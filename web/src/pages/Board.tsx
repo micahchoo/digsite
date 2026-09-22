@@ -30,7 +30,6 @@ import {
   CELL,
   COLS,
   DEFAULT_SORT,
-  type GetBoardResponse,
   type GetImageResponse,
   type Properties,
   type PropertyValue,
@@ -43,9 +42,10 @@ import {
   sortId,
   worldExtent,
 } from '@digsite/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Detail } from '../board/Detail.tsx';
+import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
 import {
   addRanks,
@@ -54,8 +54,16 @@ import {
   toggleRank,
 } from '../board/selection.ts';
 import { type UploadRow, runUpload } from '../board/upload.ts';
+import { Confirm } from '../components/Confirm.tsx';
 import { RenameInline } from '../components/RenameInline.tsx';
-import { api } from '../lib/api.ts';
+import {
+  ApiError,
+  type BoardFootprint,
+  type GetBoardAllowlistResponse,
+  type GetBoardResponseWithGroup,
+  type SheetFootprint,
+  api,
+} from '../lib/api.ts';
 
 declare global {
   interface Window {
@@ -156,9 +164,9 @@ export function Board() {
   const sortChangeAt = useRef(performance.now());
   // `board` read from inside Deck's event closures (built once, on mount)
   // would otherwise be stale; those read this ref instead.
-  const boardRef = useRef<GetBoardResponse | null>(null);
+  const boardRef = useRef<GetBoardResponseWithGroup | null>(null);
 
-  const [board, setBoard] = useState<GetBoardResponse | null>(null);
+  const [board, setBoard] = useState<GetBoardResponseWithGroup | null>(null);
   boardRef.current = board;
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
@@ -208,6 +216,38 @@ export function Board() {
     void refreshSheets();
   }, [refreshSheets]);
 
+  // -- sheet delete, with a footprint confirmation (docs/phases/3-groups.md
+  // section 4: "how many other sheets' foreign views it affects") ----------
+  const [sheetDeleteConfirm, setSheetDeleteConfirm] = useState<{
+    sheetId: string;
+    footprint: SheetFootprint;
+  } | null>(null);
+  const [sheetDeleteBusy, setSheetDeleteBusy] = useState(false);
+  const [sheetDeleteError, setSheetDeleteError] = useState<string | null>(null);
+
+  async function openSheetDeleteConfirm(sheetId: string) {
+    setSheetDeleteError(null);
+    try {
+      const footprint = await api.getSheetFootprint(sheetId);
+      setSheetDeleteConfirm({ sheetId, footprint });
+    } catch (err) {
+      setSheetDeleteError(err instanceof ApiError ? err.reason : String(err));
+    }
+  }
+  async function confirmDeleteSheet() {
+    if (!sheetDeleteConfirm) return;
+    setSheetDeleteBusy(true);
+    try {
+      await api.deleteSheet(sheetDeleteConfirm.sheetId);
+      setSheetDeleteConfirm(null);
+      await refreshSheets();
+    } catch (err) {
+      setSheetDeleteError(err instanceof ApiError ? err.reason : String(err));
+    } finally {
+      setSheetDeleteBusy(false);
+    }
+  }
+
   // -- load the board, then the viewer's stored or default sort ------------
   useEffect(() => {
     let cancelled = false;
@@ -223,6 +263,87 @@ export function Board() {
       cancelled = true;
     };
   }, [boardId]);
+
+  // -- allowlist (docs/phases/3-groups.md section 3): only meaningful on a
+  // private board, so only fetched once the board says it isn't open -------
+  const [allowlist, setAllowlist] = useState<GetBoardAllowlistResponse | null>(
+    null,
+  );
+  const [groupMembers, setGroupMembers] = useState<
+    Awaited<ReturnType<typeof api.listMembers>>
+  >([]);
+  const [allowlistPick, setAllowlistPick] = useState('');
+  const [allowlistError, setAllowlistError] = useState<string | null>(null);
+
+  const refreshAllowlist = useCallback(async () => {
+    if (!board || board.open) return;
+    try {
+      const [al, gm] = await Promise.all([
+        api.getBoardAllowlist(boardId),
+        api.listMembers(board.groupId),
+      ]);
+      setAllowlist(al);
+      setGroupMembers(gm);
+      setAllowlistError(null);
+    } catch (err) {
+      setAllowlistError(err instanceof ApiError ? err.reason : String(err));
+    }
+  }, [board, boardId]);
+  useEffect(() => {
+    void refreshAllowlist();
+  }, [refreshAllowlist]);
+
+  async function addToAllowlist(userId: string) {
+    setAllowlistError(null);
+    try {
+      await api.addToAllowlist(boardId, { userId });
+      await refreshAllowlist();
+    } catch (err) {
+      setAllowlistError(err instanceof ApiError ? err.reason : String(err));
+    }
+  }
+  async function removeFromAllowlist(userId: string) {
+    setAllowlistError(null);
+    try {
+      await api.removeFromAllowlist(boardId, userId);
+      await refreshAllowlist();
+    } catch (err) {
+      setAllowlistError(err instanceof ApiError ? err.reason : String(err));
+    }
+  }
+
+  // -- board rename and delete (docs/phases/3-groups.md section 4) ---------
+  const [boardDeleteConfirm, setBoardDeleteConfirm] =
+    useState<BoardFootprint | null>(null);
+  const [boardDeleteBusy, setBoardDeleteBusy] = useState(false);
+  const [boardDeleteError, setBoardDeleteError] = useState<string | null>(null);
+
+  async function renameBoard(name: string) {
+    try {
+      const res = await api.renameBoard(boardId, { name });
+      setBoard((prev) => (prev ? { ...prev, name: res.name } : prev));
+    } catch (err) {
+      setBoardDeleteError(err instanceof ApiError ? err.reason : String(err));
+    }
+  }
+  async function openBoardDeleteConfirm() {
+    setBoardDeleteError(null);
+    try {
+      setBoardDeleteConfirm(await api.getBoardFootprint(boardId));
+    } catch (err) {
+      setBoardDeleteError(err instanceof ApiError ? err.reason : String(err));
+    }
+  }
+  async function confirmDeleteBoard() {
+    setBoardDeleteBusy(true);
+    try {
+      await api.deleteBoard(boardId);
+      navigate(board ? `/g/${board.groupId}` : '/groups');
+    } catch (err) {
+      setBoardDeleteError(err instanceof ApiError ? err.reason : String(err));
+      setBoardDeleteBusy(false);
+    }
+  }
 
   const currentSortId = sort ? sortId(sort) : DEFAULT_SORT.key.toString();
 
@@ -639,6 +760,34 @@ export function Board() {
     void saveDetailProperties(next);
   }
 
+  // -- image delete (docs/phases/3-groups.md section 4): the row, slot and
+  // every claim stay; only `missing` flips. The map answers with a tile
+  // refetch (bump `tileVersion`, same as after an upload); every cached
+  // copy of this image (hover, the selection panel) is patched in place so
+  // the dimmed "missing" state shows without a full reload. The sheet's own
+  // missing-placeholder handling is in sheet/Sheet.tsx's `loadImages`. -----
+  async function deleteDetailImage() {
+    if (!detailImage) return;
+    const imageId = detailImage.id;
+    try {
+      await api.deleteImage(imageId);
+    } catch {
+      setDetailSaveState('error');
+      return;
+    }
+    setDetailImage(null);
+    setTileVersion((n) => n + 1);
+    for (const cache of imageCacheRef.current.values()) {
+      for (const [rank, cached] of cache) {
+        if (cached?.id === imageId)
+          cache.set(rank, { ...cached, missing: true });
+      }
+    }
+    setSelectedImages((prev) =>
+      prev.map((i) => (i.id === imageId ? { ...i, missing: true } : i)),
+    );
+  }
+
   // -- upload ------------------------------------------------------------------
   async function handleFiles(files: FileList | null) {
     if (!files || !files.length || !board) return;
@@ -806,8 +955,92 @@ export function Board() {
           padding: 8,
         }}
       >
-        <h3>{board.name}</h3>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <RenameInline
+            name={board.name}
+            onRename={renameBoard}
+            testId="board-rename"
+            style={{ fontSize: 18, fontWeight: 700 }}
+          />
+          <button
+            type="button"
+            data-testid="board-delete"
+            onClick={() => void openBoardDeleteConfirm()}
+          >
+            delete board
+          </button>
+        </div>
         <div className="muted">{board.imageCount} images</div>
+        {boardDeleteConfirm && (
+          <Confirm
+            testId="board-delete-confirm"
+            message={boardDeleteMessage(board.name, boardDeleteConfirm)}
+            busy={boardDeleteBusy}
+            error={boardDeleteError}
+            onConfirm={() => void confirmDeleteBoard()}
+            onCancel={() => setBoardDeleteConfirm(null)}
+          />
+        )}
+
+        {!board.open && (
+          <div className="card" data-testid="allowlist-card">
+            <h4>allowlist</h4>
+            {allowlistError && <div className="error">{allowlistError}</div>}
+            <table data-testid="allowlist-table">
+              <tbody>
+                {(allowlist?.members ?? []).map((m) => (
+                  <tr key={m.userId}>
+                    <td>{m.name}</td>
+                    <td className="muted">{m.role}</td>
+                    <td>
+                      <button
+                        type="button"
+                        data-testid={`allowlist-remove-${m.userId}`}
+                        onClick={() => void removeFromAllowlist(m.userId)}
+                      >
+                        remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="row">
+              <select
+                data-testid="allowlist-add-select"
+                value={allowlistPick}
+                onChange={(e) => setAllowlistPick(e.target.value)}
+              >
+                <option value="">add member…</option>
+                {groupMembers
+                  .filter(
+                    (m) =>
+                      !(allowlist?.members ?? []).some(
+                        (x) => x.userId === m.userId,
+                      ),
+                  )
+                  .map((m) => (
+                    <option key={m.userId} value={m.userId}>
+                      {m.email}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                data-testid="allowlist-add"
+                disabled={!allowlistPick}
+                onClick={() => {
+                  const userId = allowlistPick;
+                  setAllowlistPick('');
+                  if (userId) void addToAllowlist(userId);
+                }}
+              >
+                add
+              </button>
+            </div>
+          </div>
+        )}
+
         <h4>selection ({selectedImages.length})</h4>
         {selectionNote && <div className="muted">{selectionNote}</div>}
         <ul
@@ -819,6 +1052,7 @@ export function Board() {
               <button
                 type="button"
                 data-testid="selection-item"
+                data-missing={i.missing}
                 onClick={() => openDetail(i.id)}
                 style={{
                   display: 'flex',
@@ -829,14 +1063,27 @@ export function Board() {
                   background: 'none',
                   border: 'none',
                   padding: '2px 0',
+                  opacity: i.missing ? 0.5 : 1,
                 }}
               >
-                <img
-                  src={api.originalUrl(i.id)}
-                  alt=""
-                  style={{ width: 28, height: 28, objectFit: 'cover' }}
-                />
+                {i.missing ? (
+                  <span
+                    style={{
+                      width: 28,
+                      height: 28,
+                      display: 'inline-block',
+                      background: '#eee',
+                    }}
+                  />
+                ) : (
+                  <img
+                    src={api.originalUrl(i.id)}
+                    alt=""
+                    style={{ width: 28, height: 28, objectFit: 'cover' }}
+                  />
+                )}
                 {i.name}
+                {i.missing ? ' (missing)' : ''}
               </button>
             </li>
           ))}
@@ -866,30 +1113,53 @@ export function Board() {
         <h4>sheets ({sheets.length})</h4>
         <ul data-testid="sheet-list" style={{ listStyle: 'none', padding: 0 }}>
           {sheets.map((sheet) => (
-            <li
-              key={sheet.id}
-              data-testid="sheet-list-item"
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 6,
-                padding: '3px 0',
-              }}
-            >
-              <RenameInline
-                name={sheet.name}
-                onRename={(name) => renameSheet(sheet.id, name)}
-                testId={`sheet-rename-${sheet.id}`}
-              />
-              <span className="muted" style={{ fontSize: 12 }}>
-                {sheet.imageCount} images ·{' '}
-                {sheet.savedAt
-                  ? new Date(sheet.savedAt).toLocaleTimeString()
-                  : 'unsaved'}
-              </span>
-              <Link to={`/s/${sheet.id}`}>open</Link>
-            </li>
+            <Fragment key={sheet.id}>
+              <li
+                data-testid="sheet-list-item"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '3px 0',
+                }}
+              >
+                <RenameInline
+                  name={sheet.name}
+                  onRename={(name) => renameSheet(sheet.id, name)}
+                  testId={`sheet-rename-${sheet.id}`}
+                />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {sheet.imageCount} images ·{' '}
+                  {sheet.savedAt
+                    ? new Date(sheet.savedAt).toLocaleTimeString()
+                    : 'unsaved'}
+                </span>
+                <Link to={`/s/${sheet.id}`}>open</Link>
+                <button
+                  type="button"
+                  data-testid={`sheet-delete-${sheet.id}`}
+                  onClick={() => void openSheetDeleteConfirm(sheet.id)}
+                >
+                  delete
+                </button>
+              </li>
+              {sheetDeleteConfirm?.sheetId === sheet.id && (
+                <li>
+                  <Confirm
+                    testId={`sheet-delete-confirm-${sheet.id}`}
+                    message={sheetDeleteMessage(
+                      sheet.name,
+                      sheetDeleteConfirm.footprint,
+                    )}
+                    busy={sheetDeleteBusy}
+                    error={sheetDeleteError}
+                    onConfirm={() => void confirmDeleteSheet()}
+                    onCancel={() => setSheetDeleteConfirm(null)}
+                  />
+                </li>
+              )}
+            </Fragment>
           ))}
         </ul>
 
@@ -900,6 +1170,7 @@ export function Board() {
             saveState={detailSaveState}
             onSetProperty={setDetailProperty}
             onRemoveProperty={removeDetailProperty}
+            onDelete={() => void deleteDetailImage()}
             onClose={() => setDetailImage(null)}
           />
         )}

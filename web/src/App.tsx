@@ -4,6 +4,7 @@ import { authClient, useSession } from './lib/auth.ts';
 import { Board } from './pages/Board.tsx';
 import { Group } from './pages/Group.tsx';
 import { Groups } from './pages/Groups.tsx';
+import { Join } from './pages/Join.tsx';
 import { SignIn } from './pages/SignIn.tsx';
 import { Sheet } from './sheet/Sheet.tsx';
 
@@ -35,6 +36,9 @@ export function App() {
       <Nav />
       <Routes>
         <Route path="/" element={<SignIn />} />
+        {/* Public — the invitation link itself must work signed out
+            (docs/phases/3-groups.md section 1). */}
+        <Route path="/join/:id" element={<Join />} />
         <Route
           path="/groups"
           element={

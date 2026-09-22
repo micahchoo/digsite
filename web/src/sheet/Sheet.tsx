@@ -87,6 +87,33 @@ function blobToDataURL(blob: Blob): Promise<string> {
   });
 }
 
+/** A missing image's file (docs/phases/3-groups.md section 4): the
+ * original is gone server-side (`GET /images/:id/original` 404s — see
+ * ../stub/server.ts), so this is drawn locally instead of fetched, keyed
+ * the same as a real file so the scene's existing image element (and its
+ * `fileId`) needs no change. */
+function placeholderDataURL(name: string): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#e9ecef';
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.strokeStyle = '#adb5bd';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(4, 4, 248, 248);
+    ctx.fillStyle = '#868e96';
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('missing', 128, 112);
+    ctx.font = '13px sans-serif';
+    ctx.fillText(name.slice(0, 24), 128, 144);
+  }
+  return canvas.toDataURL('image/png');
+}
+
 export function Sheet() {
   const { id } = useParams<{ id: string }>();
   const sheetId = id ?? '';
@@ -95,6 +122,12 @@ export function Sheet() {
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const loadedImages = useRef<Set<string>>(new Set());
+  // Populated from GET /sheets/:id's per-image `missing`/`name` (additive,
+  // see lib/api.ts's GetSheetResponseWithStatus) before `loadImages` runs,
+  // so a missing image never even attempts the network fetch.
+  const imageMetaRef = useRef<Map<string, { missing: boolean; name: string }>>(
+    new Map(),
+  );
   const lastEmittedSig = useRef('');
   const emitTimer = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -201,15 +234,34 @@ export function Sheet() {
     if (!toLoad.length) return;
     const files = await Promise.all(
       toLoad.map(async (imageId) => {
-        const res = await fetch(api.originalUrl(imageId), {
-          credentials: 'include',
-        });
-        const blob = await res.blob();
-        const dataURL = await blobToDataURL(blob);
+        const known = imageMetaRef.current.get(imageId);
+        // Known missing: never fetched — the original is gone server-side.
+        // Unknown or not-yet-missing: fetch, and fall back to the same
+        // placeholder if it 404s (an image deleted after this sheet's own
+        // GET /sheets/:id, before the socket's 'joined' snapshot loaded it).
+        if (!known?.missing) {
+          try {
+            const res = await fetch(api.originalUrl(imageId), {
+              credentials: 'include',
+            });
+            if (!res.ok)
+              throw new Error(`original fetch failed: ${res.status}`);
+            const blob = await res.blob();
+            const dataURL = await blobToDataURL(blob);
+            return {
+              id: fileId(imageId),
+              dataURL,
+              mimeType: blob.type || 'image/png',
+              created: Date.now(),
+            };
+          } catch {
+            // fall through to the placeholder below
+          }
+        }
         return {
           id: fileId(imageId),
-          dataURL,
-          mimeType: blob.type || 'image/png',
+          dataURL: placeholderDataURL(known?.name ?? imageId),
+          mimeType: 'image/png',
           created: Date.now(),
         };
       }),
@@ -238,6 +290,12 @@ export function Sheet() {
       const info = await api.getSheet(sheetId);
       if (cancelled) return;
       setSheetInfo(info);
+      for (const img of info.images) {
+        imageMetaRef.current.set(img.id, {
+          missing: img.missing,
+          name: img.name,
+        });
+      }
       void loadImages(info.images.map((i) => i.id));
 
       socket = io(SERVER_ORIGIN, { withCredentials: true });

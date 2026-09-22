@@ -302,6 +302,20 @@ function ImageInspector({ imageId }: { imageId: string }) {
     }
   }
 
+  // Deletes the underlying image row (docs/phases/3-groups.md section 4) —
+  // distinct from `onDeleteSelected`, which removes this scene's own
+  // element. `Detail` already renders the "missing" placeholder once
+  // `missing` flips true; the map and any other sheet holding this image
+  // pick up the change on their own next load/tile refetch.
+  async function deleteImage() {
+    try {
+      await api.deleteImage(imageId);
+      setImage((prev) => (prev ? { ...prev, missing: true } : prev));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.reason : String(err));
+    }
+  }
+
   if (error) {
     return (
       <div data-testid="inspector" className="muted">
@@ -334,6 +348,7 @@ function ImageInspector({ imageId }: { imageId: string }) {
           delete next[key];
           void save(next);
         }}
+        onDelete={() => void deleteImage()}
         onClose={() => {}}
       />
     </div>

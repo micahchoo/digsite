@@ -8,6 +8,7 @@ import type {
   AllowlistRequest,
   AllowlistResponse,
   BoardImage,
+  BoardSummary,
   CreateBoardRequest,
   CreateBoardResponse,
   CreateGroupRequest,
@@ -25,9 +26,10 @@ import type {
   InviteRequest,
   InviteResponse,
   ListBoardImagesResponse,
-  ListBoardsResponse,
   ListGroupsResponse,
   ListMembersResponse,
+  Member,
+  Role,
   SheetSummary,
   UpdateBoardRequest,
   UpdateBoardResponse,
@@ -57,6 +59,82 @@ export type SheetSummaryWithStats = SheetSummary & {
 export type ListSheetsWithStatsResponse = SheetSummaryWithStats[];
 export type UpdateSheetRequest = { name: string };
 export type UpdateSheetResponse = { name: string };
+
+// Phase 3 (docs/phases/3-groups.md): invitation links, role management,
+// allowlist display, footprints and rename/delete — none of this is in
+// @digsite/shared/api yet, same TODO pattern as above. The real server's
+// routes should grow to match these shapes exactly (see this file's report
+// back to the lead for the full list).
+export type GetInvitationResponse = {
+  groupName: string;
+  inviterName: string;
+  open: boolean;
+};
+/** `POST /groups/:id/invite` — additive on top of shared's InviteResponse:
+ * the join URL the group page shows with a copy button. */
+export type InviteResponseWithUrl = InviteResponse & { url: string };
+export type PendingInvitation = {
+  id: string;
+  email: string | null;
+  createdAt: string;
+};
+export type ListPendingInvitationsResponse = PendingInvitation[];
+
+export type UpdateMemberRoleRequest = { role: Role };
+export type UpdateMemberRoleResponse = { userId: string; role: Role };
+
+export type GetBoardAllowlistResponse = { groupId: string; members: Member[] };
+
+export type BoardFootprint = {
+  images: number;
+  sheets: number;
+  regions: number;
+  edges: number;
+};
+export type SheetFootprint = { foreignViews: number };
+
+export type RenameBoardRequest = { name: string };
+export type RenameBoardResponse = { name: string };
+
+/** `GET /groups/:id/boards` — additive on top of shared's BoardSummary for
+ * the group home (docs/phases/3-groups.md section 5): sheet count and last
+ * activity, plus the group id every board already knows since boards live
+ * in exactly one group. */
+export type BoardSummaryWithStats = BoardSummary & {
+  groupId: string;
+  sheetCount: number;
+  lastActivity: string | null;
+};
+export type ListBoardsWithStatsResponse = BoardSummaryWithStats[];
+
+/** `GET /boards/:id` — additive: the board's group id, so the board page
+ * (which has no group id in its own URL) can fetch group members for the
+ * allowlist's "add" control. */
+export type GetBoardResponseWithGroup = GetBoardResponse & { groupId: string };
+
+export type RecentSheet = {
+  id: string;
+  name: string;
+  boardId: string;
+  boardName: string;
+  savedAt: string | null;
+};
+export type ListRecentSheetsResponse = RecentSheet[];
+
+/** `GET /sheets/:id` — additive per-image `name`/`missing`, so the sheet
+ * can load a placeholder file instead of fetching a deleted original
+ * (docs/phases/3-groups.md section 4). */
+export type SheetImageWithStatus = {
+  id: string;
+  slot: number;
+  width: number;
+  height: number;
+  name: string;
+  missing: boolean;
+};
+export type GetSheetResponseWithStatus = Omit<GetSheetResponse, 'images'> & {
+  images: SheetImageWithStatus[];
+};
 
 export class ApiError extends Error {
   constructor(
@@ -110,29 +188,54 @@ export const api = {
     request<CreateGroupResponse>('/groups', post(body)),
   listGroups: () => request<ListGroupsResponse>('/groups'),
   invite: (groupId: string, body: InviteRequest) =>
-    request<InviteResponse>(`/groups/${groupId}/invite`, post(body)),
+    request<InviteResponseWithUrl>(`/groups/${groupId}/invite`, post(body)),
+  listPendingInvitations: (groupId: string) =>
+    request<ListPendingInvitationsResponse>(`/groups/${groupId}/invitations`),
+  getInvitation: (invitationId: string) =>
+    request<GetInvitationResponse>(`/invitations/${invitationId}`),
+  revokeInvitation: (invitationId: string) =>
+    request<void>(`/invitations/${invitationId}`, { method: 'DELETE' }),
   acceptInvitation: (invitationId: string) =>
     request<AcceptInvitationResponse>(`/invitations/${invitationId}/accept`, {
       method: 'POST',
     }),
   leaveGroup: (groupId: string) =>
     request<void>(`/groups/${groupId}/leave`, { method: 'POST' }),
+  updateMemberRole: (
+    groupId: string,
+    userId: string,
+    body: UpdateMemberRoleRequest,
+  ) =>
+    request<UpdateMemberRoleResponse>(
+      `/groups/${groupId}/members/${userId}`,
+      patch(body),
+    ),
   removeMember: (groupId: string, userId: string) =>
     request<void>(`/groups/${groupId}/members/${userId}`, {
       method: 'DELETE',
     }),
   listMembers: (groupId: string) =>
     request<ListMembersResponse>(`/groups/${groupId}/members`),
+  listRecentSheets: (groupId: string) =>
+    request<ListRecentSheetsResponse>(`/groups/${groupId}/sheets/recent`),
 
   // -- boards ----------------------------------------------------------------
   listBoards: (groupId: string) =>
-    request<ListBoardsResponse>(`/groups/${groupId}/boards`),
+    request<ListBoardsWithStatsResponse>(`/groups/${groupId}/boards`),
   createBoard: (groupId: string, body: CreateBoardRequest) =>
     request<CreateBoardResponse>(`/groups/${groupId}/boards`, post(body)),
   getBoard: (boardId: string) =>
-    request<GetBoardResponse>(`/boards/${boardId}`),
+    request<GetBoardResponseWithGroup>(`/boards/${boardId}`),
   updateBoard: (boardId: string, body: UpdateBoardRequest) =>
     request<UpdateBoardResponse>(`/boards/${boardId}`, patch(body)),
+  renameBoard: (boardId: string, body: RenameBoardRequest) =>
+    request<RenameBoardResponse>(`/boards/${boardId}`, patch(body)),
+  deleteBoard: (boardId: string) =>
+    request<void>(`/boards/${boardId}`, { method: 'DELETE' }),
+  getBoardFootprint: (boardId: string) =>
+    request<BoardFootprint>(`/boards/${boardId}/footprint`),
+  getBoardAllowlist: (boardId: string) =>
+    request<GetBoardAllowlistResponse>(`/boards/${boardId}/allowlist`),
   addToAllowlist: (boardId: string, body: AllowlistRequest) =>
     request<AllowlistResponse>(`/boards/${boardId}/allowlist`, post(body)),
   removeFromAllowlist: (boardId: string, userId: string) =>
@@ -169,6 +272,8 @@ export const api = {
     body: UpdateImagePropertiesRequest,
   ) =>
     request<UpdateImagePropertiesResponse>(`/images/${imageId}`, patch(body)),
+  deleteImage: (imageId: string) =>
+    request<void>(`/images/${imageId}`, { method: 'DELETE' }),
   tileUrl: (boardId: string, sortId: string, z: number, x: number, y: number) =>
     `${SERVER_ORIGIN}/boards/${boardId}/tiles/${sortId}/${z}/${x}/${y}.png`,
 
@@ -178,9 +283,13 @@ export const api = {
   createSheet: (boardId: string, body: CreateSheetRequest) =>
     request<CreateSheetResponse>(`/boards/${boardId}/sheets`, post(body)),
   getSheet: (sheetId: string) =>
-    request<GetSheetResponse>(`/sheets/${sheetId}`),
+    request<GetSheetResponseWithStatus>(`/sheets/${sheetId}`),
   updateSheet: (sheetId: string, body: UpdateSheetRequest) =>
     request<UpdateSheetResponse>(`/sheets/${sheetId}`, patch(body)),
+  deleteSheet: (sheetId: string) =>
+    request<void>(`/sheets/${sheetId}`, { method: 'DELETE' }),
+  getSheetFootprint: (sheetId: string) =>
+    request<SheetFootprint>(`/sheets/${sheetId}/footprint`),
   getSheetElements: (sheetId: string) =>
     request<GetSheetElementsResponse>(`/sheets/${sheetId}/elements`),
   getSheetForeign: (sheetId: string) =>

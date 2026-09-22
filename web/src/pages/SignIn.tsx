@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { authClient, useSession } from '../lib/auth.ts';
 
@@ -12,10 +12,18 @@ export function SignIn() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (session) {
-    navigate('/groups', { replace: true });
-    return null;
-  }
+  // Not called during render: `navigate` synchronously during render (the
+  // previous shape here) warns "Cannot update a component while rendering
+  // a different component" and races a caller that just navigated
+  // elsewhere itself — a re-sign-in right after signing out landed back on
+  // /groups instead of wherever the caller sent it, because this redirect
+  // fired mid-render before the caller's own navigation settled (found via
+  // Join.tsx's sign-up-then-accept flow, which re-signs-in as a different
+  // fixture user and navigates straight to a protected route).
+  useEffect(() => {
+    if (session) navigate('/groups', { replace: true });
+  }, [session, navigate]);
+  if (session) return null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

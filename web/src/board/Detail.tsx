@@ -31,6 +31,7 @@ interface Props {
   saveState: SaveState;
   onSetProperty: (key: string, value: PropertyValue) => void;
   onRemoveProperty: (key: string) => void;
+  onDelete: () => void;
   onClose: () => void;
 }
 
@@ -40,9 +41,11 @@ export function Detail({
   saveState,
   onSetProperty,
   onRemoveProperty,
+  onDelete,
   onClose,
 }: Props) {
   const [newKey, setNewKey] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
     <div className="card" data-testid="detail-panel" style={{ marginTop: 10 }}>
@@ -54,15 +57,60 @@ export function Detail({
           close
         </button>
       </div>
-      <img
-        src={originalUrl}
-        alt={image.name}
-        style={{ maxWidth: '100%', maxHeight: 220, objectFit: 'contain' }}
-      />
+      {image.missing ? (
+        <div
+          data-testid="detail-missing"
+          style={{
+            width: '100%',
+            height: 120,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#eee',
+            color: '#888',
+          }}
+        >
+          missing
+        </div>
+      ) : (
+        <img
+          src={originalUrl}
+          alt={image.name}
+          style={{ maxWidth: '100%', maxHeight: 220, objectFit: 'contain' }}
+        />
+      )}
       <div className="muted">
         {image.width}×{image.height} · uploaded{' '}
         {new Date(image.uploadedAt).toLocaleString()}
       </div>
+      {image.missing ? (
+        <div className="muted" data-testid="detail-missing-note">
+          original removed
+        </div>
+      ) : confirmingDelete ? (
+        <div className="row" style={{ marginTop: 6 }}>
+          <span className="error">delete this image?</span>
+          <button
+            type="button"
+            data-testid="detail-delete-confirm"
+            onClick={onDelete}
+          >
+            delete
+          </button>
+          <button type="button" onClick={() => setConfirmingDelete(false)}>
+            cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          data-testid="detail-delete"
+          style={{ marginTop: 6 }}
+          onClick={() => setConfirmingDelete(true)}
+        >
+          delete image
+        </button>
+      )}
 
       <div style={{ marginTop: 10 }}>
         <div className="row" style={{ justifyContent: 'space-between' }}>

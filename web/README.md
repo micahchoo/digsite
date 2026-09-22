@@ -6,18 +6,25 @@ Vite + React 19 + TypeScript. See `../CONTEXT.md` for vocabulary and
 ## Pages
 
 - `/` — sign in / sign up.
-- `/groups` — the user's groups; create, invite, accept.
-- `/g/:id` — a group's boards; create a board; members and allowlists.
-- `/b/:id` — the map: a deck.gl tile pyramid, sort/direction, sections,
-  hover, click/shift-drag selection, a detail panel, upload, "new sheet"
-  from a selection, and the sheet list (image count, last save, inline
-  rename via `components/RenameInline.tsx`, shared with `/s/:id`). Debug
-  hooks: `window.__digsiteBoard`. Sections and the sheet list's stats
-  aren't in `@digsite/shared/api` yet — `lib/api.ts` types them locally.
+- `/join/:id` — an invitation link, the one page reachable signed out:
+  group and inviter, one message for expired/used, sign up/in then accept.
+- `/groups` — the user's groups; create, invite, accept by id.
+- `/g/:id` — boards with stats and recent sheets; create a board (one
+  sentence each for open/private); invite (copyable `/join/:id` URL,
+  pending list with revoke); members with role change/remove shown to
+  everyone, a row's own 403 inline — the server decides; leave.
+- `/b/:id` — the map (deck.gl tiles, sort, sections, hover, selection, a
+  detail panel — image delete leaves a `missing` placeholder, never a hard
+  delete — upload, "new sheet"), board rename/delete with a footprint
+  confirmation, a private board's allowlist, and the sheet list (rename,
+  per-sheet delete with a foreign-views confirmation). Debug hooks:
+  `window.__digsiteBoard`; new response shapes typed locally in `lib/api.ts`.
 - `/s/:id` — the document: one Excalidraw scene per sheet, live-synced over
   Socket.IO, plus the foreign overlay below. `Toolbar.tsx` (select/region/
   edge/pan, keys V/R/E/H) replaces Excalidraw's stock shape tools, hidden
-  by CSS (0.18 has no `UIOptions` flag for one tool); zoom/undo stay.
+  by CSS (0.18 has no `UIOptions` flag for one tool); zoom/undo stay. A
+  missing image loads a drawn placeholder instead of fetching its original
+  (`Sheet.tsx#loadImages`).
 
 ## The overlay seam
 
@@ -35,10 +42,9 @@ own floating input on release, truncated for DISPLAY only (`labels.ts`) —
 its container's width comes from the region, never the label. Deleting an
 image cascades to its regions and edges; deleting a region rebinds its
 edges to the image, tagged `dangling`, hollow arrowhead
-(`dangling.ts#applyCascade` — its header comment says why it reads
-`boundElements`, not the arrow's own binding). New hooks: `setTool`/
-`getTool`, `pointerDraw`/`pointerConnect` (scene coords, also what
-`smoke-draw.ts` drives), `deleteSelected`, `getDangling`/`removeDangling`, `rename`.
+(`dangling.ts#applyCascade`). New hooks: `setTool`/`getTool`,
+`pointerDraw`/`pointerConnect`, `deleteSelected`, `getDangling`/
+`removeDangling`, `rename`.
 
 ## Run
 
@@ -51,10 +57,14 @@ bun run stub                # node:http + socket.io on :8800, no Postgres
 bun run dev                 # in another shell, Vite on :5180
 ```
 
-The stub seeds one group, two boards (`Field` open with 60 images, `Finds`
-private) and two sheets on `Field` sharing images 8 and 9 — `Faces` polls
-`Field`'s claims as foreign. Also answers sections, `PATCH /sheets/:id
-{name}`, and upload (202 `pending` -> `ready` after 1s, no tus, so a file
-over 8 MB falls back to multipart with a console note). `bun run
-scripts/smoke.ts`, `smoke-board.ts` and `smoke-draw.ts` drive it; if 8800
-is taken, `PORT=8802 bun run stub` + `VITE_SERVER_ORIGIN=http://localhost:8802 bun run dev`.
+The stub seeds group "Lab", boards `Field` (open, 60 images) and `Finds`
+(private, allowlist `admin`+`listed`), and sheets `First pass`/`Faces` on
+`Field` sharing images 8/9 as foreign claims; also sections, footprints,
+invitations/roles/allowlist, and upload (202 `pending` -> `ready` after
+1s). Five fixed users, `<key>@example.test` / `password1`:
+`owner`/`admin`/`member`/`listed` start in Lab, `outsider` in no group —
+sign up as them on a `/join/:id` link. The stub picks the user from the
+sign-in email's local part (no `?as=` needed, unrecognised -> `owner`).
+
+`bun run scripts/smoke.ts` (and `smoke-board`/`smoke-draw`/`smoke-groups`) drive it;
+if 8800 is taken, `PORT=8802 bun run stub` + `VITE_SERVER_ORIGIN=http://localhost:8802 bun run dev`.
