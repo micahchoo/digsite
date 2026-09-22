@@ -3,6 +3,13 @@ scope: [server/src/boards/tiles.ts, server/src/boards/ladder.ts]
 tags: [board, tiles, cache, performance]
 priority: medium
 source: hand-written
+checks:
+  - require: "'X-Cache'"
+    in: server/src/boards/routes.ts
+    message: tile responses must carry X-Cache
+  - require: "'Server-Timing'"
+    in: server/src/boards/routes.ts
+    message: tile responses must carry Server-Timing
 ---
 
 # tiles: single-viewer latency comes from ladder residency, not the tile cache

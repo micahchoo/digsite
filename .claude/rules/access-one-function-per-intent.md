@@ -3,6 +3,15 @@ scope: server/src/**
 tags: [access, groups, better-auth, security]
 priority: high
 source: hand-written
+checks:
+  - forbid: '"(member|team|teamMember)"'
+    in: server/src/**
+    except: [server/src/access/, server/src/auth.ts, server/src/test/, server/src/db/migrations/]
+    message: reads a membership table outside server/src/access/
+  - forbid: '\.open\s*\|\|'
+    in: server/src/**
+    except: [server/src/access/, server/src/test/]
+    message: writes the open-or-allowlist predicate outside access/
 ---
 
 # server: every request asks one access function, and nothing else reads membership

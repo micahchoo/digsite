@@ -3,6 +3,28 @@ scope: [server/src/boards/**, shared/src/board/**]
 tags: [board, ladder, rank, tiles, sort]
 priority: high
 source: hand-written
+checks:
+  - forbid: '\b(const|let|var)\s+(COLS\s*=\s*1024|CELL\s*=\s*128|TILE\s*=\s*256)\b'
+    in: [server/src/**, web/src/**, shared/src/**]
+    except: shared/src/board/grid.ts
+    message: redefines a grid constant; import it from @digsite/shared/board/grid
+  - forbid: 'rank\s*=\s*ANY\s*\('
+    in: server/src/**
+    message: rank lookup with = ANY; use unnest($1::int[]) JOIN board_ranks
+  - forbid: 'UPDATE\s+board_ranks\b'
+    in: server/src/**
+    flags: i
+    message: patches a rank table; rebuild it whole
+  - forbid: 'UPDATE\s+images\s+SET[^;]*\bslot\s*='
+    in: server/src/**
+    flags: i
+    message: renumbers a slot
+  - forbid: 'sort_id\s*=\s*''\$\{'
+    in: server/src/**
+    message: interpolates a sort id into SQL
+  - require: 'unnest\(\$\d::int\[\]\)'
+    in: server/src/boards/ranks.ts
+    message: slotsForTile must use unnest($n::int[]) JOIN
 ---
 
 # board: a slot is an address, a rank is a position, and they are never the same thing

@@ -7,7 +7,7 @@
     "db:migrate": "bun run --filter @digsite/server migrate",
     "seed": "bun run --filter @digsite/server seed",
     "dev": "bun run scripts/dev.ts",
-    "test": "bun run --filter '*' test",
+    "test": "bun run --filter '*' test && bun test scripts",
     "check": "bun run --filter '*' check && biome check . && bun run scripts/lint-seams.ts",
     "lint:seams": "bun run scripts/lint-seams.ts"
   },

@@ -3,6 +3,23 @@ scope: web/src/sheet/**
 tags: [sheet, foreign, overlay, excalidraw]
 priority: high
 source: hand-written
+checks:
+  - require: 'export function isSyncable'
+    in: web/src/sheet/sync.ts
+    message: sync.ts must export isSyncable
+  - forbid: '^(?!\s*//).*\bforeign\b'
+    in: web/src/sheet/sync.ts
+    message: 'isSyncable has a foreign clause: a foreign claim reached the scene; find that instead'
+  - forbid: 'customData\s*:\s*\{[^}]*\bforeign\s*:'
+    in: web/src/sheet/**
+    message: builds an element whose customData carries a foreign marker
+  - forbid: '\bid\s*:\s*[''"`]foreign-'
+    in: web/src/sheet/**
+    message: uses the prototype's foreign-<sheet>-<id> element id scheme
+  - forbid: 'updateScene[^\n]*foreign|foreign[^\n]*updateScene'
+    in: web/src/sheet/**
+    except: web/src/sheet/overlay/
+    message: passes foreign data to updateScene
 ---
 
 # sheet: a foreign claim is never an Excalidraw element
