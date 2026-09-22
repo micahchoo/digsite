@@ -11,8 +11,15 @@ import type { Role } from '@digsite/shared/api';
 // where that reason lands.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
+import {
+  ErrorState,
+  type ErrorStateInfo,
+  fromCaught,
+} from '../components/ErrorState.tsx';
 import { ApiError, api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
+import { isValidEmail } from '../lib/email.ts';
+import { plural } from '../lib/plural.ts';
 
 const ROLES: Role[] = ['owner', 'admin', 'member'];
 
@@ -35,6 +42,12 @@ export function Group() {
   >([]);
   const [pendingError, setPendingError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // docs/ux/audit.md #1: a nonexistent (or inaccessible) group used to show
+  // a real error banner but still render every "create a board" / "invite"
+  // form fully working-looking underneath it. Set only from the board list
+  // fetch — the page's core content — never from an action the viewer
+  // triggered themselves (createBoard/sendInvite keep using `error` above).
+  const [pageError, setPageError] = useState<ErrorStateInfo | null>(null);
 
   const [boardName, setBoardName] = useState('');
   const [boardOpen, setBoardOpen] = useState(true);
@@ -66,6 +79,9 @@ export function Group() {
           ? failed.reason.reason
           : String(failed.reason)
         : null,
+    );
+    setPageError(
+      b.status === 'rejected' ? fromCaught(b.reason, 'group') : null,
     );
     try {
       setPending(await api.listPendingInvitations(groupId));
@@ -99,15 +115,33 @@ export function Group() {
   async function sendInvite() {
     setInviteError(null);
     setInviteCopied(false);
+    // docs/ux/audit.md #7: validated before the request goes out at all —
+    // a malformed address 500'd on the server with no way to fix it.
+    const trimmed = inviteEmail.trim();
+    if (trimmed && !isValidEmail(trimmed)) {
+      setInviteError(`"${trimmed}" doesn't look like an email address.`);
+      return;
+    }
     try {
-      const { url } = await api.invite(groupId, {
-        email: inviteEmail.trim() || '',
-      });
+      // Blank omits the key entirely — sending `email: ''` is the other
+      // half of the same server 500, queued for the server agent (see this
+      // file's own report). A link-only invite has no email at all.
+      const { url } = await api.invite(
+        groupId,
+        trimmed ? { email: trimmed } : {},
+      );
       setInviteUrl(url);
       setInviteEmail('');
       await refresh();
     } catch (err) {
-      setInviteError(err instanceof ApiError ? err.reason : String(err));
+      if (err instanceof ApiError && err.status >= 500) {
+        // The real server's own 500s here (empty email, a repeat email) are
+        // queued for the server agent — this is the client's half: never
+        // show the raw "Internal Server Error" text.
+        setInviteError('Something went wrong sending the invite. Try again.');
+      } else {
+        setInviteError(err instanceof ApiError ? err.reason : String(err));
+      }
     }
   }
 
@@ -166,6 +200,8 @@ export function Group() {
     }
   }
 
+  if (pageError) return <ErrorState info={pageError} />;
+
   return (
     <div className="page">
       <h1>group</h1>
@@ -181,8 +217,8 @@ export function Group() {
                   <Link to={`/b/${b.id}`}>{b.name}</Link>
                 </td>
                 <td className="muted">{b.open ? 'open' : 'private'}</td>
-                <td className="muted">{b.imageCount} images</td>
-                <td className="muted">{b.sheetCount} sheets</td>
+                <td className="muted">{plural(b.imageCount, 'image')}</td>
+                <td className="muted">{plural(b.sheetCount, 'sheet')}</td>
                 <td className="muted">
                   {b.lastActivity
                     ? new Date(b.lastActivity).toLocaleString()
@@ -256,7 +292,7 @@ export function Group() {
         <div className="row">
           <input
             data-testid="invite-email"
-            placeholder="email (optional)"
+            placeholder="email, or leave blank for a link anyone can use"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
           />

@@ -22,6 +22,16 @@ export function canSendPointer(
   return now - lastSentAt >= 1000 / maxPerSecond;
 }
 
+/** A peer whose name we don't know YET — room.ts's 'joined' handler sets it
+ * to `''` until the very next 'peers' broadcast fills it in — is dropped,
+ * never shown. docs/ux/audit.md #11: before this, that same handler used
+ * the peer's raw user id as a placeholder name, and a screenshot taken in
+ * that brief window caught it, e.g. "YbFKWrYrhDdOtPZSUKVNJerfMTQzjSCE" in
+ * the presence strip. `SidePanel.tsx#Header` is the one caller. Pure. */
+export function namedPeers<T extends { name: string }>(peers: T[]): T[] {
+  return peers.filter((p) => p.name);
+}
+
 /** A deterministic colour from a user id — the same id always draws the
  * same colour, on every peer's screen, every render (docs/phases/2-sheet.md
  * section 3: "in a colour from the user id"). */

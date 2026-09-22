@@ -115,8 +115,12 @@ export function useRoom(deps: RoomDeps): Room {
         );
         // 'joined' carries ids only (the stub, and the real room.ts, send
         // names on the very next 'peers' broadcast — the same tick this
-        // socket just joined into) — a peer briefly shows by id until then.
-        const joinedAsPeers = joinedPeers.map((id) => ({ id, name: id }));
+        // socket just joined into). docs/ux/audit.md #11: a raw user id
+        // ("YbFKWrYrhDdOtPZSUKVNJerfMTQzjSCE") used to stand in as the name
+        // for that brief window — name stays blank instead, so nothing
+        // ever shows an id as if it were a name; SidePanel.tsx's presence
+        // strip skips a peer with no name yet rather than rendering one.
+        const joinedAsPeers = joinedPeers.map((id) => ({ id, name: '' }));
         setPeers(joinedAsPeers);
         statusRef.current = { ...statusRef.current, peers: joinedAsPeers };
         onRemoteChange();

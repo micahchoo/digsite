@@ -5,6 +5,11 @@
 // Excalidraw type, per `../.claude/rules/sheet-canvas-seam.md`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router';
+import {
+  ErrorState,
+  type ErrorStateInfo,
+  fromCaught,
+} from '../components/ErrorState.tsx';
 import { api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
 import { DrawLayer } from './DrawLayer.tsx';
@@ -85,15 +90,24 @@ export function Sheet() {
       setSheetInfo((prev) => (prev ? { ...prev, name } : prev)),
   });
 
+  const [sheetError, setSheetError] = useState<ErrorStateInfo | null>(null);
   useEffect(() => {
     if (!sheetId) return;
     let cancelled = false;
+    setSheetError(null);
+    // docs/ux/audit.md #1: a sheet the viewer can't or shouldn't see used to
+    // hang on "loading…" forever — this call had no `.catch()` at all.
     void (async () => {
-      const info = await api.getSheet(sheetId);
-      if (cancelled) return;
-      setSheetInfo(info);
-      imageMetaRef.current = new Map(info.images.map((img) => [img.id, img]));
-      void loadImages(info.images.map((i) => i.id));
+      try {
+        const info = await api.getSheet(sheetId);
+        if (cancelled) return;
+        setSheetInfo(info);
+        imageMetaRef.current = new Map(info.images.map((img) => [img.id, img]));
+        void loadImages(info.images.map((i) => i.id));
+      } catch (err) {
+        if (cancelled) return;
+        setSheetError(fromCaught(err, 'sheet'));
+      }
     })();
     return () => {
       cancelled = true;
@@ -149,8 +163,19 @@ export function Sheet() {
   const copyEdges = (location.state as LocationState)?.copyEdges;
   useCopyConnections(copyEdges, sceneElements, tools, rerender);
 
-  if (room.denied)
-    return <div className="page">join denied: {room.denied}</div>;
+  if (sheetError) return <ErrorState info={sheetError} />;
+  if (room.denied) {
+    // The stub (and the real room.ts) give one reason string with no HTTP
+    // status attached — 'not found' is the sheet-doesn't-exist case
+    // (docs/ux/audit.md's error-cases table: "join denied: sheet not
+    // found" read as real-time-collab jargon for a plain 404); anything
+    // else is an access denial from the same `boardForViewing` predicate
+    // the sheet's board uses.
+    const status = room.denied === 'not found' ? 404 : 403;
+    return (
+      <ErrorState info={{ status, reason: room.denied, resource: 'sheet' }} />
+    );
+  }
   if (!sheetInfo) return <div className="page">loading…</div>;
 
   return (

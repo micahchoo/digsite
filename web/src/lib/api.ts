@@ -161,6 +161,14 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly reason: string,
+    /** `X-Request-Id` (server/src/app.ts sets it on every response) or, for
+     * an uncaught 500, the same id repeated in the JSON body
+     * (`{error, requestId}` — server/src/http.ts). Null when the response
+     * carried neither, e.g. a stub or a proxy in front that stripped the
+     * header. ErrorState.tsx shows it on a 500 so a report to an operator
+     * can be tied back to a server log line without exposing anything else
+     * about the failure. */
+    public readonly requestId: string | null = null,
   ) {
     super(reason);
     this.name = 'ApiError';
@@ -182,13 +190,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     let reason = res.statusText;
+    let requestId = res.headers.get('X-Request-Id');
     try {
-      const body = (await res.json()) as { reason?: string };
+      const body = (await res.json()) as {
+        reason?: string;
+        error?: string;
+        requestId?: string;
+      };
       if (body.reason) reason = body.reason;
+      else if (body.error) reason = body.error;
+      if (body.requestId) requestId = body.requestId;
     } catch {
       // no JSON body; keep statusText
     }
-    throw new ApiError(res.status, reason);
+    throw new ApiError(res.status, reason, requestId);
   }
 
   if (res.status === 204) return undefined as T;
@@ -208,7 +223,12 @@ export const api = {
   createGroup: (body: CreateGroupRequest) =>
     request<CreateGroupResponse>('/groups', post(body)),
   listGroups: () => request<ListGroupsResponse>('/groups'),
-  invite: (groupId: string, body: InviteRequest) =>
+  // `Partial<InviteRequest>` rather than the shared type's required
+  // `email: string`: docs/ux/audit.md #7's fix is to omit the key
+  // entirely for a link-only invite, not send `email: ''` — the field the
+  // real server 500s on today. Group.tsx's `sendInvite` builds the body
+  // that way; this signature just has to allow it.
+  invite: (groupId: string, body: Partial<InviteRequest>) =>
     request<InviteResponseWithUrl>(`/groups/${groupId}/invite`, post(body)),
   listPendingInvitations: (groupId: string) =>
     request<ListPendingInvitationsResponse>(`/groups/${groupId}/invitations`),

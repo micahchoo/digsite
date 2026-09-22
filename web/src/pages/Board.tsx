@@ -56,6 +56,11 @@ import {
 } from '../board/selection.ts';
 import { type UploadRow, runUpload } from '../board/upload.ts';
 import { Confirm } from '../components/Confirm.tsx';
+import {
+  ErrorState,
+  type ErrorStateInfo,
+  fromCaught,
+} from '../components/ErrorState.tsx';
 import { RenameInline } from '../components/RenameInline.tsx';
 import {
   ApiError,
@@ -65,6 +70,7 @@ import {
   type SheetFootprint,
   api,
 } from '../lib/api.ts';
+import { plural } from '../lib/plural.ts';
 
 declare global {
   interface Window {
@@ -177,6 +183,7 @@ export function Board() {
 
   const [board, setBoard] = useState<GetBoardResponseWithGroup | null>(null);
   boardRef.current = board;
+  const [boardError, setBoardError] = useState<ErrorStateInfo | null>(null);
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
   const [clickInfo, setClickInfo] = useState<string>('');
@@ -258,16 +265,26 @@ export function Board() {
   }
 
   // -- load the board, then the viewer's stored or default sort ------------
+  // docs/ux/audit.md #1: a board the viewer can't or shouldn't see (bad id,
+  // private and not on the allowlist, wrong group) used to hang on
+  // "loading…" forever — this call had no `.catch()` at all.
   useEffect(() => {
     let cancelled = false;
-    void api.getBoard(boardId).then((b) => {
-      if (cancelled) return;
-      setBoard(b);
-      const stored = localStorage.getItem(storageKey(boardId));
-      const parsed =
-        (stored && parseSortId(stored)) || parseSortId(b.defaultSort);
-      setSort(parsed ?? DEFAULT_SORT);
-    });
+    setBoardError(null);
+    api
+      .getBoard(boardId)
+      .then((b) => {
+        if (cancelled) return;
+        setBoard(b);
+        const stored = localStorage.getItem(storageKey(boardId));
+        const parsed =
+          (stored && parseSortId(stored)) || parseSortId(b.defaultSort);
+        setSort(parsed ?? DEFAULT_SORT);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setBoardError(fromCaught(err, 'board'));
+      });
     return () => {
       cancelled = true;
     };
@@ -372,38 +389,57 @@ export function Board() {
   // gives back no ranks at all (the param is unsupported, or every id came
   // back rank-less), falls back to marking the selection by id in the side
   // panel only, per the task's own fallback.
-  const selectImagesById = useCallback(async (ids: string[]) => {
-    if (!ids.length) return;
-    try {
-      const { images: found } = await api.getBoardImagesByIds(
-        boardIdRef.current,
-        currentSortIdRef.current,
-        ids,
-      );
-      const cache = sortCache(imageCacheRef.current, currentSortIdRef.current);
-      const ranks: number[] = [];
-      for (const img of found) {
-        if (typeof img.rank === 'number') {
-          ranks.push(img.rank);
-          cache.set(img.rank, img);
+  //
+  // `mode` (docs/ux/audit.md #6): 'replace' is the original behaviour and
+  // every existing caller's default (`window.__digsiteBoard.selectImages`
+  // included, so smoke-explore.ts and the ux-audit repro scripts are
+  // unaffected); Explore.tsx passes 'add' only after the owner picks "Add
+  // to selection" on its own confirm, never silently.
+  const selectImagesById = useCallback(
+    async (ids: string[], mode: 'replace' | 'add' = 'replace') => {
+      if (!ids.length) return;
+      try {
+        const { images: found } = await api.getBoardImagesByIds(
+          boardIdRef.current,
+          currentSortIdRef.current,
+          ids,
+        );
+        const cache = sortCache(
+          imageCacheRef.current,
+          currentSortIdRef.current,
+        );
+        const ranks: number[] = [];
+        for (const img of found) {
+          if (typeof img.rank === 'number') {
+            ranks.push(img.rank);
+            cache.set(img.rank, img);
+          }
         }
+        if (ranks.length) {
+          setSelectedRanks((prev) =>
+            mode === 'add' ? addRanks(prev, ranks) : new Set(ranks),
+          );
+        } else {
+          // No rank came back for anything (the `ids` param isn't honoured,
+          // or nothing matched under this sort) — mark the selection by id
+          // in the side panel only. Deliberately does NOT touch
+          // `selectedRanks`: that state drives the map's own polygon
+          // overlay AND the effect that re-derives `selectedImages` from
+          // it, so clearing it here would have that effect overwrite this
+          // fallback moments later with an empty list.
+          setSelectedImages((prev) => {
+            if (mode !== 'add') return found;
+            const byId = new Map(prev.map((i) => [i.id, i]));
+            for (const img of found) byId.set(img.id, img);
+            return [...byId.values()];
+          });
+        }
+      } catch {
+        // the ids param isn't supported by this server; nothing to select
       }
-      if (ranks.length) {
-        setSelectedRanks(new Set(ranks));
-      } else {
-        // No rank came back for anything (the `ids` param isn't honoured,
-        // or nothing matched under this sort) — mark the selection by id
-        // in the side panel only. Deliberately does NOT touch
-        // `selectedRanks`: that state drives the map's own polygon
-        // overlay AND the effect that re-derives `selectedImages` from
-        // it, so clearing it here would have that effect overwrite this
-        // fallback moments later with an empty list.
-        setSelectedImages(found);
-      }
-    } catch {
-      // the ids param isn't supported by this server; nothing to select
-    }
-  }, []);
+    },
+    [],
+  );
 
   function changeSort(next: Sort) {
     setSort(next);
@@ -739,7 +775,7 @@ export function Board() {
     const { ranks, truncated } = rankRange(a, b, SHEET_LIMIT);
     setSelectedRanks((prev) => addRanks(prev, ranks));
     setSelectionNote(
-      truncated ? `selection capped at ${SHEET_LIMIT} images` : '',
+      truncated ? `selection capped at ${plural(SHEET_LIMIT, 'image')}` : '',
     );
   }
 
@@ -882,6 +918,7 @@ export function Board() {
     await refreshSheets();
   }
 
+  if (boardError) return <ErrorState info={boardError} />;
   if (!board) return <div className="page">loading…</div>;
 
   const s = statusRef.current;
@@ -1034,7 +1071,7 @@ export function Board() {
             delete board
           </button>
         </div>
-        <div className="muted">{board.imageCount} images</div>
+        <div className="muted">{plural(board.imageCount, 'image')}</div>
         {boardDeleteConfirm && (
           <Confirm
             testId="board-delete-confirm"
@@ -1194,7 +1231,7 @@ export function Board() {
                   testId={`sheet-rename-${sheet.id}`}
                 />
                 <span className="muted" style={{ fontSize: 12 }}>
-                  {sheet.imageCount} images ·{' '}
+                  {plural(sheet.imageCount, 'image')} ·{' '}
                   {sheet.savedAt
                     ? new Date(sheet.savedAt).toLocaleTimeString()
                     : 'unsaved'}
@@ -1242,6 +1279,7 @@ export function Board() {
           <Explore
             boardId={boardId}
             imageId={detailImage.id}
+            currentSelectionCount={selectedImages.length}
             onSelectImages={selectImagesById}
           />
         )}

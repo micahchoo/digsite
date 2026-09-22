@@ -5,10 +5,7 @@
 // never decides access, so there's nothing here to unit test for that),
 // this is pure string shaping with no access decision in it.
 import type { BoardFootprint, SheetFootprint } from '../lib/api.ts';
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
-}
+import { plural } from '../lib/plural.ts';
 
 export function boardDeleteMessage(
   name: string,

@@ -96,6 +96,23 @@ async function main() {
   );
   console.log('PASS: explore at hops=2 finds the 3-image, 2-edge chain');
 
+  // docs/ux/audit.md #6: the board already had a 1-image selection
+  // (`selectImages(['img-6'])` above) when Explore ran, so it must ASK
+  // before replacing it rather than silently overwriting — "Replace" here
+  // is that confirm's own affordance, not the old direct side effect.
+  await page.waitForSelector('[data-testid="explore-selection-confirm"]');
+  const confirmText = await page
+    .locator('[data-testid="explore-selection-confirm"]')
+    .innerText();
+  assert(
+    confirmText.includes('1 selected image'),
+    `expected the confirm to name the 1 image it would replace, got "${confirmText}"`,
+  );
+  console.log(
+    'PASS: exploring over an existing selection asks before replacing it',
+  );
+  await page.click('[data-testid="explore-selection-replace"]');
+
   await page.waitForFunction(
     () => (window.__digsiteBoard?.getSelection().length ?? 0) === 3,
     undefined,
@@ -105,6 +122,74 @@ async function main() {
 
   await page.screenshot({ path: new URL('explore.png', SCREEN_DIR).pathname });
   console.log('screenshot: explore.png');
+
+  // -- 1.5. Cancel leaves the selection untouched; Add never shrinks it -----
+  // The map selection is now the 3-image chain {img-6, img-7, img-8}.
+  // Exploring from img-6 at hops=1 finds the strictly SMALLER neighbourhood
+  // {img-6, img-7} (just the one forward edge drawn in setup) — small
+  // enough that Replace, Add and Cancel are all distinguishable by the
+  // resulting selection size alone.
+  await page.click(
+    '[data-testid="selection-item"]:has(img[src*="/images/img-6/"])',
+  );
+  await page.waitForSelector('[data-testid="explore-panel"]');
+  await page.selectOption('[data-testid="explore-hops"]', '1');
+
+  await page.click('[data-testid="explore-go"]');
+  await page.waitForSelector('[data-testid="explore-selection-confirm"]');
+  await page.click('[data-testid="explore-selection-cancel"]');
+  await page.waitForSelector('[data-testid="explore-selection-confirm"]', {
+    state: 'detached',
+  });
+  const afterCancel = await page.evaluate(
+    () => window.__digsiteBoard?.getSelection().length ?? 0,
+  );
+  assert(
+    afterCancel === 3,
+    `Cancel must leave the selection untouched: expected 3, got ${afterCancel}`,
+  );
+  console.log(
+    'PASS: Cancel on the explore confirm leaves the selection untouched',
+  );
+
+  await page.click('[data-testid="explore-go"]');
+  await page.waitForSelector('[data-testid="explore-selection-confirm"]');
+  await page.click('[data-testid="explore-selection-add"]');
+  await page.waitForTimeout(300);
+  const afterAdd = await page.evaluate(
+    () => window.__digsiteBoard?.getSelection().length ?? 0,
+  );
+  assert(
+    afterAdd === 3,
+    `Add to selection must never shrink it (union with a subset stays 3): got ${afterAdd}`,
+  );
+  console.log(
+    'PASS: "Add to selection" unions with the current selection instead of replacing it',
+  );
+
+  await page.click('[data-testid="explore-go"]');
+  await page.waitForSelector('[data-testid="explore-selection-confirm"]');
+  await page.click('[data-testid="explore-selection-replace"]');
+  await page.waitForFunction(
+    () => (window.__digsiteBoard?.getSelection().length ?? 0) === 2,
+    undefined,
+    { timeout: 5000 },
+  );
+  console.log(
+    'PASS: "Replace" (unlike Add) shrinks the selection to exactly the new neighbourhood',
+  );
+
+  // Restore the full 3-image/2-edge result and selection so section 2 below
+  // (unchanged from before this block existed) sees exactly what it expects.
+  await page.selectOption('[data-testid="explore-hops"]', '2');
+  await page.click('[data-testid="explore-go"]');
+  await page.waitForSelector('[data-testid="explore-selection-confirm"]');
+  await page.click('[data-testid="explore-selection-replace"]');
+  await page.waitForFunction(
+    () => (window.__digsiteBoard?.getSelection().length ?? 0) === 3,
+    undefined,
+    { timeout: 5000 },
+  );
 
   // -- 2. new sheet WITHOUT copy connections: no own edges, foreign appears --
   await page.fill('[data-testid="explore-sheet-name"]', 'Explore no-copy');

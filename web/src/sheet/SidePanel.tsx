@@ -4,8 +4,9 @@
 // Styling is `sheet.css` classes only — no inline styles.
 import type { PropertyValue } from '@digsite/shared';
 import { RenameInline } from '../components/RenameInline.tsx';
+import { plural } from '../lib/plural.ts';
 import { Inspector } from './Inspector.tsx';
-import { colorForUser } from './presence.ts';
+import { colorForUser, namedPeers } from './presence.ts';
 import type { Peer, RoomStatus } from './room.ts';
 import type { DanglingEdge, Selected } from './tools.ts';
 
@@ -45,10 +46,13 @@ function Header({
         testId="sheet-name"
         style={{ fontWeight: 700 }}
       />
-      <div className="sheet-header-meta">{imageCount} images</div>
+      <div className="sheet-header-meta">{plural(imageCount, 'image')}</div>
       {peers.length > 0 && (
         <div className="sheet-presence" data-testid="presence-strip">
-          {peers.map((p) => (
+          {/* docs/ux/audit.md #11: a peer with no name yet is skipped
+              rather than shown by its raw user id — see
+              presence.ts#namedPeers. */}
+          {namedPeers(peers).map((p) => (
             <span
               key={p.id}
               className="sheet-presence-chip"

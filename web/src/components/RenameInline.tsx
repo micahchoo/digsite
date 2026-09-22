@@ -1,6 +1,16 @@
 // A click-to-edit name: Sheet.tsx's sidebar heading and Board.tsx's sheet
 // list both rename a sheet through `PATCH /sheets/:id` (docs/phases/2-sheet.md
 // section 6) and want the same control rather than two copies of it.
+//
+// docs/ux/audit.md #10: this used to render as plain inline styles —
+// `background: none, border: none` — so it read as static bold text, with
+// nothing hinting it was click-to-edit until the pointer happened to be a
+// text caret over it. `.rename-inline` (style.css) adds a hover/focus
+// pencil and a dotted underline; the control itself was already a real
+// `<button>`, so Tab reaches it and Enter/Space already activate it
+// (native button behaviour) — Escape-to-cancel was already wired on the
+// input below. #12's "keyboard reachable" is this: nothing to add beyond
+// making the affordance visible.
 import { useEffect, useRef, useState } from 'react';
 
 interface Props {
@@ -28,20 +38,15 @@ export function RenameInline({ name, onRename, testId, style }: Props) {
     return (
       <button
         type="button"
+        className="rename-inline"
         data-testid={testId ?? 'rename-inline'}
+        aria-label={`Rename "${name}"`}
+        title="Click to rename"
         onClick={() => {
           setValue(name);
           setEditing(true);
         }}
-        style={{
-          background: 'none',
-          border: 'none',
-          padding: 0,
-          font: 'inherit',
-          cursor: 'text',
-          textAlign: 'left',
-          ...style,
-        }}
+        style={style}
       >
         {name}
       </button>

@@ -89,6 +89,47 @@ td {
   font-size: 13px;
 }
 
+/* docs/ux/audit.md #10: a click-to-edit control (RenameInline.tsx) needs a
+   hint beyond the cursor shape — a dotted underline always, a pencil that
+   appears on hover/focus. Plain, not the global `button` chrome (no
+   border/background of its own), since it sits inline with surrounding
+   text (a sheet name, a board title). The pencil is a `::after` pseudo-
+   element on purpose, not a DOM node: it must never become part of the
+   button's `innerText()` (smoke-draw.ts's rename assertion reads that and
+   compares it to the plain name — a real `<span>`, even hidden by
+   `opacity`/`visibility`, was measured to still show up there once the
+   pointer was left resting over the button after a click, which is
+   exactly where a real click leaves it too). */
+.rename-inline {
+  display: inline-block;
+  background: none;
+  border: none;
+  border-bottom: 1px dotted transparent;
+  padding: 0;
+  font: inherit;
+  cursor: text;
+  text-align: left;
+  color: inherit;
+  border-radius: 0;
+}
+.rename-inline:hover,
+.rename-inline:focus-visible {
+  background: none;
+  border-bottom-color: #868e96;
+}
+.rename-inline::after {
+  content: "✎";
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 0.75em;
+  color: #868e96;
+  visibility: hidden;
+}
+.rename-inline:hover::after,
+.rename-inline:focus-visible::after {
+  visibility: visible;
+}
+
 .status-line {
   position: absolute;
   bottom: 8px;

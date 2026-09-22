@@ -19,12 +19,20 @@ import { ringLayout } from '@digsite/shared';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiError, api } from '../lib/api.ts';
+import { plural } from '../lib/plural.ts';
 import type { PendingCopyEdge } from '../sheet/Sheet.tsx';
 
 interface Props {
   boardId: string;
   imageId: string;
-  onSelectImages: (ids: string[]) => void;
+  /** The board's current selection size, read at the moment "Explore" is
+   * clicked — docs/ux/audit.md #6: "Explore from here" used to overwrite
+   * this silently, with zero warning, even when the anchor image had no
+   * connections and the neighbourhood collapsed to 1. Zero means there is
+   * nothing to lose, so the result becomes the selection immediately with
+   * no prompt. */
+  currentSelectionCount: number;
+  onSelectImages: (ids: string[], mode?: 'replace' | 'add') => void;
 }
 
 const HOPS_OPTIONS = [1, 2, 3] as const;
@@ -44,7 +52,12 @@ function copyableEdges(edges: EdgeRow[]): PendingCopyEdge[] {
     }));
 }
 
-export function Explore({ boardId, imageId, onSelectImages }: Props) {
+export function Explore({
+  boardId,
+  imageId,
+  currentSelectionCount,
+  onSelectImages,
+}: Props) {
   const navigate = useNavigate();
   const [hops, setHops] = useState<1 | 2 | 3>(1);
   const [relation, setRelation] = useState('');
@@ -55,6 +68,11 @@ export function Explore({ boardId, imageId, onSelectImages }: Props) {
   const [sheetName, setSheetName] = useState('');
   const [copyConnections, setCopyConnections] = useState(false);
   const [creating, setCreating] = useState(false);
+  // Holds the neighbourhood's image ids while the owner is asked what to do
+  // with the existing selection; null means no prompt is showing.
+  const [pendingSelection, setPendingSelection] = useState<string[] | null>(
+    null,
+  );
 
   // A best-effort relation list, from a real `GET /boards/:id/relations` if
   // it exists — see lib/api.ts's header comment. Not fatal when it 404s;
@@ -91,12 +109,23 @@ export function Explore({ boardId, imageId, onSelectImages }: Props) {
         new Set(res.edges.map((e) => e.relation)),
       ).filter(Boolean);
       setRelations((prev) => Array.from(new Set([...prev, ...found])));
-      onSelectImages(res.images.map((i) => i.id));
+      const ids = res.images.map((i) => i.id);
+      if (currentSelectionCount > 0) {
+        setPendingSelection(ids);
+      } else {
+        onSelectImages(ids, 'replace');
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.reason : String(err));
     } finally {
       setLoading(false);
     }
+  }
+
+  function resolvePendingSelection(mode: 'replace' | 'add') {
+    if (!pendingSelection) return;
+    onSelectImages(pendingSelection, mode);
+    setPendingSelection(null);
   }
 
   async function newSheet(e: React.FormEvent) {
@@ -127,6 +156,45 @@ export function Explore({ boardId, imageId, onSelectImages }: Props) {
     <div className="card" data-testid="explore-panel" style={{ marginTop: 10 }}>
       <b>Explore from here</b>
       {error && <div className="error">{error}</div>}
+      {pendingSelection && (
+        <div
+          className="card"
+          data-testid="explore-selection-confirm"
+          style={{
+            borderColor: '#e8590c',
+            background: '#fff9db',
+            marginTop: 6,
+          }}
+        >
+          <div>
+            Replace your {plural(currentSelectionCount, 'selected image')} with
+            this neighbourhood?
+          </div>
+          <div className="row" style={{ marginTop: 6 }}>
+            <button
+              type="button"
+              data-testid="explore-selection-replace"
+              onClick={() => resolvePendingSelection('replace')}
+            >
+              Replace
+            </button>
+            <button
+              type="button"
+              data-testid="explore-selection-add"
+              onClick={() => resolvePendingSelection('add')}
+            >
+              Add to selection
+            </button>
+            <button
+              type="button"
+              data-testid="explore-selection-cancel"
+              onClick={() => setPendingSelection(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <div className="row" style={{ marginTop: 6 }}>
         <label>
           hops:{' '}
@@ -169,8 +237,9 @@ export function Explore({ boardId, imageId, onSelectImages }: Props) {
       {result && (
         <div data-testid="explore-result" style={{ marginTop: 6 }}>
           <span className="muted">
-            {result.images.length} images
-            {result.truncated ? ' (capped)' : ''} · {result.edges.length} edges
+            {plural(result.images.length, 'image')}
+            {result.truncated ? ' (capped)' : ''} ·{' '}
+            {plural(result.edges.length, 'edge')}
           </span>
           <form onSubmit={(e) => void newSheet(e)} style={{ marginTop: 6 }}>
             <input

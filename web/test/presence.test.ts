@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   canSendPointer,
   colorForUser,
+  namedPeers,
   peerCursors,
 } from '../src/sheet/presence.ts';
 
@@ -19,6 +20,29 @@ describe('canSendPointer', () => {
   test('a custom rate changes the interval', () => {
     expect(canSendPointer(1_099, 1_000, 10)).toBe(false); // 10/s -> 100ms
     expect(canSendPointer(1_100, 1_000, 10)).toBe(true);
+  });
+});
+
+describe('namedPeers', () => {
+  test('drops a peer whose name is blank — docs/ux/audit.md #11', () => {
+    const peers = [
+      { id: 'u1', name: '' },
+      { id: 'u2', name: 'Member' },
+    ];
+    expect(namedPeers(peers)).toEqual([{ id: 'u2', name: 'Member' }]);
+  });
+
+  test('never falls back to the id — a blank name is dropped, not substituted', () => {
+    const peers = [{ id: 'YbFKWrYrhDdOtPZSUKVNJerfMTQzjSCE', name: '' }];
+    expect(namedPeers(peers)).toEqual([]);
+  });
+
+  test('keeps every peer when all have names', () => {
+    const peers = [
+      { id: 'u1', name: 'Ann' },
+      { id: 'u2', name: 'Bo' },
+    ];
+    expect(namedPeers(peers)).toEqual(peers);
   });
 });
 

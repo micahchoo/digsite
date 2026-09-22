@@ -425,6 +425,51 @@ async function main() {
   );
   console.log('PASS: rename round-trips through PATCH /sheets/:id');
 
+  // -- 6. RenameInline's affordance and keyboard reach (docs/ux/audit.md
+  // #10/#12): a hover/focus pencil, invisible otherwise, and Enter/Escape
+  // reach the same control from the keyboard alone. ------------------------
+  await page.mouse.move(10, 10); // away from the rename button first
+  const pencilVisibility = (el: string) =>
+    page.evaluate(
+      (sel) =>
+        getComputedStyle(document.querySelector(sel) as Element, '::after')
+          .visibility,
+      el,
+    );
+  assert(
+    (await pencilVisibility('[data-testid="sheet-name"]')) === 'hidden',
+    'the rename pencil must be invisible when neither hovered nor focused',
+  );
+  await page.hover('[data-testid="sheet-name"]');
+  assert(
+    (await pencilVisibility('[data-testid="sheet-name"]')) === 'visible',
+    'the rename pencil must appear on hover',
+  );
+  await page.mouse.move(10, 10);
+
+  // Enter, from the keyboard alone (no click), opens the editor — a plain
+  // `<button>` activates on Enter natively, so this is really a check that
+  // nothing here fights that default.
+  await page.locator('[data-testid="sheet-name"]').focus();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-testid="sheet-name-input"]');
+  console.log('PASS: Enter, from the keyboard, opens the rename editor');
+
+  // Escape cancels without committing.
+  await page.fill('[data-testid="sheet-name-input"]', 'should not save');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('[data-testid="sheet-name-input"]', {
+    state: 'detached',
+  });
+  const afterEscape = await page
+    .locator('[data-testid="sheet-name"]')
+    .innerText();
+  assert(
+    afterEscape === 'First pass (renamed)',
+    `Escape must cancel without committing, got "${afterEscape}"`,
+  );
+  console.log('PASS: Escape cancels the rename without committing');
+
   await browser.close();
   console.log('smoke-draw: all assertions passed');
 }
