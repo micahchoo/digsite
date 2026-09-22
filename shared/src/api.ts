@@ -93,23 +93,50 @@ export type UpdateImagePropertiesResponse = { properties: Properties };
 
 // -- Sheets ------------------------------------------------------------
 
-export type SheetSummary = { id: string; name: string; createdAt: string };
+// Phase 2 (docs/phases/2-sheet.md section 6): `imageCount`/`savedAt` are
+// additive on the phase-1 shape — GET /boards/:id/sheets for the sheet
+// list's stats. `savedAt` is null until the sheet's first snapshot.
+export type SheetSummary = {
+  id: string;
+  name: string;
+  createdAt: string;
+  imageCount: number;
+  savedAt: string | null;
+};
 export type ListSheetsResponse = SheetSummary[];
 
-export type CreateSheetRequest = { name: string; imageIds: string[] };
+// PATCH /sheets/:id, under sheetForEditing (docs/phases/2-sheet.md section 6).
+export type UpdateSheetRequest = { name: string };
+export type UpdateSheetResponse = { name: string };
+
+export type CreateSheetRequest = {
+  name: string;
+  imageIds: string[];
+  // Phase 2 section 4: a sheet made from a neighbourhood carries explicit
+  // centres (e.g. shared/sheet/layout.ts's ringLayout), one per imageId.
+  // Absent (or an id missing from the map) falls back to the grid layout.
+  positions?: Record<string, { x: number; y: number }>;
+};
 export type CreateSheetResponse = { id: string };
 
+// Phase 2 section 6 / docs/phases/3-groups.md section 4: `name`/`missing`
+// are additive, so the sheet can show a name and skip fetching a deleted
+// original.
 export type SheetImage = {
   id: string;
   slot: number;
   width: number;
   height: number;
+  name: string;
+  missing: boolean;
 };
 export type GetSheetResponse = {
   id: string;
   name: string;
   boardId: string;
   images: SheetImage[];
+  // Phase 2 section 6: additive — null until the sheet's first snapshot.
+  savedAt: string | null;
 };
 
 export type GetSheetElementsResponse = { elements: unknown[] };
@@ -117,6 +144,19 @@ export type GetSheetElementsResponse = { elements: unknown[] };
 export type GetSheetForeignResponse = Foreign;
 
 export type GetSheetRowsResponse = { regions: RegionRow[]; edges: EdgeRow[] };
+
+// GET /boards/:id/neighbourhood?from=<imageId>&hops=<1..3>&relation=<optional>
+// (docs/phases/2-sheet.md section 4), under boardForViewing. `images` is
+// breadth-first, nearest-first, capped at SHEET_LIMIT
+// (shared/sheet/elements.ts); `truncated` says whether the cap cut it off.
+// `edges` are the board's own edges (any sheet's) that join two images both
+// present in `images`.
+export type NeighbourhoodImage = { id: string; hops: number };
+export type GetNeighbourhoodResponse = {
+  images: NeighbourhoodImage[];
+  edges: EdgeRow[];
+  truncated: boolean;
+};
 
 export type GetStatsResponse = {
   scenes: number;
@@ -136,7 +176,23 @@ export type JoinedPayload = { elements: SceneElements; peers: string[] };
 export type JoinDeniedPayload = { reason: string };
 export type SceneClientPayload = { elements: SceneElements };
 export type SceneServerPayload = { elements: SceneElements; from: string };
-export type PeersPayload = { users: string[] };
+
+// Phase 2 section 3: additive — `peers` carries {id, name} objects for a
+// named cursor and outline; `users` (ids only) stays for whatever already
+// reads it.
+export type PeersPayload = {
+  users: string[];
+  peers: { id: string; name: string }[];
+};
+
+// A client's own pointer, at most 20/s (server-enforced, extras dropped —
+// docs/phases/2-sheet.md section 3); never persisted. The room relays it
+// widened with who sent it.
+export type PointerPayload = { x: number; y: number; selectedIds: string[] };
+export type PointerBroadcastPayload = PointerPayload & {
+  user: string;
+  name: string;
+};
 
 // -- Phase 1: sections, forced rebuild ------------------------------------
 

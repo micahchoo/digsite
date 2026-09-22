@@ -13,6 +13,7 @@
     "./sheet/claims": "./src/sheet/claims.ts",
     "./sheet/merge": "./src/sheet/merge.ts",
     "./sheet/project": "./src/sheet/project.ts",
+    "./sheet/layout": "./src/sheet/layout.ts",
     "./api": "./src/api.ts"
   },
   "scripts": {

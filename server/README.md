@@ -44,9 +44,21 @@ materialise's tile-compose pool.
   materialised file (`X-Cache: disk`) ahead of composing. `materialise.ts`
   — one sort's z ≤ -3 tiles, `WORKER_CONCURRENCY` parallel. `sections.ts`
   — one query's boundary-rank grouping for `GET /boards/:id/sections`.
-- `sheets/room.ts` / `snapshot.ts` — the Socket.IO room, merge + project.
-  `src/seed.ts` — dev fixture via the API. `scripts/tus-upload.ts` — a
-  resumable upload via `tus-js-client`, to check the tus path by hand.
+- `sheets/room.ts` / `snapshot.ts` — the Socket.IO room, merge + project,
+  presence (`pointer`, rate-limited to 20/s per socket server-side, never
+  persisted) and named `peers`. `sheets/routes.ts` — sheet list stats
+  (`imageCount`/`savedAt`), `PATCH /sheets/:id` rename, `POST
+  /boards/:id/sheets`'s optional `positions`. `sheets/neighbourhood.ts` —
+  `GET /boards/:id/neighbourhood`, a recursive CTE over `edges` in both
+  directions, capped nearest-first at `SHEET_LIMIT`
+  (`@digsite/shared/sheet/elements`); ring layout for the result lives in
+  `@digsite/shared/sheet/layout.ts` (`ringLayout`). `sheets/rows.ts` — the
+  regions/edges tables' own shape converted to the wire shape, shared by
+  `routes.ts` and `neighbourhood.ts`. `src/seed.ts` — dev fixture via the
+  API. `scripts/tus-upload.ts` — a resumable upload via `tus-js-client`, to
+  check the tus path by hand. `scripts/presence-smoke.ts` — two
+  `socket.io-client`s in one sheet room, to check the pointer relay and its
+  20/s cap by hand.
 
 `POST /boards/:id/images` responds `202`, waiting by default (up to 10s,
 `?wait=0` skips it) for the images it enqueued to leave `pending`. tus

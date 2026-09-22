@@ -9,6 +9,8 @@ import type {
   JoinPayload,
   JoinedPayload,
   PeersPayload,
+  PointerBroadcastPayload,
+  PointerPayload,
   SceneClientPayload,
   SceneServerPayload,
 } from '@digsite/shared/api';
@@ -20,6 +22,10 @@ import { env } from '../env.ts';
 import { getSnapshotElements, saveSnapshotAndProject } from './snapshot.ts';
 
 const DEBOUNCE_MS = 1500;
+// Presence (docs/phases/2-sheet.md section 3): server-enforced, not a hint
+// to the client — a socket past this in the current second has its pointer
+// events dropped, not queued.
+const POINTER_RATE_PER_S = 20;
 
 export const roomStats = {
   scenes: 0,
@@ -40,10 +46,17 @@ function countForeign(elements: unknown[]): number {
   }).length;
 }
 
-// sheetId -> socketId -> userId
-const peers = new Map<string, Map<string, string>>();
-function peerList(sheetId: string): string[] {
+// sheetId -> socketId -> {id, name}. Names come from Better Auth's `user`
+// table by way of the session (`session.user.name`) at join time — no
+// extra query, since getSession already reads it.
+type Peer = { id: string; name: string };
+const peers = new Map<string, Map<string, Peer>>();
+function peerList(sheetId: string): Peer[] {
   return Array.from(peers.get(sheetId)?.values() ?? []);
+}
+function peersPayloadFor(sheetId: string): PeersPayload {
+  const list = peerList(sheetId);
+  return { users: list.map((p) => p.id), peers: list };
 }
 
 const pending = new Map<
@@ -88,20 +101,22 @@ export function mountSheetRoom(httpServer: HttpServer): SocketIOServer {
         await sheetForEditing(session.user.id, payload.sheetId);
         socket.data.sheetId = payload.sheetId;
         socket.data.userId = session.user.id;
+        socket.data.userName = session.user.name;
         await socket.join(payload.sheetId);
 
         if (!peers.has(payload.sheetId)) peers.set(payload.sheetId, new Map());
-        peers.get(payload.sheetId)?.set(socket.id, session.user.id);
+        peers
+          .get(payload.sheetId)
+          ?.set(socket.id, { id: session.user.id, name: session.user.name });
 
         const elements = await getSnapshotElements(payload.sheetId);
         const joined: JoinedPayload = {
           elements,
-          peers: peerList(payload.sheetId),
+          peers: peerList(payload.sheetId).map((p) => p.id),
         };
         socket.emit('joined', joined);
 
-        const peersPayload: PeersPayload = { users: peerList(payload.sheetId) };
-        io.to(payload.sheetId).emit('peers', peersPayload);
+        io.to(payload.sheetId).emit('peers', peersPayloadFor(payload.sheetId));
       } catch (err) {
         const reason = err instanceof AccessDenied ? err.reason : 'error';
         const denied: JoinDeniedPayload = { reason };
@@ -128,12 +143,40 @@ export function mountSheetRoom(httpServer: HttpServer): SocketIOServer {
       scheduleSnapshot(sheetId, payload.elements);
     });
 
+    // Presence (docs/phases/2-sheet.md section 3): never persisted, never
+    // debounced into a snapshot — a pointer is relayed and forgotten. Rate
+    // limited per socket, server-side, so one fast/broken client can't
+    // flood the room; extras are dropped, not queued or coalesced.
+    socket.on('pointer', (payload: PointerPayload) => {
+      const sheetId = socket.data.sheetId as string | undefined;
+      const userId = socket.data.userId as string | undefined;
+      if (!sheetId || !userId) return;
+
+      const now = Date.now();
+      const windowStart = (socket.data.pointerWindowStart as number) || 0;
+      if (now - windowStart >= 1000) {
+        socket.data.pointerWindowStart = now;
+        socket.data.pointerCount = 0;
+      }
+      socket.data.pointerCount =
+        ((socket.data.pointerCount as number) || 0) + 1;
+      if (socket.data.pointerCount > POINTER_RATE_PER_S) return;
+
+      const out: PointerBroadcastPayload = {
+        x: payload.x,
+        y: payload.y,
+        selectedIds: payload.selectedIds,
+        user: userId,
+        name: (socket.data.userName as string) || '',
+      };
+      socket.to(sheetId).emit('pointer', out);
+    });
+
     socket.on('disconnecting', () => {
       const sheetId = socket.data.sheetId as string | undefined;
       if (!sheetId) return;
       peers.get(sheetId)?.delete(socket.id);
-      const peersPayload: PeersPayload = { users: peerList(sheetId) };
-      io.to(sheetId).emit('peers', peersPayload);
+      io.to(sheetId).emit('peers', peersPayloadFor(sheetId));
     });
   });
 

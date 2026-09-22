@@ -70,16 +70,24 @@ export function project(
     });
   }
 
+  // A dangling edge keeps its row (CONTEXT.md "Dangling"): when the bound
+  // region is deleted, the end falls back to the region's image, which is
+  // still known from the deleted element's own data. Only an end whose
+  // image is gone from the scene is unresolved.
   function resolveEnd(elementId: string | undefined): EdgeEnd | null {
     if (!elementId) return null;
     const bound = byId.get(elementId);
-    if (!bound || bound.isDeleted) return null;
-    const data = dataById.get(elementId);
+    if (!bound) return null;
+    const data = dataOf(bound);
     if (!data) return null;
-    if (data.kind === 'image') return { imageId: data.imageId };
+    if (data.kind === 'image') {
+      return bound.isDeleted ? null : { imageId: data.imageId };
+    }
     if (data.kind === 'region') {
       if (!imagesByImageId.has(data.imageId)) return null;
-      return { imageId: data.imageId, regionSourceId: bound.id };
+      return bound.isDeleted
+        ? { imageId: data.imageId }
+        : { imageId: data.imageId, regionSourceId: bound.id };
     }
     return null;
   }

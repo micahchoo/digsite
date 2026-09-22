@@ -142,4 +142,30 @@ describe('project', () => {
     });
     expect(edges[0]?.target).toEqual({ imageId: 'IMG-A' });
   });
+
+  test('an edge whose region end was deleted dangles to the image and keeps its row', () => {
+    const a = image('img1', 'IMG-A');
+    const b = image('img2', 'IMG-B', { x: 500 });
+    const reg = region(
+      'reg1',
+      'IMG-A',
+      { x: 0, y: 0, width: 10, height: 10 },
+      { isDeleted: true },
+    );
+    const e = edge('edge1', 'reg1', 'img2');
+    const { edges, unresolved } = project('sheet-1', [a, b, reg, e]);
+    expect(edges).toHaveLength(1);
+    expect(edges[0]?.source).toEqual({ imageId: 'IMG-A' });
+    expect(edges[0]?.target).toEqual({ imageId: 'IMG-B' });
+    expect(unresolved).toBe(0);
+  });
+
+  test('an edge whose image end was deleted is unresolved', () => {
+    const a = image('img1', 'IMG-A', { isDeleted: true });
+    const b = image('img2', 'IMG-B', { x: 500 });
+    const e = edge('edge1', 'img1', 'img2');
+    const { edges, unresolved } = project('sheet-1', [a, b, e]);
+    expect(edges).toEqual([]);
+    expect(unresolved).toBe(1);
+  });
 });
