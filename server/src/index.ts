@@ -1,10 +1,14 @@
 // Bootstrap: build the app (app.ts), warm recently-viewed boards' default
-// sort, listen. See docs/design.md "server/".
+// sort, listen, and start the worker in-process. See docs/design.md
+// "server/" and docs/phases/1-map.md "Upload as a worker" — WORKER=off
+// disables the in-process loop (for running `bun run worker` as its own
+// process instead).
 import { parseSortId } from '@digsite/shared/board/sort';
 import { createHttpServer } from './app.ts';
 import { ensureRank } from './boards/ranks.ts';
 import { pool } from './db/pool.ts';
 import { env } from './env.ts';
+import { startWorker } from './worker/index.ts';
 
 // Warm the default sort for boards viewed recently, so the first tile after
 // a restart doesn't pay the rebuild — docs/design.md "ensureRank rebuilds
@@ -28,4 +32,8 @@ const httpServer = createHttpServer();
 httpServer.listen(env.PORT, () => {
   console.log(`digsite server on http://localhost:${env.PORT}`);
   warmRecentBoards().catch((err) => console.error('warm failed', err));
+  if (process.env.WORKER !== 'off') {
+    startWorker();
+    console.log('worker started in-process (poll every 500ms)');
+  }
 });

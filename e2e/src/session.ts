@@ -8,8 +8,10 @@
 // incompatibility, not anything in this app — see RESULTS.md. Browser
 // automation (chromium.launch/newContext/page) is unaffected and is used
 // as directed for the sheet pages.
-export const SERVER = 'http://localhost:8800';
-export const WEB = 'http://localhost:5180';
+// Overridable via env for a regression run on alternate ports (the default
+// 8800/5180 stay the values everything else assumes).
+export const SERVER = process.env.SERVER_ORIGIN ?? 'http://localhost:8800';
+export const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
 
 export type ApiResult<T = unknown> = { status: number; json: T };
 

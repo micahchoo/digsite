@@ -352,13 +352,17 @@ async function main() {
           `e2e-upload-${tag}-${i}.png`,
         );
       }
-      const uploadRes = await member.postForm<{ id: string; slot: number }[]>(
-        `/boards/${fieldId}/images`,
-        form,
-      );
-      assertStatus(uploadRes, 200, 'upload 3 images');
+      const uploadRes = await member.postForm<
+        { id: string; slot: number; status: string }[]
+      >(`/boards/${fieldId}/images`, form);
+      // Phase 1: the ladder is built by the worker; the route answers 202 and,
+      // with the default wait, returns once those jobs are done.
+      assertStatus(uploadRes, 202, 'upload 3 images');
       if (uploadRes.json.length !== 3)
         fail(`expected 3 uploaded, got ${uploadRes.json.length}`);
+      const notReady = uploadRes.json.filter((u) => u.status !== 'ready');
+      if (notReady.length)
+        fail(`upload waited but ${notReady.length} image(s) are not ready`);
       const gotSlots = uploadRes.json.map((u) => u.slot).sort((a, b) => a - b);
       const wantSlots = [startCount, startCount + 1, startCount + 2];
       if (JSON.stringify(gotSlots) !== JSON.stringify(wantSlots)) {

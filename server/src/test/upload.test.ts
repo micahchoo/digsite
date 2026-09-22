@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { ladderAddress } from '@digsite/shared/board/ladder';
 // docs/design.md "Tests": upload two files; slots 0 and 1; ladder pages
-// exist; ladderAddress finds non-transparent pixels.
+// exist; ladderAddress finds non-transparent pixels. Since docs/phases/
+// 1-map.md, painting moved to the worker — the request only enqueues the
+// `ladder` job, so this test drains it once before checking the pages.
 import { createCanvas } from '@napi-rs/canvas';
 import { ladderPagePath } from '../boards/ladder.ts';
 import { uploadOne } from '../boards/upload.ts';
 import { pool } from '../db/pool.ts';
+import { drain } from '../worker/index.ts';
 
 async function makeBoard(name: string): Promise<string> {
   const { rows } = await pool.query(
@@ -33,6 +36,15 @@ describe('upload', () => {
 
     expect(a.slot).toBe(0);
     expect(b.slot).toBe(1);
+    expect(a.status).toBe('pending');
+
+    await drain();
+
+    const { rows } = await pool.query(
+      'SELECT status FROM images WHERE id = ANY($1::uuid[])',
+      [[a.id, b.id]],
+    );
+    expect(rows.every((r) => r.status === 'ready')).toBe(true);
 
     const { loadImage } = await import('@napi-rs/canvas');
     const { readFileSync } = await import('node:fs');

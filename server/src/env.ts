@@ -60,4 +60,8 @@ export const env = {
   DATA_DIR: resolve(REPO_ROOT, process.env.DATA_DIR ?? './data'),
   LADDER_BUDGET_MB: Number(process.env.LADDER_BUDGET_MB ?? 4096),
   INVITATION_EXPIRES_IN: Number(process.env.INVITATION_EXPIRES_IN ?? 172800),
+  // The in-process worker's poll concurrency (docs/phases/1-map.md "Upload
+  // as a worker") and materialise.ts's tile-compose parallelism — the same
+  // number for both, per the phase contract.
+  WORKER_CONCURRENCY: Number(process.env.WORKER_CONCURRENCY ?? 4),
 };

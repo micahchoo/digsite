@@ -15,6 +15,7 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { tileFor } from '../boards/tiles.ts';
 import { uploadOne } from '../boards/upload.ts';
 import { pool } from '../db/pool.ts';
+import { drain } from '../worker/index.ts';
 
 async function makeBoard(name: string): Promise<string> {
   const { rows } = await pool.query(
@@ -42,6 +43,10 @@ describe('tiles', () => {
     const boardId = await makeBoard(`tiles-test-${Date.now()}`);
     await uploadOne(boardId, 'tester', 'a.png', paintSquare(0));
     await uploadOne(boardId, 'tester', 'b.png', paintSquare(160));
+    // docs/phases/1-map.md: painting moved to the worker — drain it so
+    // these two land `ready` before composing (a pending slot would paint
+    // the neutral #333 cell this test doesn't expect).
+    await drain();
 
     const cacheKey = `/boards/${boardId}/tiles/${'uploaded_at.desc'}/0/0/0.png`;
 

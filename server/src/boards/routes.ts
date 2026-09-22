@@ -10,8 +10,10 @@ import type {
   CreateBoardResponse,
   GetBoardResponse,
   GetImageResponse,
+  GetSectionsResponse,
   ListBoardImagesResponse,
   ListBoardsResponse,
+  RebuildSortResponse,
   SortableKey,
   UpdateBoardRequest,
   UpdateBoardResponse,
@@ -46,9 +48,12 @@ import {
   requireAuth,
   toWebRequest,
 } from '../http.ts';
-import { imagesInRankOrder } from './ranks.ts';
+import { enqueueMaterialiseJob } from '../worker/jobs.ts';
+import { originalPath } from './paths.ts';
+import { forceRebuildRank, imagesInRankOrder } from './ranks.ts';
+import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
-import { originalPathFor, uploadOne } from './upload.ts';
+import { uploadOne } from './upload.ts';
 
 function toBoardSummary(b: BoardRow): BoardSummary {
   return { id: b.id, name: b.name, open: b.open, imageCount: b.image_count };
@@ -64,6 +69,8 @@ function toBoardImage(i: ImageRow): BoardImage {
     uploadedAt: i.uploaded_at.toISOString(),
     properties: i.properties as BoardImage['properties'],
     missing: i.missing,
+    status: i.status,
+    error: i.error,
   };
 }
 
@@ -253,6 +260,7 @@ export function registerBoardRoutes(router: Router) {
     }
 
     const out: UploadImagesResponse = [];
+    const ids: string[] = [];
     for (const [i, file] of files.entries()) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const properties = propsArray[i] ?? {};
@@ -263,9 +271,38 @@ export function registerBoardRoutes(router: Router) {
         bytes,
         properties,
       );
+      ids.push(uploaded.id);
       out.push(uploaded);
     }
-    json(ctx.res, 200, out);
+
+    // docs/phases/1-map.md: the multipart route waits (up to 10s) for the
+    // images it just enqueued to leave `pending`, so a caller that uploads
+    // and immediately requests a tile sees them painted (e2e scenario 3).
+    // `?wait=0` skips this and returns the `pending` rows straight away.
+    // tus uploads (boards/tus.ts) never wait — see server/README.md.
+    const wait = ctx.url.searchParams.get('wait') !== '0';
+    if (wait && ids.length > 0) {
+      const deadline = Date.now() + 10_000;
+      let statuses = new Map<string, string>();
+      for (;;) {
+        const { rows } = await pool.query(
+          'SELECT id, status FROM images WHERE id = ANY($1::uuid[])',
+          [ids],
+        );
+        statuses = new Map(rows.map((r) => [r.id, r.status]));
+        const settled = ids.every((id) => statuses.get(id) !== 'pending');
+        if (settled || Date.now() >= deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      for (const item of out) {
+        const s = statuses.get(item.id);
+        if (s === 'ready' || s === 'pending' || s === 'failed') {
+          item.status = s;
+        }
+      }
+    }
+
+    json(ctx.res, 202, out);
   });
 
   router.get('/boards/:id/images', async (ctx) => {
@@ -310,7 +347,7 @@ export function registerBoardRoutes(router: Router) {
   router.get('/images/:id/original', async (ctx) => {
     const userId = requireAuth(ctx);
     const image = await imageForViewing(userId, param(ctx, 'id'));
-    const path = originalPathFor(image.board_id, image.sha256);
+    const path = originalPath(image.board_id, image.sha256);
     try {
       const buf = readFileSync(path);
       ctx.res.writeHead(200, {
@@ -370,5 +407,31 @@ export function registerBoardRoutes(router: Router) {
       'Cache-Control': 'private, max-age=60',
     });
     ctx.res.end(result.png);
+  });
+
+  router.get('/boards/:id/sections', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
+    const response: GetSectionsResponse = await sectionsFor(boardId, sort);
+    json(ctx.res, 200, response);
+  });
+
+  // Forces a rank rebuild and an immediate materialise for one sort —
+  // docs/phases/1-map.md's definition of done ("after POST .../rebuild and
+  // the materialise job, a z=-3 tile returns X-Cache: disk"). Everything
+  // else reaches a rebuild lazily (ensureRank) or via the debounced
+  // rank-rebuild job; this route is for the measurement/manual path.
+  router.post('/boards/:id/sort/:sortId/rebuild', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    const sort = parseSortId(param(ctx, 'sortId'));
+    if (!sort) return json(ctx.res, 400, { error: 'bad sort id' });
+    await forceRebuildRank(boardId, sort);
+    await enqueueMaterialiseJob(boardId, param(ctx, 'sortId'));
+    const response: RebuildSortResponse = { ok: true };
+    json(ctx.res, 202, response);
   });
 }

@@ -225,16 +225,25 @@ async function main() {
       `image-${i}.png`,
     );
   }
+  // 202: the request enqueues a `ladder` job per image and (by default)
+  // waits up to 10s for them to leave `pending` — docs/phases/1-map.md
+  // "Upload as a worker". The dev server started this fixture against
+  // (`bun run dev`) runs the worker in-process, so 60 small synthetic
+  // images finish well inside that window.
   const uploadRes = await member.session.postForm(
     `/boards/${fieldId}/images`,
     form,
   );
-  if (uploadRes.status !== 200) {
+  if (uploadRes.status !== 202) {
     throw new Error(
       `upload to Field failed: ${uploadRes.status} ${JSON.stringify(uploadRes.json)}`,
     );
   }
-  const uploaded = uploadRes.json as { id: string; slot: number }[];
+  const uploaded = uploadRes.json as {
+    id: string;
+    slot: number;
+    status: string;
+  }[];
   console.log(`uploaded ${uploaded.length} images to Field`);
 
   for (const img of uploaded) {

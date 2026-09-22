@@ -58,6 +58,10 @@ export type ImageRow = {
   uploaded_by: string;
   properties: Record<string, unknown>;
   missing: boolean;
+  // Phase 1 (docs/phases/1-map.md "Upload as a worker"): 0/0 and 'pending'
+  // until worker/jobs.ts#runLadderJob decodes the original and sets these.
+  status: 'ready' | 'pending' | 'failed';
+  error: string | null;
 };
 
 async function findMember(

@@ -60,7 +60,15 @@ export type UpdateBoardResponse = { defaultSort: string };
 export type AllowlistRequest = { userId: string };
 export type AllowlistResponse = { userId: string }[];
 
-export type UploadImagesResponse = { id: string; slot: number }[];
+// Phase 1 (docs/phases/1-map.md "Upload as a worker"): the request enqueues
+// a ladder job and reports each image's status instead of always being
+// ready. `status` is additive on this existing response type — every other
+// field is unchanged.
+export type UploadImagesResponse = {
+  id: string;
+  slot: number;
+  status: 'ready' | 'pending' | 'failed';
+}[];
 
 export type BoardImage = {
   id: string;
@@ -71,6 +79,10 @@ export type BoardImage = {
   uploadedAt: string;
   properties: Properties;
   missing: boolean;
+  // Phase 1 (docs/phases/1-map.md "Upload as a worker"): additive on this
+  // existing type. width/height are 0 while status is 'pending'.
+  status: 'ready' | 'pending' | 'failed';
+  error: string | null;
 };
 export type ListBoardImagesResponse = { images: BoardImage[] };
 
@@ -125,3 +137,15 @@ export type JoinDeniedPayload = { reason: string };
 export type SceneClientPayload = { elements: SceneElements };
 export type SceneServerPayload = { elements: SceneElements; from: string };
 export type PeersPayload = { users: string[] };
+
+// -- Phase 1: sections, forced rebuild ------------------------------------
+
+/** GET /boards/:id/sections?sort=<sortId> — docs/phases/1-map.md
+ * "Sections, hover, selection". Rank ranges cap at 500; `truncated` says
+ * whether more existed. */
+export type Section = { label: string; fromRank: number; toRank: number };
+export type GetSectionsResponse = { sections: Section[]; truncated: boolean };
+
+/** POST /boards/:id/sort/:sortId/rebuild — forces a rank rebuild and an
+ * immediate materialise for that sort. */
+export type RebuildSortResponse = { ok: true };

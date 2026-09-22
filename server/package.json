@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun run src/index.ts",
+    "worker": "bun run src/worker/main.ts",
     "migrate": "bun run src/db/migrate.ts",
     "seed": "bun run src/seed.ts",
     "test": "bun test",
@@ -16,13 +17,16 @@
     "better-auth": "^1.7.5",
     "pg": "^8.23.0",
     "socket.io": "^4.8.3",
-    "@napi-rs/canvas": "^0.1.65"
+    "@napi-rs/canvas": "^0.1.65",
+    "@tus/server": "^2.4.5",
+    "@tus/file-store": "^2.1.1"
   },
   "devDependencies": {
     "@better-auth/cli": "^1.4.21",
     "@types/pg": "^8.23.1",
     "socket.io-client": "^4.8.3",
     "typescript": "^5.7.0",
-    "@types/bun": "^1.2.0"
+    "@types/bun": "^1.2.0",
+    "tus-js-client": "^4.3.1"
   }
 }

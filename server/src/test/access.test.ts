@@ -22,6 +22,7 @@ import {
   sheetForEditing,
 } from '../access/index.ts';
 import { createHttpServer } from '../app.ts';
+import { drain } from '../worker/index.ts';
 
 let server: Server;
 let base = '';
@@ -231,14 +232,20 @@ describe('access matrix', () => {
       new Blob([onePixelPng()], { type: 'image/png' }),
       'dot.png',
     );
+    // docs/phases/1-map.md: uploads are now async (202, enqueues a `ladder`
+    // job). This test server never calls startWorker(), so ?wait=0 skips
+    // the route's own 10s wait and `drain()` runs the job directly —
+    // otherwise the sheet-creation step below would see width/height still
+    // at their pending placeholder of 0.
     const upload = await admin.session.postForm(
-      `/boards/${bPrivateId}/images`,
+      `/boards/${bPrivateId}/images?wait=0`,
       form,
     );
-    expect(upload.status).toBe(200);
+    expect(upload.status).toBe(202);
     const uploadedImages = upload.json as { id: string }[];
     const bPrivateImageId = uploadedImages[0]?.id;
     if (!bPrivateImageId) throw new Error('upload returned no image');
+    await drain();
 
     const sPrivate = await admin.session.post(`/boards/${bPrivateId}/sheets`, {
       name: 'S-private',

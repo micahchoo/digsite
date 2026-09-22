@@ -1,27 +1,24 @@
-// One upload (CONTEXT.md "Image", "Slot"): hash, decode, cap the longer
-// side at 4096 (Figma's cap), write the original, assign the next slot and
-// insert the row in one transaction that also marks every rank stale, then
-// paint the ladder. See docs/design.md "Uploads and the ladder".
+// One upload (CONTEXT.md "Image", "Slot"): the request does the cheap,
+// synchronous part only — sha256, store the raw original, assign the next
+// slot and insert a `pending` row in one transaction that also marks every
+// rank stale — then enqueues the `ladder` job. See docs/phases/1-map.md
+// "Upload as a worker": decoding, the 4096-px cap, and painting the ladder
+// all moved to worker/jobs.ts#runLadderJob. Both the multipart route
+// (boards/routes.ts) and the tus `onUploadFinish` hook (boards/tus.ts) call
+// this same function — it is the one ingest path either way.
+//
+// A pending row's width/height are 0 (images.width/height stay NOT NULL,
+// unchanged by this phase) until the worker decodes the original and sets
+// the real values alongside status = 'ready'.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { pool } from '../db/pool.ts';
-import { env } from '../env.ts';
-import { paintLadder } from './ladder.ts';
+import { enqueueLadderJob } from '../worker/jobs.ts';
+import { originalPath } from './paths.ts';
 import { invalidateComposedTiles } from './tiles-cache.ts';
 
-const MAX_SIDE = 4096;
-
-export type UploadedImage = { id: string; slot: number };
-
-function originalPath(boardId: string, sha256: string): string {
-  return `${env.DATA_DIR}/boards/${boardId}/originals/${sha256}`;
-}
-
-export function originalPathFor(boardId: string, sha256: string): string {
-  return originalPath(boardId, sha256);
-}
+export type UploadedImage = { id: string; slot: number; status: 'pending' };
 
 export async function uploadOne(
   boardId: string,
@@ -31,29 +28,11 @@ export async function uploadOne(
   properties: Record<string, unknown> = {},
 ): Promise<UploadedImage> {
   const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const decoded = await loadImage(Buffer.from(bytes));
-
-  let width = decoded.width;
-  let height = decoded.height;
-  let stored: Buffer<ArrayBufferLike> = Buffer.from(bytes);
-  let paintSource: typeof decoded = decoded;
-
-  if (width > MAX_SIDE || height > MAX_SIDE) {
-    const scale = MAX_SIDE / Math.max(width, height);
-    const nw = Math.round(width * scale);
-    const nh = Math.round(height * scale);
-    const canvas = createCanvas(nw, nh);
-    canvas.getContext('2d').drawImage(decoded, 0, 0, nw, nh);
-    stored = canvas.encodeSync('png');
-    width = nw;
-    height = nh;
-    paintSource = await loadImage(stored);
-  }
 
   const path = originalPath(boardId, sha256);
   if (!existsSync(path)) {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, stored);
+    writeFileSync(path, Buffer.from(bytes));
   }
 
   const client = await pool.connect();
@@ -67,18 +46,9 @@ export async function uploadOne(
     );
     slot = slotRes.rows[0].slot;
     const insRes = await client.query(
-      `INSERT INTO images (board_id, slot, sha256, name, width, height, uploaded_by, properties)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [
-        boardId,
-        slot,
-        sha256,
-        filename,
-        width,
-        height,
-        userId,
-        JSON.stringify(properties),
-      ],
+      `INSERT INTO images (board_id, slot, sha256, name, width, height, uploaded_by, properties, status)
+       VALUES ($1,$2,$3,$4,0,0,$5,$6,'pending') RETURNING id`,
+      [boardId, slot, sha256, filename, userId, JSON.stringify(properties)],
     );
     imageId = insRes.rows[0].id;
     await client.query(
@@ -94,7 +64,7 @@ export async function uploadOne(
   }
 
   invalidateComposedTiles(boardId);
-  await paintLadder(boardId, slot, paintSource, width, height);
+  await enqueueLadderJob(boardId, imageId);
 
-  return { id: imageId, slot };
+  return { id: imageId, slot, status: 'pending' };
 }

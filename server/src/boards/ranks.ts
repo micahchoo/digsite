@@ -31,6 +31,16 @@ export async function markBoardRanksStale(boardId: string): Promise<void> {
   invalidateComposedTiles(boardId);
 }
 
+/** Unconditionally rebuilds (board, sort)'s rank table — `ensureRank` checks
+ * `stale` first; this is for a caller that wants a rebuild regardless (the
+ * manual `POST /boards/:id/sort/:sortId/rebuild` route). */
+export async function forceRebuildRank(
+  boardId: string,
+  sort: Sort,
+): Promise<void> {
+  return rebuildRank(boardId, sort);
+}
+
 async function rebuildRank(boardId: string, sort: Sort): Promise<void> {
   const sid = sortId(sort);
   const client = await pool.connect();

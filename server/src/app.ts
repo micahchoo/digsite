@@ -19,6 +19,7 @@ import {
 } from './access/index.ts';
 import { auth } from './auth.ts';
 import { registerBoardRoutes } from './boards/routes.ts';
+import { isTusPath, tusServer } from './boards/tus.ts';
 import { env } from './env.ts';
 import { registerGroupRoutes } from './groups/routes.ts';
 import { Router, json, param } from './http.ts';
@@ -81,6 +82,19 @@ export function createHttpServer(): Server {
   };
 
   const httpServer = createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://internal');
+
+    // tus (docs/phases/1-map.md "Upload as a worker") handles its own CORS
+    // (Tus-Resumable, Upload-Offset/-Length, Location — allowedOrigins/
+    // allowedCredentials/exposedHeaders in boards/tus.ts) and its own
+    // OPTIONS response (advertises Tus-Version/-Extension), so it must run
+    // before the blanket CORS/OPTIONS handling below, which would otherwise
+    // shadow both.
+    if (isTusPath(url.pathname)) {
+      await tusServer.handle(req, res);
+      return;
+    }
+
     for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
 
     if (req.method === 'OPTIONS') {
@@ -89,7 +103,6 @@ export function createHttpServer(): Server {
       return;
     }
 
-    const url = new URL(req.url ?? '/', 'http://internal');
     if (url.pathname.startsWith('/api/auth')) {
       return toNodeHandler(auth)(req, res);
     }
