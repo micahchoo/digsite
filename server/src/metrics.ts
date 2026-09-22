@@ -1,3 +1,8 @@
+import { residentBytes as coarseBytes } from './boards/coarse-cache.ts';
+import {
+  residentBytes as ladderBytes,
+  evictionCount as ladderEvictions,
+} from './boards/ladder.ts';
 // Phase 5 section 4 (docs/phases/5-hardening.md "Operability"): GET
 // /metrics, Prometheus text format, protected by METRICS_TOKEN. Fed by two
 // call sites elsewhere — logging.ts#logRequest (request counts + latency,
@@ -7,14 +12,8 @@
 // change fast enough to justify counters that could drift from the source
 // of truth).
 //
-// Not exposed here: ladder/coarse-cache residency bytes
-// (docs/phases/5-hardening.md section 4's last bullet). Neither
-// boards/ladder.ts nor boards/coarse-cache.ts exports a byte accessor, and
-// both files are outside this task's edit scope (owned by the section 5
-// scale-debts pass running in parallel — see this task's report). Add
-// `export function residentBytes(): number` to each (ladder.ts already
-// tracks `PAGE_BYTES` and `cache.size`; coarse-cache.ts already tracks
-// `totalBytes`) and two gauges here once that lands.
+// Plus three residency reads: ladder bytes and evictions, coarse-tile
+// bytes — the numbers the phase-5 load run needed and could not see.
 import { pool } from './db/pool.ts';
 import { env } from './env.ts';
 import type { Router } from './http.ts';
@@ -126,6 +125,15 @@ export async function renderMetrics(): Promise<string> {
     lines.push(`digsite_tile_cache_total{cache="${esc(cache)}"} ${n}`);
   }
 
+  lines.push('# HELP digsite_ladder_resident_bytes Decoded ladder pages held.');
+  lines.push('# TYPE digsite_ladder_resident_bytes gauge');
+  lines.push(`digsite_ladder_resident_bytes ${ladderBytes()}`);
+  lines.push('# HELP digsite_ladder_evictions_total Ladder pages evicted.');
+  lines.push('# TYPE digsite_ladder_evictions_total counter');
+  lines.push(`digsite_ladder_evictions_total ${ladderEvictions()}`);
+  lines.push('# HELP digsite_coarse_resident_bytes Coarse tiles held.');
+  lines.push('# TYPE digsite_coarse_resident_bytes gauge');
+  lines.push(`digsite_coarse_resident_bytes ${coarseBytes()}`);
   lines.push('# HELP digsite_worker_queue_depth Jobs table rows by state.');
   lines.push('# TYPE digsite_worker_queue_depth gauge');
   for (const { state, n } of await workerQueueDepth()) {

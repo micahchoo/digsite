@@ -85,6 +85,9 @@ describe('metrics: GET /metrics', () => {
       'digsite_request_duration_ms_count{method="GET",route="/boards/:id"} 2',
     );
     expect(body).toContain('digsite_tile_cache_total{cache="resident"} 2');
+    expect(body).toMatch(/^digsite_ladder_resident_bytes \d+$/m);
+    expect(body).toMatch(/^digsite_ladder_evictions_total \d+$/m);
+    expect(body).toMatch(/^digsite_coarse_resident_bytes \d+$/m);
     expect(body).toContain('digsite_tile_cache_total{cache="miss"} 1');
     expect(body).toContain('digsite_worker_queue_depth');
     expect(body).toContain('digsite_sheet_rooms');
