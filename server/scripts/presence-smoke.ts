@@ -17,7 +17,7 @@ import { env } from '../src/env.ts';
 const sheetId = process.argv[2];
 const email1 = process.argv[3] ?? 'owner@example.test';
 const email2 = process.argv[4] ?? 'member@example.test';
-const password = 'password1';
+const password = 'password1234';
 
 if (!sheetId) {
   console.error(

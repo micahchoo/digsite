@@ -12,7 +12,7 @@ import { env } from '../src/env.ts';
 
 const boardId = process.argv[2];
 const email = process.argv[3] ?? 'member@example.test';
-const password = process.argv[4] ?? 'password1';
+const password = process.argv[4] ?? 'password1234';
 
 if (!boardId) {
   console.error(

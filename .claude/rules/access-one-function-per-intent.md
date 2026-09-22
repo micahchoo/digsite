@@ -73,6 +73,25 @@ bypass it, cache it, or fold it into a route's own query.
   `better-auth.session_token`; generated columns are camelCase and must
   be quoted in SQL.
 
-Verify with `cd server && bun test access.test.ts`: five users × seven
-intents, zero deviations, plus the per-user board lists; and
+## Every route actually calls its intent
+
+The two checks above prove no file OUTSIDE access/ reads membership; they
+don't prove every ROUTE calls an intent (or is deliberately public) at
+all — a route missing its `*For*(` call entirely would pass both. That's
+`server/src/test/routes-audit.test.ts` (docs/phases/5-hardening.md
+section 1), not a `checks:` entry here: this file's linter (`forbid`/
+`require` — `scripts/seams/lint.ts`) tests one line at a time or a whole
+file once, so it can express "this string never appears" and "this string
+appears somewhere," but not "every occurrence of X is followed
+(somewhere in the next N lines, across whatever the handler does in
+between) by Y" — that's what a route needing its access call actually
+requires. The audit test enumerates every registered route
+(`Router#routes()`, http.ts) against a hand-maintained expectations table;
+a route with neither an entry there nor a documented public/exception
+reason fails the build the same way a missing `checks:` match would.
+
+Verify with `cd server && bun test access.test.ts routes-audit.test.ts`:
+access.test.ts is five users × seven intents, zero deviations, plus the
+per-user board lists; routes-audit.test.ts is every route, unauthenticated
+(401) and as an outsider against a real group's objects (403); and
 `bun run lint:seams` at the root.

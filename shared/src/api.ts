@@ -258,6 +258,12 @@ export type JoinDeniedPayload = { reason: string };
 export type SceneClientPayload = { elements: SceneElements };
 export type SceneServerPayload = { elements: SceneElements; from: string };
 
+// Phase 5 section 2 (docs/phases/5-hardening.md "Abuse limits"): a socket
+// past `socket-connect` (join) or `scene-emit` (scene) drops instead of
+// erroring — `limited` names which bucket, distinct from `join-denied`
+// (an access refusal, not a rate refusal).
+export type LimitedPayload = { reason: 'socket-connect' | 'scene-emit' };
+
 // Phase 2 section 3: additive — `peers` carries {id, name} objects for a
 // named cursor and outline; `users` (ids only) stays for whatever already
 // reads it.
@@ -286,3 +292,25 @@ export type GetSectionsResponse = { sections: Section[]; truncated: boolean };
 /** POST /boards/:id/sort/:sortId/rebuild — forces a rank rebuild and an
  * immediate materialise for that sort. */
 export type RebuildSortResponse = { ok: true };
+
+// -- Phase 5 section 4: worker operability --------------------------------
+
+/** GET /boards/:id/jobs?state=<state> (default 'failed'), under
+ * boardForManagingAllowlist — docs/phases/5-hardening.md section 4. `kind`
+ * is one of worker/jobs.ts's job kinds ('ladder' | 'rank-rebuild' |
+ * 'materialise'); `error` is the reason recorded on the last attempt
+ * (null before any attempt has failed). */
+export type JobSummary = {
+  id: number;
+  kind: string;
+  state: string;
+  attempts: number;
+  error: string | null;
+  runAfter: string;
+  createdAt: string;
+};
+export type ListJobsResponse = JobSummary[];
+
+/** POST /jobs/:id/retry, same intent — resets a failed job to pending,
+ * attempts 0, due now. */
+export type RetryJobResponse = { ok: true };

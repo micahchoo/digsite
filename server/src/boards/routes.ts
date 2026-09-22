@@ -1,7 +1,5 @@
 // Boards (CONTEXT.md "Board", "Image", "Tile"). See docs/design.md
 // "Routes / Boards" for the fixed route shapes.
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
 import type {
   AllowlistRequest,
   AllowlistResponse,
@@ -19,9 +17,11 @@ import type {
   ListBoardImagesByIdsResponse,
   ListBoardImagesResponse,
   ListBoardsResponse,
+  ListJobsResponse,
   RebuildSortResponse,
   RenameBoardRequest,
   RenameBoardResponse,
+  RetryJobResponse,
   Role,
   SortableKey,
   UpdateBoardRequest,
@@ -55,7 +55,6 @@ import {
 import { allowlistMembersOf, allowlistOf } from '../access/reads.ts';
 import { auth } from '../auth.ts';
 import { pool } from '../db/pool.ts';
-import { env } from '../env.ts';
 import {
   type Router,
   json,
@@ -64,7 +63,13 @@ import {
   requireAuth,
   toWebRequest,
 } from '../http.ts';
-import { presignedGetUrl, storageFromEnv } from '../storage/index.ts';
+import { checkLimit, tooManyRequests } from '../limits.ts';
+import { recordTileCache } from '../metrics.ts';
+import {
+  deletePrefix,
+  presignedGetUrl,
+  storageFromEnv,
+} from '../storage/index.ts';
 import { enqueueMaterialiseJob } from '../worker/jobs.ts';
 import { getPage } from './ladder.ts';
 import { originalKey, previewKey } from './paths.ts';
@@ -72,6 +77,7 @@ import { ensureRank, forceRebuildRank, imagesInRankOrder } from './ranks.ts';
 import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
 import { uploadOne } from './upload.ts';
+import { validateUpload } from './validate.ts';
 
 const PREVIEW_MAX_SIDE = 1024;
 const PREVIEW_LADDER_SIZE = 128;
@@ -403,26 +409,19 @@ export function registerBoardRoutes(router: Router) {
       }
     }
 
-    // Best-effort file sweep (docs/phases/3-groups.md section 4): every
-    // storage key for this board's originals, ladder pages and tiles lives
-    // under this one prefix (paths.ts, ladder.ts, materialise.ts,
-    // coarse-cache.ts, tiles.ts all key off `boards/<id>/`). fs-only — the
-    // Storage interface has no "delete by prefix" (storage/index.ts's
-    // header comment; materialise.ts's own sweep explains the same gap).
-    // Under S3 the board's objects are left in the bucket; nothing can
-    // reach them (every route needs a live `images`/`boards` row, and both
-    // are gone above), and reclaiming them is the deploy's bucket lifecycle
-    // policy or an operator running `deploy/backup.sh`'s restore-then-prune,
-    // not this best-effort request-path sweep.
-    if (env.STORAGE !== 's3') {
-      try {
-        rmSync(join(env.DATA_DIR, 'boards', boardId), {
-          recursive: true,
-          force: true,
-        });
-      } catch {
-        // best-effort — the DB rows are already gone regardless.
-      }
+    // Best-effort file sweep (docs/phases/3-groups.md section 4, made
+    // adapter-agnostic by docs/phases/5-hardening.md section 5's
+    // `Storage.list`): every storage key for this board's originals, ladder
+    // pages and tiles lives under this one prefix (paths.ts, ladder.ts,
+    // materialise.ts, coarse-cache.ts, tiles.ts all key off `boards/<id>/`).
+    // Runs on fs and s3 alike now; still best-effort — a failure here never
+    // fails the response, since the DB rows are already gone regardless,
+    // and this exercises the same sweep the load run in
+    // docs/measurements/phase-5.md deletes its boards through.
+    try {
+      await deletePrefix(storageFromEnv(), `boards/${boardId}/`);
+    } catch {
+      // best-effort — the DB rows are already gone regardless.
     }
 
     json(ctx.res, 200, {});
@@ -538,6 +537,17 @@ export function registerBoardRoutes(router: Router) {
     if (files.length === 0) {
       return json(ctx.res, 400, { error: 'no files' });
     }
+
+    // Phase 5 section 2 (docs/phases/5-hardening.md "Abuse limits"): the
+    // bucket is charged for the whole batch at once (one request with 50
+    // files is 50 uploads, not one) — checked before touching any file's
+    // bytes, so an over-limit caller pays for parsing the multipart body
+    // but nothing past it.
+    const limit = checkLimit('upload', userId, files.length);
+    if (!limit.allowed) {
+      return tooManyRequests(ctx.res, 'upload', limit.retryAfter);
+    }
+
     // One JSON field "properties": an array of per-file property objects,
     // same order as "files". Optional; a plain upload has none, and the
     // simplest way to set them is PATCH /images/:id afterwards (seed.ts
@@ -553,10 +563,28 @@ export function registerBoardRoutes(router: Router) {
       }
     }
 
+    // Every file is read and validated (real type by magic bytes, size,
+    // pixel budget — boards/validate.ts) BEFORE any of them is stored or
+    // enqueued: one bad file in a batch refuses the whole request instead
+    // of leaving a partial upload the client has to reconcile.
+    const fileBytes: Uint8Array[] = [];
+    for (const file of files) {
+      fileBytes.push(new Uint8Array(await file.arrayBuffer()));
+    }
+    for (const [i, bytes] of fileBytes.entries()) {
+      const result = validateUpload(bytes);
+      if (!result.ok) {
+        return json(ctx.res, result.status, {
+          error: result.reason,
+          file: files[i]?.name ?? null,
+        });
+      }
+    }
+
     const out: UploadImagesResponse = [];
     const ids: string[] = [];
     for (const [i, file] of files.entries()) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
+      const bytes = fileBytes[i] ?? new Uint8Array();
       const properties = propsArray[i] ?? {};
       const uploaded = await uploadOne(
         boardId,
@@ -827,6 +855,7 @@ export function registerBoardRoutes(router: Router) {
       cellPx(z),
       ctx.url.pathname,
     );
+    recordTileCache(result.cache);
 
     ctx.res.writeHead(200, {
       'Content-Type': 'image/png',
@@ -861,5 +890,71 @@ export function registerBoardRoutes(router: Router) {
     await enqueueMaterialiseJob(boardId, param(ctx, 'sortId'));
     const response: RebuildSortResponse = { ok: true };
     json(ctx.res, 202, response);
+  });
+
+  // Phase 5 section 4 (docs/phases/5-hardening.md "Operability"): every
+  // enqueue* function in worker/jobs.ts puts `boardId` in the job's
+  // payload (ladder, rank-rebuild, materialise all do), so filtering by
+  // `payload->>'boardId'` covers every kind with one query — under
+  // boardForManagingAllowlist, same gate as the allowlist and the delete
+  // confirmation (this is operational visibility into the board, not a
+  // viewer's concern).
+  router.get('/boards/:id/jobs', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForManagingAllowlist(userId, boardId);
+    const state = ctx.url.searchParams.get('state') ?? 'failed';
+    const { rows } = await pool.query(
+      `SELECT id, kind, state, attempts, last_error, run_after, created_at
+       FROM jobs WHERE payload->>'boardId' = $1 AND state = $2
+       ORDER BY created_at DESC LIMIT 200`,
+      [boardId, state],
+    );
+    const response: ListJobsResponse = rows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      state: r.state,
+      attempts: r.attempts,
+      error: r.last_error,
+      runAfter: r.run_after.toISOString(),
+      createdAt: r.created_at.toISOString(),
+    }));
+    json(ctx.res, 200, response);
+  });
+
+  // POST /jobs/:id/retry — worker/index.ts's backoff/dead-letter puts a
+  // job here after MAX_ATTEMPTS_BACKOFF failures; this resets it to
+  // pending, attempts 0, due immediately, same as a brand-new job. The
+  // job id alone doesn't say who may retry it, so the board id is read out
+  // of its own payload first (every kind carries one) and THAT is what
+  // boardForManagingAllowlist gates on — the same "existence must not
+  // leak" shape as sheetForDeleting (access/index.ts): a job that doesn't
+  // exist and a job on a board this user can't manage both refuse, the
+  // first with 404 (nothing to leak — no board id to check access
+  // against) and the second with 403.
+  router.post('/jobs/:id/retry', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const jobId = Number(param(ctx, 'id'));
+    if (!Number.isInteger(jobId)) {
+      return json(ctx.res, 400, { error: 'bad job id' });
+    }
+    const { rows } = await pool.query(
+      'SELECT id, payload, state FROM jobs WHERE id = $1',
+      [jobId],
+    );
+    const job = rows[0];
+    if (!job) return json(ctx.res, 404, { reason: 'job not found' });
+    const boardId = (job.payload as { boardId?: string }).boardId;
+    if (!boardId) return json(ctx.res, 404, { reason: 'job not found' });
+    await boardForManagingAllowlist(userId, boardId);
+    if (job.state !== 'failed') {
+      return json(ctx.res, 400, { error: 'job is not failed' });
+    }
+    await pool.query(
+      `UPDATE jobs SET state = 'pending', attempts = 0, run_after = now(), last_error = NULL WHERE id = $1`,
+      [jobId],
+    );
+    const response: RetryJobResponse = { ok: true };
+    json(ctx.res, 200, response);
   });
 }

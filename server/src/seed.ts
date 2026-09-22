@@ -99,7 +99,7 @@ async function inviteAndAccept(
       `invite ${email} failed: ${invite.status} ${JSON.stringify(invite.json)}`,
     );
   }
-  const invited = await signUpOrIn(email, 'password1', name);
+  const invited = await signUpOrIn(email, 'password1234', name);
   const invitation = invite.json as { invitationId: string };
   const accept = await invited.session.post(
     `/invitations/${invitation.invitationId}/accept`,
@@ -138,7 +138,15 @@ function paintSyntheticImage(index: number): Buffer {
 }
 
 async function main() {
-  const owner = await signUpOrIn('owner@example.test', 'password1', 'owner');
+  // Phase 5 section 3 (docs/phases/5-hardening.md): this creates a
+  // well-known owner account with a well-known password
+  // (owner@example.test / password1234) and posts it to the running
+  // server — never against a production database.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('seed refuses to run when NODE_ENV=production');
+  }
+
+  const owner = await signUpOrIn('owner@example.test', 'password1234', 'owner');
 
   const existing = await owner.session.get('/groups');
   if (
@@ -173,7 +181,7 @@ async function main() {
 
   const outsider = await signUpOrIn(
     'outsider@example.test',
-    'password1',
+    'password1234',
     'outsider',
   );
   const other = await outsider.session.post('/groups', { name: 'Other' });

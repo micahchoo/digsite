@@ -8,6 +8,7 @@ import type {
   JoinDeniedPayload,
   JoinPayload,
   JoinedPayload,
+  LimitedPayload,
   PeersPayload,
   PointerBroadcastPayload,
   PointerPayload,
@@ -19,6 +20,7 @@ import { type Socket, Server as SocketIOServer } from 'socket.io';
 import { AccessDenied, sheetForEditing } from '../access/index.ts';
 import { auth } from '../auth.ts';
 import { env } from '../env.ts';
+import { checkLimit } from '../limits.ts';
 import { getSnapshotElements, saveSnapshotAndProject } from './snapshot.ts';
 
 const DEBOUNCE_MS = 1500;
@@ -57,6 +59,14 @@ function peerList(sheetId: string): Peer[] {
 function peersPayloadFor(sheetId: string): PeersPayload {
   const list = peerList(sheetId);
   return { users: list.map((p) => p.id), peers: list };
+}
+
+/** metrics.ts's "socket rooms and peers" gauge (docs/phases/5-hardening.md
+ * section 4) — the only reader of `peers` outside this file. */
+export function roomCounts(): { rooms: number; peers: number } {
+  let peerTotal = 0;
+  for (const room of peers.values()) peerTotal += room.size;
+  return { rooms: peers.size, peers: peerTotal };
 }
 
 const pending = new Map<
@@ -98,6 +108,20 @@ export function mountSheetRoom(httpServer: HttpServer): SocketIOServer {
           return;
         }
 
+        // Phase 5 section 2 (docs/phases/5-hardening.md "Abuse limits"):
+        // checked here, not in `io.on('connection', ...)` — the bucket is
+        // per USER, and the user is only known once the session resolves.
+        // A `limited` refusal drops the socket (same as `join-denied`),
+        // rather than answering `429` — this is Socket.IO, no HTTP
+        // response to carry a status on.
+        const limit = checkLimit('socket-connect', session.user.id);
+        if (!limit.allowed) {
+          const limited: LimitedPayload = { reason: 'socket-connect' };
+          socket.emit('limited', limited);
+          socket.disconnect(true);
+          return;
+        }
+
         await sheetForEditing(session.user.id, payload.sheetId);
         socket.data.sheetId = payload.sheetId;
         socket.data.userId = session.user.id;
@@ -129,6 +153,19 @@ export function mountSheetRoom(httpServer: HttpServer): SocketIOServer {
       const sheetId = socket.data.sheetId as string | undefined;
       const userId = socket.data.userId as string | undefined;
       if (!sheetId || !userId) return;
+
+      // Phase 5 section 2: 30/s per user — a `limited` notice, and the
+      // payload itself is dropped (no broadcast, no snapshot), same as an
+      // over-rate pointer below is dropped silently. Unlike `pointer`'s
+      // own ad hoc per-socket counter, this goes through the shared bucket
+      // so it's the same limit `checkLimit('scene-emit', ...)` reports on
+      // in a test and the one the client actually hits.
+      const limit = checkLimit('scene-emit', userId);
+      if (!limit.allowed) {
+        const limited: LimitedPayload = { reason: 'scene-emit' };
+        socket.emit('limited', limited);
+        return;
+      }
 
       roomStats.scenes++;
       roomStats.foreignInScene += countForeign(payload.elements);

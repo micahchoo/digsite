@@ -6,15 +6,54 @@
 // anything inserts into `jobs` — worker/index.ts only claims and retries
 // them; it does not know what a job means.
 import { parseSortId, sortId as toSortId } from '@digsite/shared/board/sort';
-import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { type Image, createCanvas, loadImage } from '@napi-rs/canvas';
 import { paintLadder } from '../boards/ladder.ts';
 import { materialiseSort } from '../boards/materialise.ts';
 import { originalKey } from '../boards/paths.ts';
 import { ensureRank, markBoardRanksStale } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
+import { env } from '../env.ts';
 import { storageFromEnv } from '../storage/index.ts';
 
 const MAX_SIDE = 4096; // Figma's cap — same bound the request used to apply inline
+
+// Phase 5 section 4 (docs/phases/5-hardening.md "Operability", the worker
+// bullet): a decode failure is deterministic — the same bytes fail the
+// same way every time (this file's pre-phase-5 comment on `fail()`,
+// worker/index.ts) — so it gets no backoff, same as before. A DecodeError
+// is worker/index.ts's ONLY hook into what a job's failure means; every
+// other throw (storage unreachable, a transient error) gets the backoff.
+export class DecodeError extends Error {}
+
+/** `loadImage` with a hard timeout (env.DECODE_TIMEOUT_MS — section 2's
+ * "decode inside the worker with a timeout"), so a pathological file (a
+ * decompression-bomb-shaped one the header-level pixel budget in
+ * boards/validate.ts didn't catch, or one already past that check because
+ * it predates it) can't tie up a worker slot indefinitely. A timeout is
+ * itself a DecodeError: it's these bytes, decoded by this decoder, that
+ * are the problem — retrying with the same bytes would just time out
+ * again three more times before backoff even had a chance to matter. */
+async function decodeWithTimeout(bytes: Buffer): Promise<Image> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new DecodeError(`decode timed out after ${env.DECODE_TIMEOUT_MS}ms`),
+        ),
+      env.DECODE_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([loadImage(bytes), timeout]);
+  } catch (err) {
+    if (err instanceof DecodeError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    throw new DecodeError(message);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export async function enqueueJob(
   kind: string,
@@ -71,8 +110,15 @@ async function runLadderJob(payload: Record<string, unknown>): Promise<void> {
   const key = originalKey(boardId, image.sha256);
   const storage = storageFromEnv();
   const bytes = await storage.get(key);
-  if (!bytes) throw new Error(`original missing: ${key}`); // throws (retried, then failed) if the original is gone or unreadable
-  const decoded = await loadImage(Buffer.from(bytes)); // throws on a corrupt/non-image upload
+  // Not a DecodeError: the bytes were never even reached, so retrying
+  // later (with backoff — worker/index.ts) is exactly right for a
+  // just-cleaned-up-by-something-else or momentarily-unreachable object,
+  // and pointless for a genuinely corrupt file (that's the branch below).
+  if (!bytes) throw new Error(`original missing: ${key}`);
+  // decodeWithTimeout throws DecodeError on a corrupt/non-image upload or
+  // a decode that runs past DECODE_TIMEOUT_MS — no backoff either way
+  // (worker/index.ts), since retrying decodes the same bytes again.
+  const decoded = await decodeWithTimeout(Buffer.from(bytes));
 
   let width = decoded.width;
   let height = decoded.height;
@@ -88,7 +134,7 @@ async function runLadderJob(payload: Record<string, unknown>): Promise<void> {
     await storage.put(key, resized, 'image/png'); // same content-addressed key, now capped — matches the old inline behaviour
     width = nw;
     height = nh;
-    paintSource = await loadImage(resized);
+    paintSource = await decodeWithTimeout(resized);
   }
 
   await paintLadder(boardId, image.slot, paintSource, width, height);

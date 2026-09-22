@@ -52,15 +52,21 @@ services:
       db:
         condition: service_healthy
     environment:
+      # NODE_ENV=production already comes from Dockerfile.server's own ENV
+      # — not repeated here. It's what gates seed.ts's refusal (env.ts) and
+      # Better Auth's rateLimit default (auth.ts's comment).
       DATABASE_URL: postgres://${POSTGRES_USER:-digsite}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-digsite}
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET required}
-      # SERVER_ORIGIN keeps the bind port (8800) appended by server/src/
-      # env.ts#withPort on purpose (see that file's header comment) — this
-      # is only Better Auth's own internal baseURL, never a URL handed to a
-      # browser (invite links use WEB_ORIGIN — groups/routes.ts — and
-      # cookies are port-agnostic), so the externally-visible origin being
-      # https://api.DOMAIN with no port is unaffected.
-      SERVER_ORIGIN: https://api.${DOMAIN}
+      # Phase 5 section 3 (docs/phases/5-hardening.md): 0.0.0.0, not the
+      # server's own 127.0.0.1 default (server/src/env.ts) — inside this
+      # container the loopback isn't reachable from the `caddy` container.
+      HOST: 0.0.0.0
+      # PUBLIC_ORIGIN (not SERVER_ORIGIN) is the real, externally-visible
+      # origin behind Caddy — env.ts prefers it verbatim, port and all,
+      # over SERVER_ORIGIN+PORT's local-dev math. Better Auth's baseURL
+      # reads this, and through it, whether cookies get Secure (auth.ts's
+      # comment) — getting this right is what makes that automatic.
+      PUBLIC_ORIGIN: https://api.${DOMAIN}
       WEB_ORIGIN: https://${DOMAIN}
       DATA_DIR: /data
       STORAGE: ${STORAGE:-fs}
@@ -74,6 +80,21 @@ services:
       LADDER_BUDGET_MB: ${LADDER_BUDGET_MB:-4096}
       MATERIALISE_BUDGET_MB: ${MATERIALISE_BUDGET_MB:-2048}
       COARSE_BUDGET_MB: ${COARSE_BUDGET_MB:-1024}
+      SESSION_EXPIRES_IN: ${SESSION_EXPIRES_IN:-604800}
+      SESSION_UPDATE_AGE: ${SESSION_UPDATE_AGE:-86400}
+      AUTH_RATE_LIMIT_WINDOW: ${AUTH_RATE_LIMIT_WINDOW:-10}
+      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-100}
+      RATE_UPLOAD_PER_MIN: ${RATE_UPLOAD_PER_MIN:-120}
+      RATE_TUS_CREATE_PER_MIN: ${RATE_TUS_CREATE_PER_MIN:-20}
+      RATE_SOCKET_CONNECT_PER_MIN: ${RATE_SOCKET_CONNECT_PER_MIN:-30}
+      RATE_SCENE_EMIT_PER_SEC: ${RATE_SCENE_EMIT_PER_SEC:-30}
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-50}
+      UPLOAD_MAX_PIXELS: ${UPLOAD_MAX_PIXELS:-100000000}
+      DECODE_TIMEOUT_MS: ${DECODE_TIMEOUT_MS:-15000}
+      # Unset by default (empty), same posture as AUTH_SECRET's own
+      # required-with-no-default: GET /metrics 404s until an operator opts
+      # in by setting this in deploy/.env.
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     volumes:
       - digsite-data:/data
     healthcheck:

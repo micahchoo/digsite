@@ -24,6 +24,8 @@ import { env } from './env.ts';
 import { registerGroupRoutes } from './groups/routes.ts';
 import { registerHealthRoutes } from './health.ts';
 import { Router, json, param } from './http.ts';
+import { logError, logRequest, requestIdFor } from './logging.ts';
+import { registerMetricsRoutes } from './metrics.ts';
 import { mountSheetRoom } from './sheets/room.ts';
 import { registerSheetRoutes } from './sheets/routes.ts';
 
@@ -51,12 +53,27 @@ async function boardsForListingIntent(userId: string, orgId: string) {
 }
 accessFns.boardsForListing = boardsForListingIntent;
 
-export function createHttpServer(): Server {
+export type HttpServerOptions = {
+  /** Overrides GET /metrics's token (default env.METRICS_TOKEN) — for
+   * metrics.test.ts, which otherwise has no reliable way to set it (env.ts
+   * reads process.env once, at first import, and an earlier-loading test
+   * file has almost always already imported it — see that test's own
+   * comment). Product code never passes this. */
+  metricsToken?: string;
+};
+
+/** Builds and registers every route without starting anything — the one
+ * place the full route set is assembled, so
+ * server/src/test/routes-audit.test.ts can enumerate it (`Router#routes()`)
+ * without also standing up Socket.IO or listening on a port.
+ * `createHttpServer` below is the only caller in product code. */
+export function buildRouter(opts: HttpServerOptions = {}): Router {
   const router = new Router();
   registerHealthRoutes(router);
   registerGroupRoutes(router);
   registerBoardRoutes(router);
   registerSheetRoutes(router);
+  registerMetricsRoutes(router, opts.metricsToken ?? env.METRICS_TOKEN);
 
   router.get('/_access/:intent/:objectId', async (ctx) => {
     if (!ctx.userId) return json(ctx.res, 401, { error: 'unauthorized' });
@@ -76,6 +93,12 @@ export function createHttpServer(): Server {
     }
   });
 
+  return router;
+}
+
+export function createHttpServer(opts: HttpServerOptions = {}): Server {
+  const router = buildRouter(opts);
+
   const corsHeaders = {
     'Access-Control-Allow-Origin': env.WEB_ORIGIN,
     'Access-Control-Allow-Credentials': 'true',
@@ -84,6 +107,16 @@ export function createHttpServer(): Server {
   };
 
   const httpServer = createServer(async (req, res) => {
+    // Phase 5 section 4 (docs/phases/5-hardening.md "Operability"): one
+    // request id for the whole request, generated once here (or read off
+    // an incoming X-Request-Id) so the response header and every log line
+    // below agree. `router.dispatch` logs its own matched-route line
+    // (http.ts); the four branches below it are the paths dispatch never
+    // sees (tus, CORS preflight, /api/auth, an unmatched path) and log
+    // their own single line each, so every request gets exactly one.
+    const requestId = requestIdFor(req);
+    res.setHeader('X-Request-Id', requestId);
+    const start = performance.now();
     const url = new URL(req.url ?? '/', 'http://internal');
 
     // tus (docs/phases/1-map.md "Upload as a worker") handles its own CORS
@@ -94,6 +127,16 @@ export function createHttpServer(): Server {
     // shadow both.
     if (isTusPath(url.pathname)) {
       await tusServer.handle(req, res);
+      res.on('finish', () =>
+        logRequest({
+          requestId,
+          method: req.method ?? '',
+          route: '(tus)',
+          status: res.statusCode,
+          ms: performance.now() - start,
+          userId: null,
+        }),
+      );
       return;
     }
 
@@ -102,20 +145,64 @@ export function createHttpServer(): Server {
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
+      logRequest({
+        requestId,
+        method: 'OPTIONS',
+        route: '(cors-preflight)',
+        status: 204,
+        ms: performance.now() - start,
+        userId: null,
+      });
       return;
     }
 
     if (url.pathname.startsWith('/api/auth')) {
-      return toNodeHandler(auth)(req, res);
+      await toNodeHandler(auth)(req, res);
+      logRequest({
+        requestId,
+        method: req.method ?? '',
+        // Not the raw pathname: a sign-in/sign-up path is Better Auth's
+        // own concern and this label must stay low-cardinality (see
+        // metrics.ts's header comment on '(unmatched)') — one series for
+        // the whole surface is enough for "is auth up and how slow".
+        route: '(auth)',
+        status: res.statusCode,
+        ms: performance.now() - start,
+        userId: null,
+      });
+      return;
     }
     if (url.pathname.startsWith('/socket.io')) return; // socket.io's own listener
 
     try {
-      const handled = await router.dispatch(req, res);
-      if (!handled) json(res, 404, { error: 'not found' });
+      const handled = await router.dispatch(req, res, requestId);
+      if (!handled) {
+        json(res, 404, { error: 'not found' });
+        logRequest({
+          requestId,
+          method: req.method ?? '',
+          route: '(unmatched)',
+          status: 404,
+          ms: performance.now() - start,
+          userId: null,
+        });
+      }
     } catch (err) {
-      console.error(err);
-      if (!res.headersSent) json(res, 500, { error: String(err) });
+      // router.dispatch only throws here for something outside its own
+      // try/catch (a handler threw during a response that was never
+      // reached, e.g. matching itself) — dispatch's own handler errors are
+      // already logged and turned into a 500 inside it.
+      logError(err, requestId, url.pathname);
+      if (!res.headersSent)
+        json(res, 500, { error: 'internal error', requestId });
+      logRequest({
+        requestId,
+        method: req.method ?? '',
+        route: '(error)',
+        status: res.statusCode,
+        ms: performance.now() - start,
+        userId: null,
+      });
     }
   });
 

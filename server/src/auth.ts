@@ -67,6 +67,38 @@ export const auth = betterAuth({
   trustedOrigins: [env.WEB_ORIGIN],
   emailAndPassword: {
     enabled: true,
+    // Phase 5 section 3 (docs/phases/5-hardening.md): 10, not the
+    // package's own default of 8.
+    minPasswordLength: 10,
+  },
+  // Phase 5 section 3: lifetime/refresh from env (env.ts). Cookie
+  // Secure/SameSite/HttpOnly need no setting here — cookies/index.ts
+  // derives `secure` from `baseURL.startsWith('https://')` when
+  // `advanced.useSecureCookies` is unset (it is), `sameSite` is hardcoded
+  // 'lax' and `httpOnly` is hardcoded true regardless of any option; the
+  // only lever this app has is getting `baseURL` (env.SERVER_ORIGIN) right,
+  // which is env.ts's PUBLIC_ORIGIN change, not a setting here.
+  session: {
+    expiresIn: env.SESSION_EXPIRES_IN,
+    updateAge: env.SESSION_UPDATE_AGE,
+  },
+  // Phase 5 section 2 (docs/phases/5-hardening.md): tunes the general
+  // window/max a path falls back to when it has no tighter built-in rule of
+  // its own (rate-limiter/index.ts's `getDefaultSpecialRules` already gives
+  // sign-in/sign-up/change-password/change-email window=10s max=3, and this
+  // does not widen that). `enabled` is left unset on purpose — Better Auth
+  // defaults it to `NODE_ENV === 'production'`
+  // (context/create-context.ts:`enabled: options.rateLimit?.enabled ??
+  // isProduction`) — forcing it on here would rate-limit this repo's own
+  // test suite, which signs up and signs in dozens of users from one IP
+  // (127.0.0.1) inside one `bun test` run; every one of those calls goes
+  // through `/api/auth/sign-up/email` or `/sign-in/email` and would trip the
+  // window=10s/max=3 rule within the first few tests. The option is real in
+  // production (NODE_ENV=production, set by deploy/docker-compose.yml's
+  // Dockerfile) and does nothing test-breaking in dev/test.
+  rateLimit: {
+    window: env.AUTH_RATE_LIMIT_WINDOW,
+    max: env.AUTH_RATE_LIMIT_MAX,
   },
   plugins: [
     organization({

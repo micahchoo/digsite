@@ -7,10 +7,21 @@ import { pool } from '../db/pool.ts';
 // runs it alone. Tests use `drain()` instead of the interval loop, so a
 // test never leaks a timer.
 import { env } from '../env.ts';
-import { onJobFailedFinal, runJob } from './jobs.ts';
+import { DecodeError, onJobFailedFinal, runJob } from './jobs.ts';
 
 const POLL_INTERVAL_MS = 500;
-const MAX_ATTEMPTS = 3;
+
+// Phase 5 section 4 (docs/phases/5-hardening.md "Operability", the worker
+// bullet): two failure shapes. A DecodeError is deterministic — the same
+// bytes fail the same way every time (jobs.ts's own comment on
+// DecodeError) — so it keeps the pre-phase-5 behaviour: three attempts,
+// no delay between them, straight to `failed`. Anything else (storage
+// unreachable, a transient error a retry might actually fix) gets
+// exponential backoff — 1s, 10s, 60s between the three retries — before
+// landing in `failed` on the fourth attempt.
+const MAX_ATTEMPTS_DECODE = 3;
+const MAX_ATTEMPTS_BACKOFF = 4;
+const BACKOFF_MS = [1_000, 10_000, 60_000];
 
 type ClaimedJob = {
   id: number;
@@ -39,28 +50,42 @@ async function finish(id: number): Promise<void> {
   await pool.query('DELETE FROM jobs WHERE id = $1', [id]);
 }
 
-// No backoff: a ladder job's failures are deterministic (a bad decode fails
-// the same way every time), so a delay only slows the test suite and the
-// worker down without buying reliability. Revisit if a job kind with
-// transient failures shows up.
-async function fail(job: ClaimedJob, reason: string): Promise<void> {
+/** `last_error` is written on every attempt, not only the final one —
+ * GET /boards/:id/jobs (boards/routes.ts) reads it for `state=failed`, and
+ * a mid-retry job carrying its most recent reason costs nothing extra to
+ * keep. */
+async function fail(
+  job: ClaimedJob,
+  reason: string,
+  isDecodeError: boolean,
+): Promise<void> {
   const attempts = job.attempts + 1;
-  if (attempts >= MAX_ATTEMPTS) {
+  const maxAttempts = isDecodeError
+    ? MAX_ATTEMPTS_DECODE
+    : MAX_ATTEMPTS_BACKOFF;
+  if (attempts >= maxAttempts) {
     await pool.query(
-      'UPDATE jobs SET state = $2, attempts = $3 WHERE id = $1',
-      [job.id, 'failed', attempts],
+      'UPDATE jobs SET state = $2, attempts = $3, last_error = $4 WHERE id = $1',
+      [job.id, 'failed', attempts, reason],
     );
     await onJobFailedFinal(job.kind, job.payload, reason);
     return;
   }
+  const delayMs = isDecodeError ? 0 : (BACKOFF_MS[attempts - 1] ?? 60_000);
   await pool.query(
-    `UPDATE jobs SET state = 'pending', attempts = $2, run_after = now() WHERE id = $1`,
-    [job.id, attempts],
+    `UPDATE jobs SET state = 'pending', attempts = $2,
+       run_after = now() + ($3 || ' milliseconds')::interval,
+       last_error = $4
+     WHERE id = $1`,
+    [job.id, attempts, String(delayMs), reason],
   );
 }
 
 /** Claims and runs up to `concurrency` due jobs once. Returns how many were
- * claimed, so `drain()` knows when to stop. */
+ * claimed, so `drain()` knows when to stop — a backed-off job's run_after
+ * is in the future, so it isn't "due" and `drain()` correctly stops
+ * without waiting for it (see this function's own `claim()`, which only
+ * ever selects `run_after <= now()`). */
 export async function pollOnce(
   concurrency: number = env.WORKER_CONCURRENCY,
 ): Promise<number> {
@@ -73,7 +98,7 @@ export async function pollOnce(
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         console.error(`[worker] job ${job.id} (${job.kind}) failed:`, err);
-        await fail(job, reason);
+        await fail(job, reason, err instanceof DecodeError);
       }
     }),
   );

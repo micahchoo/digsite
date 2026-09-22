@@ -94,7 +94,7 @@ async function signUpOrIn(email: string, name: string): Promise<SignedIn> {
   const s = new Session();
   const up = await s.post('/api/auth/sign-up/email', {
     email,
-    password: 'password1',
+    password: 'password1234',
     name,
   });
   if (up.status === 200) {
@@ -103,7 +103,7 @@ async function signUpOrIn(email: string, name: string): Promise<SignedIn> {
   }
   const inn = await s.post('/api/auth/sign-in/email', {
     email,
-    password: 'password1',
+    password: 'password1234',
   });
   if (inn.status !== 200) {
     throw new Error(`sign-in failed ${email}: ${inn.status}`);

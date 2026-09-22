@@ -11,7 +11,17 @@ const sharedSrc = fileURLToPath(new URL('../shared/src', import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: 5180, strictPort: true },
+  // Phase 5 section 3 (docs/phases/5-hardening.md): bind 127.0.0.1 by
+  // default, same posture as server/src/env.ts's HOST — Vite's own default
+  // host, `localhost`, still resolves to a listen call with no explicit
+  // address on some platforms. `HOST` overrides it (unset in dev; compose
+  // doesn't run this dev server in prod, the web workspace ships a static
+  // build behind its own Caddy — deploy/Dockerfile.web).
+  server: {
+    port: 5180,
+    strictPort: true,
+    host: process.env.HOST ?? '127.0.0.1',
+  },
   resolve: {
     alias: [
       { find: '@digsite/shared', replacement: `${sharedSrc}/index.ts` },

@@ -27,7 +27,9 @@ import { Server } from '@tus/server';
 import { AccessDenied, boardForUploading } from '../access/index.ts';
 import { auth } from '../auth.ts';
 import { env } from '../env.ts';
+import { checkLimit } from '../limits.ts';
 import { uploadOne } from './upload.ts';
+import { validateUpload } from './validate.ts';
 
 const TUS_MOUNT = /^\/boards\/([^/]+)\/uploads(?:\/([^/]+))?\/?$/;
 
@@ -83,6 +85,27 @@ export const tusServer = new Server({
       throw err;
     }
 
+    // Phase 5 section 2 (docs/phases/5-hardening.md "Abuse limits"): "tus
+    // 20 creates/min" — a POST is the one method tus uses to create a new
+    // upload (a PATCH continues an existing one by id, per the mount
+    // regex — TUS_MOUNT); onIncomingRequest runs before every method, so
+    // this only charges the bucket for the create, never a chunk's PATCH.
+    if (req.method === 'POST') {
+      const limit = checkLimit('tus-create', userId);
+      if (!limit.allowed) {
+        // @tus/server's thrown-error shape is `{status_code, body}` only
+        // (server.ts's `onError`) — no headers, so `Retry-After` travels
+        // in the body instead of as its own header here.
+        throw {
+          status_code: 429,
+          body: JSON.stringify({
+            reason: 'tus-create',
+            retryAfter: limit.retryAfter,
+          }),
+        };
+      }
+    }
+
     if (uploadId) uploaders.set(uploadId, { boardId, userId });
   },
 
@@ -106,6 +129,18 @@ export const tusServer = new Server({
     const bytes = new Uint8Array(
       readFileSync(join(env.DATA_DIR, 'tus', upload.id)),
     );
+
+    // Phase 5 section 2: the same header-level check the multipart route
+    // runs before calling uploadOne (boards/routes.ts, boards/validate.ts)
+    // — real type by magic bytes, size, pixel budget. The finished tus
+    // file is removed either way; a rejected upload has nothing left to
+    // resume.
+    const result = validateUpload(bytes);
+    if (!result.ok) {
+      await fileStore.remove(upload.id).catch(() => {});
+      throw { status_code: result.status, body: `${result.reason}\n` };
+    }
+
     const contentType = upload.metadata?.filetype || 'application/octet-stream';
     await uploadOne(
       meta.boardId,
