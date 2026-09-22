@@ -1,0 +1,113 @@
+<!doctype html>
+<html data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>digsite — board, 12 selected</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<link rel="stylesheet" href="board.css">
+<style>
+  .canvas-wrap { padding: 48px 32px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="rail">
+    <div class="rail-icon active">L</div>
+    <div class="rail-icon">S<span class="dot"></span></div>
+    <div class="rail-icon">D</div>
+    <div class="rail-plus">+</div>
+  </div>
+
+  <div class="channels">
+    <div class="channels-head">
+      <div class="name">Lab</div>
+      <div class="gear">⚙</div>
+    </div>
+    <div class="channel-list">
+      <div class="board-row current"># Field</div>
+      <div class="sheet-row unread current"><span class="thread-glyph">↳</span> First pass <span class="unread-dot"></span></div>
+      <div class="sheet-row"><span class="thread-glyph">↳</span> Faces</div>
+      <div class="sheet-row new">+ Start a sheet</div>
+      <div class="board-row unread"><span class="lock">🔒</span> Finds <span class="unread-dot"></span></div>
+      <div class="board-row"># Synthetic 1M</div>
+      <div class="section-gap"></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="breadcrumb"><span class="current"># Field</span></div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-search">🔍 Search or filter…</div>
+      <div class="topbar-icon">⋯</div>
+    </div>
+    <div class="canvas-wrap" id="canvas">
+      <div class="section-label" style="top:0;left:0;">1987</div>
+      <div class="grid" id="grid1" style="top:24px;left:0;"></div>
+      <div class="section-label" style="top:220px;left:0;">1988</div>
+      <div class="grid" id="grid2" style="top:244px;left:0;"></div>
+
+      <div class="zoom-bar">
+        <button>−</button>
+        <div class="level">42%</div>
+        <button>+</button>
+        <button>⛶</button>
+      </div>
+
+      <div class="tray">
+        <div class="tray-head">
+          <span class="count">12 selected</span>
+          <span class="cap">12 / 150</span>
+          <span class="chevron">▾</span>
+          <span class="close">×</span>
+        </div>
+        <div class="tray-body" id="trayBody"></div>
+        <div class="tray-actions">
+          <button class="btn primary">Start a sheet</button>
+          <button class="btn">Add to sheet…</button>
+          <button class="btn">Copy to another board…</button>
+          <button class="btn">Download</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rightcol">
+    <h3>Who's here</h3>
+    <div class="presence-row"><span class="presence-dot" style="background:var(--p1)"></span>Micah</div>
+    <div class="presence-row"><span class="presence-dot" style="background:var(--p6)"></span>Alex</div>
+  </div>
+</div>
+
+<script>
+function fillGrid(id, seed, selectFrom) {
+  const el = document.getElementById(id);
+  const hues = [16, 28, 40, 150, 200, 220, 260, 340];
+  let selected = 0;
+  for (let i = 0; i < 6 * 16; i++) {
+    const d = document.createElement('div');
+    d.className = 'cell';
+    const h = hues[(i + seed) % hues.length];
+    const l = 55 + ((i * 7) % 20);
+    d.style.background = `hsl(${h} 35% ${l}%)`;
+    if ((i + seed) % 11 === 0) d.classList.add('claimed');
+    if (selectFrom && selected < 6 && i % 9 === (seed % 9)) { d.classList.add('selected'); selected++; }
+    el.appendChild(d);
+  }
+}
+fillGrid('grid1', 0, true);
+fillGrid('grid2', 3, true);
+
+const hues = [16, 28, 40, 150, 200, 220, 260, 340, 16, 150, 220, 340];
+const trayBody = document.getElementById('trayBody');
+for (let i = 0; i < 12; i++) {
+  const d = document.createElement('div');
+  d.className = 'tray-thumb';
+  d.style.background = `hsl(${hues[i]} 35% ${55 + (i*6)%20}%)`;
+  d.innerHTML = '<div class="x">×</div>';
+  trayBody.appendChild(d);
+}
+</script>
+</body>
+</html>

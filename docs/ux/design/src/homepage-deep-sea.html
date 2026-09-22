@@ -1,0 +1,72 @@
+<!doctype html>
+<html data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>digsite — group homepage — Deep Sea</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<link rel="stylesheet" href="geo.css">
+<style>
+  :root {
+    --geo-tile: repeating-radial-gradient(circle at 20px 20px, #13315C 0 3px, transparent 3px 24px) #0B2545;
+    --geo-heading: #8ED1FC;
+    --geo-link: #FFD166;
+    --geo-banner-bg: linear-gradient(180deg, #0B2545, #123A61);
+    --geo-banner-text: #C7DFF5;
+    --geo-bevel-light: rgba(255,255,255,.35);
+    --geo-bevel-dark: rgba(0,0,0,.5);
+    --geo-chip-bg: #123A61;
+    --geo-text-shadow: none;
+  }
+  body, .geo-surface { color: #EDEEF0; }
+</style>
+</head>
+<body>
+<div class="app no-right">
+  <div class="rail">
+    <div class="rail-icon active">L</div>
+    <div class="rail-icon">S<span class="dot"></span></div>
+    <div class="rail-icon">D</div>
+    <div class="rail-plus">+</div>
+  </div>
+  <div class="channels">
+    <div class="channels-head"><div class="name">Lab</div><div class="gear">⚙</div></div>
+    <div class="channel-list">
+      <div class="board-row"># Field</div>
+      <div class="board-row"><span class="lock">🔒</span> Finds</div>
+      <div class="board-row"># Synthetic 1M</div>
+    </div>
+  </div>
+  <div class="main">
+    <div class="topbar"><div class="breadcrumb"><span class="current">Lab</span></div></div>
+    <div class="canvas-wrap geo-surface" style="overflow-y:auto;">
+      <div class="geo-inner">
+        <div class="geo-banner">
+          <div class="title">L A B</div>
+          <div class="tagline">a group of four, digging since 2024</div>
+        </div>
+        <div class="stat-strip">
+          <div class="stat-chip"><div class="n">1,204</div><div class="label">images</div></div>
+          <div class="stat-chip"><div class="n">12</div><div class="label">sheets</div></div>
+          <div class="stat-chip"><div class="n">4</div><div class="label">members</div></div>
+        </div>
+        <div class="geo-h2">Boards</div>
+        <div class="badges">
+          <div class="badge"><div class="n">Field</div><div class="sub">118 images</div></div>
+          <div class="badge"><div class="n">🔒 Finds</div><div class="sub">0 images</div></div>
+          <div class="badge"><div class="n">Synthetic</div><div class="sub">1,000,000</div></div>
+          <div class="badge new">+ New board</div>
+        </div>
+        <div class="geo-h2">Guestbook</div>
+        <div class="guestbook">
+          <div class="guestbook-title-row"><span style="font-size:11px; color:var(--geo-banner-text);">Recent activity</span><button class="sign-btn">Sign</button></div>
+          <div class="guestbook-row"><span class="dot" style="background:var(--p1);"></span><span class="who">Alex</span> started First pass on Field<span class="when">2h ago</span></div>
+          <div class="guestbook-row"><span class="dot" style="background:var(--p6);"></span><span class="who">Micah</span> uploaded 40 images to Field<span class="when">yesterday</span></div>
+          <div class="guestbook-row"><span class="dot" style="background:var(--p4);"></span><span class="who">Sam</span> joined the group<span class="when">3 days ago</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

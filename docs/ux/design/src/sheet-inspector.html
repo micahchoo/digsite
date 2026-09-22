@@ -1,0 +1,124 @@
+<!doctype html>
+<html data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>digsite — sheet + inspector</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+<link rel="stylesheet" href="sheet.css">
+</head>
+<body>
+<div class="app">
+  <div class="rail">
+    <div class="rail-icon active">L</div>
+    <div class="rail-icon">S<span class="dot"></span></div>
+    <div class="rail-icon">D</div>
+    <div class="rail-plus">+</div>
+  </div>
+
+  <div class="channels">
+    <div class="channels-head">
+      <div class="name">Lab</div>
+      <div class="gear">⚙</div>
+    </div>
+    <div class="channel-list">
+      <div class="board-row current"># Field</div>
+      <div class="sheet-row current"><span class="thread-glyph">↳</span> First pass</div>
+      <div class="sheet-row"><span class="thread-glyph">↳</span> Faces</div>
+      <div class="sheet-row new">+ Start a sheet</div>
+      <div class="board-row unread"><span class="lock">🔒</span> Finds <span class="unread-dot"></span></div>
+      <div class="board-row"># Synthetic 1M</div>
+      <div class="section-gap"></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span class="ancestor"># Field</span><span class="sep">›</span><span class="current">First pass</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div style="font-size: var(--text-sm); color: var(--text-secondary);">◀ Faces ▶</div>
+      <div class="topbar-icon">⋯</div>
+    </div>
+    <div class="canvas-wrap" id="canvas" style="position:relative;">
+      <div class="presence-strip">
+        <div class="chip"><span class="presence-dot" style="background:var(--p1)"></span>Micah</div>
+        <div class="chip"><span class="presence-dot" style="background:var(--p6)"></span>Alex</div>
+      </div>
+
+      <svg style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none;">
+        <line x1="260" y1="180" x2="480" y2="260" stroke="var(--claim-edge)" stroke-width="2"></line>
+        <line x1="480" y1="260" x2="620" y2="420" stroke="var(--claim-foreign)" stroke-width="1.5" stroke-dasharray="5 4"></line>
+      </svg>
+      <div class="edge-label" style="top:200px; left:340px;">resembles</div>
+
+      <div class="scene-card" style="top:140px; left:200px; background:hsl(28 35% 62%);">
+        <div class="label">image-053.jpg</div>
+      </div>
+      <div class="own-region" style="top:150px; left:220px; width:40px; height:28px;">
+        <div class="tag">north wall</div>
+      </div>
+
+      <div class="scene-card" style="top:220px; left:440px; background:hsl(200 35% 60%);">
+        <div class="label">image-091.jpg</div>
+      </div>
+
+      <div class="scene-card" style="top:380px; left:580px; background:hsl(150 35% 58%);">
+        <div class="label">image-142.jpg</div>
+      </div>
+      <div class="foreign-region" style="top:392px; left:596px; width:34px; height:24px;">
+        <div class="tag">Faces · window</div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tool-group">
+          <button>▤ Select</button>
+          <button class="active">▢ Region</button>
+          <button>↗ Edge</button>
+          <button>✋ Pan</button>
+        </div>
+        <div class="zoom-cluster">
+          <button>−</button><div class="level">100%</div><button>+</button>
+        </div>
+        <div class="history-cluster">
+          <button>↶</button><button>↷</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rightcol">
+    <div class="insp-head">
+      <div class="insp-heading">Connection</div>
+      <div style="color:var(--text-faint);">×</div>
+    </div>
+    <div class="insp-identity">
+      <div class="name">image-053.jpg</div>
+      <div class="sub">→ image-091.jpg</div>
+    </div>
+    <div class="field-row">
+      <div class="caption">Arrow</div>
+      <select><option>Source → target</option></select>
+    </div>
+    <div class="prop-section">Properties</div>
+    <div class="prop-row"><div class="pname">relation</div><input value="resembles"><div style="color:var(--text-faint);">−</div></div>
+    <div class="prop-row"><div class="pname">confidence</div><input value="0.8"><div style="color:var(--text-faint);">−</div></div>
+    <div class="insp-footer">
+      <button class="btn primary" style="padding:6px 16px;">Save</button>
+      <div style="font-size:var(--text-xs); color:var(--text-faint);">Saved</div>
+    </div>
+
+    <hr>
+    <h3>Relation filter</h3>
+    <div class="relation-row"><span style="width:8px;height:8px;border-radius:999px;background:var(--text-faint);"></span>All relations</div>
+    <div class="relation-row"><span class="swatch"></span>resembles</div>
+    <div class="relation-row"><span class="swatch" style="background:var(--claim-own);"></span>shares palette</div>
+
+    <hr>
+    <h3>Dangling</h3>
+    <div class="dangling-row"><span>→ image-091 (missing)</span><span style="color:var(--danger);">Remove</span></div>
+  </div>
+</div>
+</body>
+</html>

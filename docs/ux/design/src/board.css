@@ -1,0 +1,143 @@
+.section-label {
+  position: absolute;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-faint);
+  letter-spacing: .03em;
+}
+.grid {
+  position: absolute;
+  display: grid;
+  grid-template-columns: repeat(16, 40px);
+  gap: 3px;
+}
+.cell {
+  width: 40px; height: 40px;
+  border-radius: 3px;
+  position: relative;
+}
+.cell.claimed::after {
+  content: "";
+  position: absolute; top: 2px; right: 2px;
+  width: 5px; height: 5px; border-radius: var(--radius-full);
+  background: var(--accent);
+}
+.cell.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.cell.hover {
+  outline: 1px solid var(--text-primary);
+  outline-offset: 1px;
+}
+
+.hover-card {
+  position: absolute;
+  background: var(--surface-overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  min-width: 160px;
+}
+.hover-card .name { font-weight: 600; margin-bottom: 2px; }
+.hover-card .prop { color: var(--text-secondary); font-size: var(--text-xs); }
+
+.zoom-bar {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  display: flex; align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-m);
+  font-size: var(--text-sm);
+}
+.zoom-bar button, .zoom-bar .level {
+  border: none; border-left: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+}
+.zoom-bar button:first-child { border-left: none; }
+
+.topbar-search {
+  display: flex; align-items: center; gap: var(--space-2);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-s);
+  padding: 5px var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+  width: 260px;
+}
+
+.tray {
+  position: absolute;
+  left: var(--space-3); right: 190px; bottom: var(--space-3);
+  background: var(--surface-raised);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-m);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.tray-head {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+.tray-head .count { font-weight: 600; }
+.tray-head .cap { margin-left: auto; font-family: var(--font-mono); color: var(--text-faint); font-size: var(--text-xs); }
+.tray-head .chevron, .tray-head .close { color: var(--text-faint); margin-left: var(--space-2); }
+.tray-body {
+  display: flex; gap: 6px;
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+}
+.tray-thumb {
+  width: 52px; height: 52px; border-radius: var(--radius-s);
+  flex: none; position: relative;
+  box-shadow: var(--shadow-s);
+}
+.tray-thumb .x {
+  position: absolute; top: -5px; right: -5px;
+  width: 16px; height: 16px; border-radius: var(--radius-full);
+  background: var(--text-primary); color: #fff;
+  font-size: 10px; display: flex; align-items: center; justify-content: center;
+}
+.tray-actions {
+  display: flex; gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-3);
+}
+.btn {
+  font-size: var(--text-sm);
+  padding: 6px 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.detail-thumb {
+  width: 100%; aspect-ratio: 1;
+  border-radius: var(--radius-m);
+  margin-bottom: var(--space-3);
+}
+.detail-name { font-weight: 600; font-size: var(--text-md); margin-bottom: 2px; }
+.detail-sub { color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--space-3); }
+.claim-row {
+  padding: 6px 0; border-top: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+.claim-row .sheet-name { font-weight: 600; }
+.claim-row .detail { color: var(--text-secondary); font-size: var(--text-xs); }
