@@ -41,6 +41,12 @@ import { useForeign } from './overlay/useForeign.ts';
 import { isSyncable, signature } from './sync.ts';
 import { type SyncStatus, createTools } from './tools.ts';
 
+declare global {
+  interface Window {
+    __digsiteSheetDebug?: { getAppState: () => AppState | null };
+  }
+}
+
 function rectOf(el: {
   x: number;
   y: number;
@@ -132,6 +138,18 @@ export function Sheet() {
   useEffect(() => {
     window.__digsite = tools;
   }, [tools]);
+
+  // A debug-only hook for e2e, NOT part of the fixed window.__digsite
+  // contract (docs/design.md's Tools list has no raw-appState getter) —
+  // same pattern as pages/Board.tsx's window.__digsiteBoard. Scenario 8
+  // (.claude/rules/foreign-never-in-scene.md) asserts a pointer drag across
+  // a foreign shape never reaches Excalidraw's own selection; that needs a
+  // read of appState.selectedElementIds, which no product hook exposes.
+  useEffect(() => {
+    window.__digsiteSheetDebug = {
+      getAppState: () => apiRef.current?.getAppState() ?? null,
+    };
+  }, []);
 
   const loadImages = useCallback(async (imageIds: string[]) => {
     const toLoad = imageIds.filter((id) => !loadedImages.current.has(id));

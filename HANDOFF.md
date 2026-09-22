@@ -1,6 +1,6 @@
 # HANDOFF — digsite product repo
 
-Updated 2026-09-21, during the first build.
+Updated 2026-09-21, phase 0 done, phase 1 starting. Roadmap: `docs/roadmap.md`.
 
 ## Where things stand
 
@@ -10,8 +10,9 @@ prototypes' numbers, not their code. Build order, each step by a Sonnet
 subagent against `docs/design.md`:
 
 1. root + `shared/` — DONE. 41 tests, tsc and Biome clean.
-2. `server/` and `web/` — IN FLIGHT, in parallel.
-3. `e2e/` walking-skeleton run, then `README.md` — NOT STARTED.
+2. `server/` and `web/` — DONE, each committed.
+3. `e2e/` walking-skeleton run — DONE, 10/10 (`e2e/RESULTS.md`).
+4. Phase 1 (the map, `docs/phases/1-map.md`) — IN FLIGHT.
 
 No git commit has been made; the first commit is the owner's.
 
