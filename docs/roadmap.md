@@ -7,9 +7,9 @@ Completion means a group can use it daily. Each phase has a contract in
 | --- | --- | --- | --- |
 | 0 | Walking skeleton | ten e2e scenarios green; the two prototype regressions cannot recur | DONE 2026-09-21, 10/10 (`e2e/RESULTS.md`) |
 | 1 | Make the map real | a million synthetic images on one board pan and re-sort at the prototype's numbers through the product code path | DONE 2026-09-22 (`measurements/phase-1-map.md`): materialise 24.5 s, coarse p95 1.1 ms, tiles and viewer pass; rank rebuild 2.5–3.2 s against a 2 s target, open (partition `board_ranks` by board; hardening) |
-| 2 | Make the sheet complete | two people edit one sheet for an hour and the snapshot, rows and foreign views agree | built; hour run dry-run only, real run pending the server tree (`phases/2-sheet.md`) |
-| 3 | Groups people can live in | invite by link, roles in the UI, allowlists, leave/remove, rename/delete with claims accounted for | web done; server half in flight (`phases/3-groups.md`) |
-| 4 | Storage and deployment | a fresh machine goes from zero to a running instance from the README | not started |
+| 2 | Make the sheet complete | two people edit one sheet for an hour and the snapshot, rows and foreign views agree | built; canvas seam split in flight (`phases/2-sheet.md` §7); hour run dry-run only; open question: native canvas ported from image-graph as a second adapter |
+| 3 | Groups people can live in | invite by link, roles in the UI, allowlists, leave/remove, rename/delete with claims accounted for | built both sides; lifecycle walk 9/9 on the server; real-server run of the web pending (`phases/3-groups.md`) |
+| 4 | Storage and deployment | a fresh machine goes from zero to a running instance from the README | in flight (`phases/4-deploy.md`) |
 | 5 | Hardening | rate limits, route audit against the access module, load at tens of millions across boards, observability | not started |
 | 6 | Parked ideas, on evidence | private staging space, copy-on-promote choices, region/caption coupling | parked |
 
