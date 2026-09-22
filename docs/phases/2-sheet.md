@@ -195,3 +195,91 @@ pure parts of the seam (patch application, scene-change diffing,
 type conversion both ways); every smoke script and the e2e ten still
 pass unchanged; and a screenshot of a sheet with an edge selected
 shows only our toolbar, our side panel and the canvas.
+
+## 8. The native adapter — image-graph's canvas behind the same seam
+
+Asked 2026-09-22: can image-graph's own canvas be the sheet instead of
+Excalidraw? With §7 done the question is cheap to answer for real: a
+second adapter at the same seam, judged by the same smokes and suites.
+Two adapters make the seam real (`codebase-design`).
+
+### Where
+
+`web/src/sheet/canvas/native/` implements `CanvasProps` and
+`CanvasHandle` from `canvas/types.ts` with no Excalidraw import.
+`canvas/Canvas.tsx` becomes a switch: `VITE_CANVAS=excalidraw|native`
+(default `excalidraw` until the native one passes everything), and
+`?canvas=native` on a sheet URL overrides for a session.
+
+### What is ported, file by file, from `research/image-graph/src/`
+
+- `camera.ts` — pure, returns new cameras: `zoomAt`, `scrollBy`,
+  `fitBox`, `wheelGesture`. Our `Viewport` is `{scrollX, scrollY, zoom}`
+  in Excalidraw's convention (`screen = (scene + scroll) * zoom`); write
+  the camera in that convention so `overlay/screen.ts` needs no change.
+- `gestures.ts` — `pressIntent` / `dragBecomes`, total over tools ×
+  hit kinds; `pan` is the answer to everything unclaimed.
+- `scene.ts` — the elements, a spatial index (`spatial.ts`), the hit
+  test that measures what the frame drew, selection.
+- `renderer` — one frame from the scene plus a frame state, canvas 2D:
+  images from the `files` map (object URL → `HTMLImageElement`, cached),
+  region rectangles, edge lines with arrowheads per `arrowheadsFor`,
+  labels in the app's UI font, selection outline and grips, a hollow
+  marker on a dangling end. Straight edges first; image-graph's
+  `routing.ts` (orthogonal polylines around images) is a follow-up
+  under `image-graph-hit-what-was-drawn.md`'s rule when it comes.
+- `geometry.ts` — `overlaps`, `boundsOf`.
+
+### The scene format is shared, not replaced
+
+Both adapters read and write the same persisted element JSON (the
+Excalidraw shape: `type` image/rectangle/arrow/text, `x y width height`,
+`points` and `startBinding`/`endBinding` on arrows, `groupIds`,
+`customData`, `version`, `versionNonce`, `index`, `containerId` and
+`boundElements` for a label). The native adapter renders straight from
+that model: an image by `fileId`, a rectangle with `customData.kind =
+'region'`, an arrow with `kind = 'edge'` drawn between its bound
+elements' CURRENT rects, a text with `containerId` drawn centred in its
+container. A label edit writes both the text element's `text` and the
+container's `customData.label`. An arrow's `points` are recomputed from
+the bound rects on every local change so an Excalidraw session opening
+the same sheet sees the arrow where the native one drew it. Nothing
+native-only is added to the format.
+
+### History and sync
+
+`apply(patch, {history: true})` pushes the previous elements on our own
+history (`history.ts`, bounded at 100); `applyRemote` merges by
+`mergeByVersion` from shared and never touches history; every local
+change bumps `version` and draws a new `versionNonce`; `undo`/`redo`
+restore and bump versions so sync carries them. `onChange` fires after
+every committed change with our element type, exactly as §7 promises.
+
+### Interaction, matching what the smokes drive
+
+Select: click selects the topmost hit; drag moves an image with its
+regions and labels (its group), a region clamped inside its image
+(`clamp.ts`), an own edge's ends follow; grips on a selected region;
+Delete removes with the cascade in `dangling.ts`. Region tool: drag on
+an image. Edge tool: click, click. Pan: drag; space or middle button
+pans in any tool; wheel scrolls, ctrl+wheel zooms at the pointer;
+pinch on trackpads via `wheelGesture`. Keys V R E H, Cmd/Ctrl+Z,
+Shift+Cmd/Ctrl+Z. The `DrawLayer` and `Overlay` stay above the canvas
+unchanged; the native adapter must emit `onChange` and pointer scene
+coordinates the way the Excalidraw adapter does so they keep working.
+
+### Done when
+
+- `bun test` green with pure tests for camera, gestures, hit and
+  history ported from image-graph's own tests where they apply.
+- Every smoke and `e2e/src/run.ts` scenarios 6–10 and `sheet-hour.ts`
+  pass with `VITE_CANVAS=native` AND still with `excalidraw`.
+- A sheet saved by one adapter opens in the other with every claim in
+  place (a test that round-trips a scene through both).
+- `bun run lint:seams` clean; `canvas/README.md` names both adapters.
+- `web/screenshots/sheet-native.png` beside `sheet-product.png`.
+
+Then the choice is a screenshot and a diff of two directories, and if
+native wins, Excalidraw and its CSS override are deleted and
+`foreign-never-in-scene.md` is rewritten for a renderer that draws
+foreign claims itself, read-only, as image-graph does.
