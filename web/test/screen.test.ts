@@ -7,6 +7,7 @@ import {
   foreignShapes,
   rectToScreen,
   sceneToScreen,
+  screenToScene,
 } from '../src/sheet/overlay/screen.ts';
 
 describe('sceneToScreen', () => {
@@ -24,6 +25,16 @@ describe('sceneToScreen', () => {
     const vp = { scrollX: 0, scrollY: 0, zoom: 1.5 };
     const p = sceneToScreen({ x: 40, y: 40 }, vp, { left: 0, top: 0 });
     expect(p).toEqual({ x: 60, y: 60 });
+  });
+});
+
+describe('screenToScene', () => {
+  test('is the exact inverse of sceneToScreen — DrawLayer.tsx round-trips a pointer through both', () => {
+    const vp = { scrollX: 50, scrollY: -20, zoom: 2 };
+    const offset = { left: 10, top: 5 };
+    const scene = { x: 100, y: 200 };
+    const screen = sceneToScreen(scene, vp, offset);
+    expect(screenToScene(screen, vp, offset)).toEqual(scene);
   });
 });
 

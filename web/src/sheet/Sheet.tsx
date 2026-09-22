@@ -3,14 +3,7 @@
 // loads every image file, and wires window.__digsite (tools.ts) plus the
 // foreign overlay (overlay/) — which never touches this scene, per
 // ../.claude/rules/foreign-never-in-scene.md.
-import {
-  type Fraction,
-  clampFraction,
-  dataOf,
-  fileId,
-  fromFraction,
-  toFraction,
-} from '@digsite/shared';
+import { dataOf, fileId } from '@digsite/shared';
 import {
   CaptureUpdateAction,
   Excalidraw,
@@ -27,9 +20,15 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 import { type Socket, io } from 'socket.io-client';
+import { RenameInline } from '../components/RenameInline.tsx';
 import { SERVER_ORIGIN, api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
+import { DrawLayer } from './DrawLayer.tsx';
 import { Inspector } from './Inspector.tsx';
+import { Toolbar } from './Toolbar.tsx';
+import { clampRegion } from './clamp.ts';
+import { type CascadeElement, applyCascade } from './dangling.ts';
+import type { Tool } from './gestures.ts';
 import { Overlay } from './overlay/Overlay.tsx';
 import {
   type ForeignShape,
@@ -54,6 +53,29 @@ function rectOf(el: {
   height: number;
 }): Rect {
   return { x: el.x, y: el.y, width: el.width, height: el.height };
+}
+
+/** applyCascade (dangling.ts) is pure and returns plain patched objects —
+ * this wraps that in Excalidraw's version-bump convention
+ * (`newElementWith`), and ONLY for elements the cascade actually touched,
+ * so an untouched element's `version` never bumps and nothing spuriously
+ * re-syncs. */
+function applyCascadeToScene(elements: readonly ExcalidrawElement[]): {
+  elements: ExcalidrawElement[];
+  changed: boolean;
+} {
+  const result = applyCascade(elements as unknown as CascadeElement[]);
+  if (!result.changed)
+    return { elements: elements as ExcalidrawElement[], changed: false };
+  const next = result.elements.map((patched, i) => {
+    const original = elements[i];
+    if (!original || patched === (original as unknown as CascadeElement)) {
+      return original as ExcalidrawElement;
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: a cascade patch is a generic subset of one Excalidraw element variant
+    return newElementWith(original, patched as any);
+  });
+  return { elements: next, changed: true };
 }
 
 function blobToDataURL(blob: Blob): Promise<string> {
@@ -103,6 +125,9 @@ export function Sheet() {
   });
   const [, bumpTick] = useState(0);
   const rerender = useCallback(() => bumpTick((n) => n + 1), []);
+  const [tool, setToolState] = useState<Tool>('select');
+  const toolRef = useRef<Tool>('select');
+  const [pendingEdge, setPendingEdge] = useState(false);
 
   const foreignRows = useForeign(sheetId);
 
@@ -124,6 +149,21 @@ export function Sheet() {
     apiRef.current = instance;
   }, []);
 
+  // setTool is the one place Excalidraw's own activeTool is set — select and
+  // pan map onto its built-in tools; region and edge become {type: 'custom'}
+  // (research/excalidraw: a custom tool gets no built-in pointer behaviour,
+  // so DrawLayer never fights Excalidraw's own drag-select/hand-pan). See
+  // Toolbar.tsx's header comment.
+  const applyTool = useCallback((next: Tool) => {
+    toolRef.current = next;
+    setToolState(next);
+    const liveApi = apiRef.current;
+    if (!liveApi) return;
+    if (next === 'select') liveApi.setActiveTool({ type: 'selection' });
+    else if (next === 'pan') liveApi.setActiveTool({ type: 'hand' });
+    else liveApi.setActiveTool({ type: 'custom', customType: next });
+  }, []);
+
   if (!toolsRef.current) {
     toolsRef.current = createTools({
       getApi: () => apiRef.current,
@@ -131,6 +171,11 @@ export function Sheet() {
       getSelectedForeignId: () => selectedForeignRef.current,
       setSelectedForeign: applySelectedForeign,
       getSyncStatus: () => ({ ...statsRef.current }),
+      getTool: () => toolRef.current,
+      setTool: applyTool,
+      getSheetId: () => sheetId,
+      onRenamed: (name) =>
+        setSheetInfo((prev) => (prev ? { ...prev, name } : prev)),
     });
   }
   const tools = toolsRef.current;
@@ -293,13 +338,14 @@ export function Sheet() {
       const liveApi = apiRef.current;
       if (!liveApi) return;
 
+      // 1. clamp every region against its image's CURRENT rect, only
+      // rewriting one whose clamp actually changed it (clamp.ts).
       const imgByImageId = new Map<string, ExcalidrawElement>();
       for (const el of elements) {
         if (el.isDeleted) continue;
         const data = dataOf(el);
         if (data?.kind === 'image') imgByImageId.set(data.imageId, el);
       }
-
       let anyClamped = false;
       const afterClamp = elements.map((el) => {
         if (el.isDeleted) return el;
@@ -307,34 +353,26 @@ export function Sheet() {
         if (data?.kind !== 'region') return el;
         const img = imgByImageId.get(data.imageId);
         if (!img) return el;
-        const frac: Fraction = toFraction(rectOf(el), rectOf(img));
-        const inBounds =
-          frac.fx >= -1e-6 &&
-          frac.fy >= -1e-6 &&
-          frac.fx + frac.fw <= 1 + 1e-6 &&
-          frac.fy + frac.fh <= 1 + 1e-6;
-        if (inBounds) return el;
-        const clamped = clampFraction(frac);
-        const rect = fromFraction(clamped, rectOf(img));
-        const same =
-          Math.abs(rect.x - el.x) < 0.01 &&
-          Math.abs(rect.y - el.y) < 0.01 &&
-          Math.abs(rect.width - el.width) < 0.01 &&
-          Math.abs(rect.height - el.height) < 0.01;
-        if (same) return el;
+        const corrected = clampRegion(rectOf(el), rectOf(img));
+        if (!corrected) return el;
         anyClamped = true;
-        return newElementWith(el, rect);
+        return newElementWith(el, corrected);
       });
 
-      if (anyClamped) {
+      // 2. the delete cascade + dangling rebind (dangling.ts section 1/5):
+      // an image delete takes its regions and edges with it; a region
+      // delete rebinds its edge to the image instead, tagged dangling.
+      const cascaded = applyCascadeToScene(afterClamp as ExcalidrawElement[]);
+      const finalElements = cascaded.elements;
+
+      if (anyClamped || cascaded.changed) {
         liveApi.updateScene({
-          elements: afterClamp,
+          elements: finalElements,
           captureUpdate: CaptureUpdateAction.NEVER,
         });
-        return;
       }
 
-      const syncable = elements.filter(isSyncable);
+      const syncable = finalElements.filter(isSyncable);
       const sig = signature(syncable);
       if (sig !== lastEmittedSig.current) {
         lastEmittedSig.current = sig;
@@ -350,7 +388,7 @@ export function Sheet() {
         }, 100);
       }
 
-      scheduleOverlayUpdate(elements as ExcalidrawElement[], appState);
+      scheduleOverlayUpdate(finalElements, appState);
       rerender();
     },
     [scheduleOverlayUpdate, rerender],
@@ -367,11 +405,31 @@ export function Sheet() {
   const s = statsRef.current;
   const lastSyncAt = Math.max(s.lastEmitAt ?? 0, s.lastRecvAt ?? 0);
   const lastSyncMs = lastSyncAt ? Date.now() - lastSyncAt : null;
+  const dangling = tools.getDangling();
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 41px)' }}>
+    <div
+      className="digsite-sheet"
+      style={{ display: 'flex', height: 'calc(100vh - 41px)' }}
+    >
+      {/* Excalidraw 0.18 has no UIOptions flag for hiding individual shape
+          tools (see Toolbar.tsx's header comment) — hide the stock
+          `.shapes-section` island by CSS, scoped to this page, leaving the
+          zoom controls and undo/redo footer (separate Sections) alone. */}
+      <style>
+        {'.digsite-sheet .shapes-section { display: none !important; }'}
+      </style>
       <div style={{ flex: 1, position: 'relative' }}>
         <Excalidraw excalidrawAPI={setApi} onChange={onChange} />
+        <DrawLayer
+          tool={tool}
+          tools={tools}
+          elements={sceneElements}
+          viewport={viewport}
+          offset={{ left: 0, top: 0 }}
+          onPendingEdgeChange={setPendingEdge}
+          onDrawn={rerender}
+        />
         <Overlay
           rows={foreignRows}
           elements={sceneElements}
@@ -383,6 +441,7 @@ export function Sheet() {
             rerender();
           }}
         />
+        <Toolbar tool={tool} onChange={applyTool} pendingEdge={pendingEdge} />
         <div className="status-line" data-testid="status">
           user={session?.user.email ?? '-'} sheet={sheetInfo.name} peers=
           {peers.join(',') || '-'} foreign={foreignShapesRef.current.length}{' '}
@@ -395,17 +454,49 @@ export function Sheet() {
         <div
           style={{ padding: 8, borderBottom: '1px solid #eee', fontSize: 13 }}
         >
-          <div>
-            <b>{sheetInfo.name}</b>
-          </div>
+          <RenameInline
+            name={sheetInfo.name}
+            onRename={tools.rename}
+            testId="sheet-name"
+            style={{ fontWeight: 700 }}
+          />
           <div className="muted">{sheetInfo.images.length} images</div>
         </div>
+        {dangling.length > 0 && (
+          <div
+            data-testid="dangling-list"
+            style={{ padding: 8, borderBottom: '1px solid #eee', fontSize: 13 }}
+          >
+            <div>
+              <b>dangling ({dangling.length})</b>
+            </div>
+            {dangling.map((d) => (
+              <div key={d.id} className="muted">
+                {d.relation || '(no relation)'}
+              </div>
+            ))}
+            <button
+              type="button"
+              data-testid="remove-dangling"
+              onClick={() => {
+                tools.removeDangling();
+                rerender();
+              }}
+            >
+              Remove dangling
+            </button>
+          </div>
+        )}
         <Inspector
           selected={selected}
           onSetProperty={tools.setProperty}
           onRemoveProperty={tools.removeProperty}
           onCopyForeign={(fid) => {
             tools.copyForeign(fid);
+            rerender();
+          }}
+          onDeleteSelected={() => {
+            tools.deleteSelected();
             rerender();
           }}
         />

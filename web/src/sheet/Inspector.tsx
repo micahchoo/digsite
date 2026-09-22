@@ -1,10 +1,17 @@
 // For an own element: kind, label/relation, direction, properties as
-// editable rows. For a foreign selection: the sheet name, a jump link and
-// "Copy to this sheet" (docs/design.md "web/"). Never edits a foreign
-// element — there isn't one; see ../../.claude/rules/foreign-never-in-scene.md.
-import { type PropertyValue, dataOf } from '@digsite/shared';
-import { useState } from 'react';
+// editable rows. For an image: name, size, board properties through
+// `PATCH /images/:id` — the same panel Board.tsx's Detail.tsx already
+// implements, reused here since both edit an image row, not a scene element
+// (docs/phases/2-sheet.md section 2). For several: count and a delete
+// button. For a foreign selection: the sheet name, a jump link and "Copy to
+// this sheet" (docs/design.md "web/"). Never edits a foreign element —
+// there isn't one; see ../../.claude/rules/foreign-never-in-scene.md.
+import type { GetImageResponse, PropertyValue } from '@digsite/shared';
+import { dataOf } from '@digsite/shared';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
+import { Detail } from '../board/Detail.tsx';
+import { ApiError, api } from '../lib/api.ts';
 import type { Selected } from './tools.ts';
 
 interface Props {
@@ -12,6 +19,7 @@ interface Props {
   onSetProperty: (id: string, key: string, value: PropertyValue) => void;
   onRemoveProperty: (id: string, key: string) => void;
   onCopyForeign: (id: string) => void;
+  onDeleteSelected: () => void;
 }
 
 function typeOf(v: PropertyValue): 'text' | 'number' | 'boolean' {
@@ -34,6 +42,7 @@ export function Inspector({
   onSetProperty,
   onRemoveProperty,
   onCopyForeign,
+  onDeleteSelected,
 }: Props) {
   const [newKey, setNewKey] = useState('');
 
@@ -41,6 +50,23 @@ export function Inspector({
     return (
       <div data-testid="inspector" className="muted">
         nothing selected
+      </div>
+    );
+  }
+
+  if (selected.kind === 'own' && selected.elements.length > 1) {
+    return (
+      <div data-testid="inspector">
+        <div data-testid="inspector-count">
+          {selected.elements.length} selected
+        </div>
+        <button
+          type="button"
+          data-testid="inspector-delete"
+          onClick={onDeleteSelected}
+        >
+          Delete
+        </button>
       </div>
     );
   }
@@ -94,10 +120,29 @@ export function Inspector({
     );
   }
 
+  if (data.kind === 'image') {
+    return <ImageInspector imageId={data.imageId} />;
+  }
+
   return (
     <div data-testid="inspector">
-      <div>
-        <b>kind:</b> {data.kind}
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <span>
+          <b>kind:</b> {data.kind}
+        </span>
+        {/* A click on a grouped element (a region shares groupIds with its
+            image) selects the whole group by default — Excalidraw's own
+            "click again to narrow the selection" gets a single region back,
+            or `tools.select(id)` does directly. Either way, deleting from
+            here deletes exactly what is currently selected: the group, or
+            just this element. */}
+        <button
+          type="button"
+          data-testid="inspector-delete"
+          onClick={onDeleteSelected}
+        >
+          Delete
+        </button>
       </div>
 
       {(data.kind === 'region' || data.kind === 'edge') && (
@@ -211,6 +256,86 @@ export function Inspector({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Board-owned data, not scene data: fetched by imageId on selection and
+ * saved through `PATCH /images/:id`, same as Board.tsx's Detail panel
+ * (docs/phases/2-sheet.md section 2). */
+function ImageInspector({ imageId }: { imageId: string }) {
+  const [image, setImage] = useState<GetImageResponse | null>(null);
+  const [saveState, setSaveState] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setImage(null);
+    setError(null);
+    void api
+      .getImage(imageId)
+      .then((img) => {
+        if (!cancelled) setImage(img);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setError(err instanceof ApiError ? err.reason : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [imageId]);
+
+  async function save(properties: GetImageResponse['properties']) {
+    setImage((prev) => (prev ? { ...prev, properties } : prev));
+    setSaveState('saving');
+    try {
+      const res = await api.updateImageProperties(imageId, { properties });
+      setImage((prev) =>
+        prev ? { ...prev, properties: res.properties } : prev,
+      );
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  if (error) {
+    return (
+      <div data-testid="inspector" className="muted">
+        {error}
+      </div>
+    );
+  }
+  if (!image) {
+    return (
+      <div data-testid="inspector" className="muted">
+        loading…
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="inspector">
+      <div>
+        <b>kind:</b> image
+      </div>
+      <Detail
+        image={image}
+        originalUrl={api.originalUrl(imageId)}
+        saveState={saveState}
+        onSetProperty={(key, value) =>
+          void save({ ...image.properties, [key]: value })
+        }
+        onRemoveProperty={(key) => {
+          const next = { ...image.properties };
+          delete next[key];
+          void save(next);
+        }}
+        onClose={() => {}}
+      />
     </div>
   );
 }

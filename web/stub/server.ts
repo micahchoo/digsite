@@ -247,6 +247,13 @@ const peersBySheet: Record<string, Set<string>> = {
   s1: new Set(),
   s2: new Set(),
 };
+// GET /boards/:id/sheets "savedAt" (docs/phases/2-sheet.md section 6) — the
+// stub's stand-in for sheet_snapshots.saved_at, bumped on every 'scene'
+// broadcast, same as the real server's debounced snapshot would be.
+const sheetSavedAt: Record<string, string> = {
+  s1: new Date().toISOString(),
+  s2: new Date().toISOString(),
+};
 const stats = { scenes: 0, broadcasts: 0, snapshots: 0, lastProjectionMs: 0 };
 
 /** Rows from OTHER sheets whose images `sheetId` holds — GET /sheets/:id/foreign. */
@@ -512,6 +519,10 @@ const httpServer = createServer(async (req, res) => {
   }
 
   // -- sheets ----------------------------------------------------------------------
+  // Phase 2 (docs/phases/2-sheet.md section 6): imageCount + savedAt are
+  // additive on top of phase 1's {id, name, createdAt} — the real server's
+  // GET /boards/:id/sheets should grow the same two fields (see
+  // web/README.md's note on the shape).
   const sheetsList = url.pathname.match(/^\/boards\/([^/]+)\/sheets$/);
   if (sheetsList && req.method === 'GET') {
     return json(
@@ -520,6 +531,8 @@ const httpServer = createServer(async (req, res) => {
         id,
         name: SHEET_NAME[id],
         createdAt: new Date().toISOString(),
+        imageCount: (SHEET_IMAGES[id] ?? []).length,
+        savedAt: sheetSavedAt[id] ?? null,
       })),
     );
   }
@@ -537,10 +550,22 @@ const httpServer = createServer(async (req, res) => {
     );
     elementsBySheet[id] = grid(body.imageIds);
     peersBySheet[id] = new Set();
+    sheetSavedAt[id] = new Date().toISOString();
     return json(201, { id });
   }
 
   const sheetOne = url.pathname.match(/^\/sheets\/([^/]+)$/);
+  if (sheetOne && req.method === 'PATCH') {
+    const id = sheetOne[1] ?? '';
+    if (!SHEET_NAME[id]) return json(404, { reason: 'not found' });
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+      name: string;
+    };
+    SHEET_NAME[id] = body.name;
+    return json(200, { name: SHEET_NAME[id] });
+  }
   if (sheetOne && req.method === 'GET') {
     const id = sheetOne[1] ?? '';
     if (!SHEET_NAME[id]) return json(404, { reason: 'not found' });
@@ -596,6 +621,7 @@ io.on('connection', (socket: Socket) => {
     const sheetId = socket.data.sheetId as string | undefined;
     if (!sheetId) return;
     elementsBySheet[sheetId] = elements;
+    sheetSavedAt[sheetId] = new Date().toISOString();
     stats.scenes++;
     stats.broadcasts++;
     stats.snapshots++;

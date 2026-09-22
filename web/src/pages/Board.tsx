@@ -44,7 +44,7 @@ import {
   worldExtent,
 } from '@digsite/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { Detail } from '../board/Detail.tsx';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
 import {
@@ -54,6 +54,7 @@ import {
   toggleRank,
 } from '../board/selection.ts';
 import { type UploadRow, runUpload } from '../board/upload.ts';
+import { RenameInline } from '../components/RenameInline.tsx';
 import { api } from '../lib/api.ts';
 
 declare global {
@@ -195,6 +196,17 @@ export function Board() {
   const [uploadRows, setUploadRows] = useState<UploadRow[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState('');
+
+  // -- sheets (docs/phases/2-sheet.md section 6) ------------------------------
+  const [sheets, setSheets] = useState<
+    Awaited<ReturnType<typeof api.listSheets>>
+  >([]);
+  const refreshSheets = useCallback(async () => {
+    setSheets(await api.listSheets(boardId));
+  }, [boardId]);
+  useEffect(() => {
+    void refreshSheets();
+  }, [refreshSheets]);
 
   // -- load the board, then the viewer's stored or default sort ------------
   useEffect(() => {
@@ -652,6 +664,11 @@ export function Board() {
     navigate(`/s/${newId}`);
   }
 
+  async function renameSheet(id: string, name: string) {
+    await api.updateSheet(id, { name });
+    await refreshSheets();
+  }
+
   if (!board) return <div className="page">loading…</div>;
 
   const s = statusRef.current;
@@ -845,6 +862,36 @@ export function Board() {
             new sheet
           </button>
         </form>
+
+        <h4>sheets ({sheets.length})</h4>
+        <ul data-testid="sheet-list" style={{ listStyle: 'none', padding: 0 }}>
+          {sheets.map((sheet) => (
+            <li
+              key={sheet.id}
+              data-testid="sheet-list-item"
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 6,
+                padding: '3px 0',
+              }}
+            >
+              <RenameInline
+                name={sheet.name}
+                onRename={(name) => renameSheet(sheet.id, name)}
+                testId={`sheet-rename-${sheet.id}`}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>
+                {sheet.imageCount} images ·{' '}
+                {sheet.savedAt
+                  ? new Date(sheet.savedAt).toLocaleTimeString()
+                  : 'unsaved'}
+              </span>
+              <Link to={`/s/${sheet.id}`}>open</Link>
+            </li>
+          ))}
+        </ul>
 
         {detailImage && (
           <Detail

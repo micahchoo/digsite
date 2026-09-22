@@ -23,6 +23,14 @@ import {
 } from '@excalidraw/excalidraw';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
+// Aliased: this file's convention is `const api = getApi()` everywhere
+// below for the Excalidraw imperative API; `httpApi` is the one HTTP call
+// (rename) among all these scene-only tools.
+import { api as httpApi } from '../lib/api.ts';
+import { isDangling } from './dangling.ts';
+import { type Tool, rectFromDrag } from './gestures.ts';
+import { hitAt } from './hit.ts';
+import { regionLabelWidth, truncateLabel } from './labels.ts';
 import { type ForeignShape, foreignCopyRect } from './overlay/screen.ts';
 
 export interface SyncStatus {
@@ -41,6 +49,13 @@ export type Selected =
   | { kind: 'foreign'; shape: ForeignShape }
   | { kind: 'own'; elements: ExcalidrawElement[] };
 
+/** An edge tools.ts#applyCascade rebound to an image, per the inspector's
+ * "dangling" list (docs/phases/2-sheet.md section 5). */
+export interface DanglingEdge {
+  id: string;
+  relation: string;
+}
+
 export interface Tools {
   drawRegion: (
     imageId: string,
@@ -57,12 +72,37 @@ export interface Tools {
   setRegionRect: (id: string, fraction: Partial<Fraction>) => void;
   copyForeign: (foreignShapeId: string) => string | null;
   select: (id: string) => void;
+  deleteSelected: () => void;
   getElements: () => ExcalidrawElement[];
   getForeign: () => ForeignShape[];
   getSelected: () => Selected | null;
   setProperty: (id: string, key: string, value: PropertyValue) => void;
   removeProperty: (id: string, key: string) => void;
   syncStatus: () => SyncStatus;
+  // -- Toolbar + drawing (docs/phases/2-sheet.md section 1) -----------------
+  setTool: (tool: Tool) => void;
+  getTool: () => Tool;
+  /** Drives a region draw in SCENE coords — the real Toolbar/DrawLayer
+   * convert a screen drag through the viewport first; this is also
+   * `window.__digsite.pointerDraw` for tests. */
+  pointerDraw: (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ) => string | null;
+  /** Two scene points, source then target — `window.__digsite.pointerConnect`. */
+  pointerConnect: (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ) => string | null;
+  // -- dangling (section 5) --------------------------------------------------
+  getDangling: () => DanglingEdge[];
+  removeDangling: () => number;
+  // -- rename (section 6) ---------------------------------------------------
+  rename: (name: string) => Promise<void>;
 }
 
 export interface ToolsDeps {
@@ -71,6 +111,10 @@ export interface ToolsDeps {
   getSelectedForeignId: () => string | null;
   setSelectedForeign: (id: string | null) => void;
   getSyncStatus: () => SyncStatus;
+  getTool: () => Tool;
+  setTool: (tool: Tool) => void;
+  getSheetId: () => string;
+  onRenamed: (name: string) => void;
 }
 
 function rectOf(el: ExcalidrawElement): Rect {
@@ -104,6 +148,10 @@ export function createTools(deps: ToolsDeps): Tools {
     getSelectedForeignId,
     setSelectedForeign,
     getSyncStatus,
+    getTool: getToolExternal,
+    setTool: setToolExternal,
+    getSheetId,
+    onRenamed,
   } = deps;
 
   function replace(elements: ExcalidrawElement[]) {
@@ -123,6 +171,7 @@ export function createTools(deps: ToolsDeps): Tools {
     const imgEl = liveImageElements(api).get(imageId);
     if (!imgEl) return null;
     const rect = fromFraction(clampFraction(fraction), rectOf(imgEl));
+    const labelWidth = regionLabelWidth(rect);
     const built = convertToExcalidrawElements([
       {
         type: 'rectangle',
@@ -132,19 +181,41 @@ export function createTools(deps: ToolsDeps): Tools {
         height: rect.height,
         groupIds: [imageGroupId(imageId)],
         customData: { kind: 'region', imageId, label, properties: {} },
-        label: label ? { text: label } : undefined,
+        label: label
+          ? { text: truncateLabel(label), width: labelWidth, autoResize: false }
+          : undefined,
         // biome-ignore lint/suspicious/noExplicitAny: Excalidraw's skeleton union is not worth narrowing by hand
       } as any,
     ]) as ExcalidrawElement[];
-    replace([...allElements(api), ...built]);
-    return built[0]?.id ?? null;
+    // convertToExcalidrawElements' bound-text fitting can still grow a
+    // container to fit wrapped text (research/excalidraw's textElement.ts:
+    // growY is unconditional on container height, autoResize only fixes
+    // width) — force the container back to the rect the FRACTION demands,
+    // every time, so drawing never depends on what the label measured to.
+    // This is the mechanism tools.test.ts's 200-char label case exercises
+    // at the fraction level; a real label is exercised in smoke-draw.ts.
+    const container = built.find((e) => e.type === 'rectangle');
+    const fixedBuilt =
+      container &&
+      (container.width !== rect.width || container.height !== rect.height)
+        ? built.map((e) =>
+            e === container
+              ? newElementWith(e, { width: rect.width, height: rect.height })
+              : e,
+          )
+        : built;
+    replace([...allElements(api), ...fixedBuilt]);
+    return fixedBuilt[0]?.id ?? null;
   }
 
+  // Direction defaults to 'forward' (docs/design.md "web/" § "The sheet
+  // page": "direction defaulting to forward") — the release of a plain
+  // click-click edge draw, before the owner ever opens the inspector.
   function connect(
     fromId: string,
     toId: string,
     relation = '',
-    direction: Direction = 'none',
+    direction: Direction = 'forward',
   ): string | null {
     const api = getApi();
     if (!api) return null;
@@ -357,6 +428,11 @@ export function createTools(deps: ToolsDeps): Tools {
       (data.kind === 'edge' && key === 'relation')
     ) {
       const boundTextId = el.boundElements?.find((b) => b.type === 'text')?.id;
+      // The full string is the data (customData.label/relation); the bound
+      // text on the canvas is a truncated, ellipsised VIEW of it — same
+      // split as drawRegion, so editing a label never regrows the region.
+      const displayText =
+        data.kind === 'region' ? truncateLabel(String(value)) : String(value);
       const updated = current.map((e) => {
         if (e.id === id)
           return newElementWith(e, { customData: { ...data, [key]: value } });
@@ -364,7 +440,7 @@ export function createTools(deps: ToolsDeps): Tools {
           // The bound text element (type: 'text') is the only variant with a
           // `text` field; `e` here is typed as the whole element union.
           // biome-ignore lint/suspicious/noExplicitAny: narrowing the whole ExcalidrawElement union by hand isn't worth it for one field
-          return newElementWith(e, { text: String(value) } as any);
+          return newElementWith(e, { text: displayText } as any);
         }
         return e;
       });
@@ -403,6 +479,108 @@ export function createTools(deps: ToolsDeps): Tools {
     return getSyncStatus();
   }
 
+  function deleteSelected(): void {
+    const api = getApi();
+    if (!api) return;
+    const ids = api.getAppState().selectedElementIds ?? {};
+    const idSet = new Set(Object.keys(ids).filter((id) => ids[id]));
+    if (!idSet.size) return;
+    const current = allElements(api);
+    const updated = current.map((e) =>
+      !e.isDeleted && idSet.has(e.id)
+        ? newElementWith(e, { isDeleted: true })
+        : e,
+    );
+    replace(updated);
+    setSelectedForeign(null);
+  }
+
+  // -- toolbar --------------------------------------------------------------
+
+  function setTool(tool: Tool): void {
+    setToolExternal(tool);
+  }
+
+  function getTool(): Tool {
+    return getToolExternal();
+  }
+
+  // -- drawing from scene coordinates — the real Toolbar/DrawLayer convert
+  // a screen drag through the viewport before calling these; the test hooks
+  // call them directly. --------------------------------------------------
+
+  function pointerDraw(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): string | null {
+    const api = getApi();
+    if (!api) return null;
+    const hit = hitAt({ x: x0, y: y0 }, allElements(api));
+    if (!hit || hit.kind !== 'image') return null;
+    const imgEl = liveImageElements(api).get(hit.imageId);
+    if (!imgEl) return null;
+    const dragRect = rectFromDrag({ x: x0, y: y0 }, { x: x1, y: y1 });
+    const fraction = clampFraction(toFraction(dragRect, rectOf(imgEl)));
+    return drawRegion(hit.imageId, fraction);
+  }
+
+  function pointerConnect(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): string | null {
+    const api = getApi();
+    if (!api) return null;
+    const elements = allElements(api);
+    const fromHit = hitAt({ x: x0, y: y0 }, elements);
+    const toHit = hitAt({ x: x1, y: y1 }, elements);
+    if (!fromHit || !toHit || fromHit.id === toHit.id) return null;
+    return connect(fromHit.id, toHit.id);
+  }
+
+  // -- dangling ---------------------------------------------------------------
+
+  function getDangling(): DanglingEdge[] {
+    const api = getApi();
+    if (!api) return [];
+    return allElements(api)
+      .filter((e) => !e.isDeleted)
+      .filter(isDangling)
+      .map((e) => {
+        const data = dataOf(e);
+        return {
+          id: e.id,
+          relation: data?.kind === 'edge' ? data.relation : '',
+        };
+      });
+  }
+
+  function removeDangling(): number {
+    const api = getApi();
+    if (!api) return 0;
+    const current = allElements(api);
+    let count = 0;
+    const updated = current.map((e) => {
+      if (e.isDeleted || !isDangling(e)) return e;
+      count++;
+      return newElementWith(e, { isDeleted: true });
+    });
+    if (count) replace(updated);
+    return count;
+  }
+
+  // -- rename -----------------------------------------------------------------
+
+  async function rename(name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await httpApi.updateSheet(getSheetId(), { name: trimmed });
+    onRenamed(trimmed);
+  }
+
   return {
     drawRegion,
     connect,
@@ -410,12 +588,20 @@ export function createTools(deps: ToolsDeps): Tools {
     setRegionRect,
     copyForeign,
     select,
+    deleteSelected,
     getElements,
     getForeign,
     getSelected,
     setProperty,
     removeProperty,
     syncStatus,
+    setTool,
+    getTool,
+    pointerDraw,
+    pointerConnect,
+    getDangling,
+    removeDangling,
+    rename,
   };
 }
 

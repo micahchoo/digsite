@@ -60,6 +60,21 @@ export function sceneToScreen(
   };
 }
 
+/** The inverse of `sceneToScreen` — what DrawLayer.tsx converts a real
+ * pointer event's client position into before calling
+ * `tools.ts#pointerDraw`/`pointerConnect`, both of which take scene
+ * coordinates only. */
+export function screenToScene(
+  p: Point,
+  vp: Viewport,
+  offset: ContainerOffset,
+): Point {
+  return {
+    x: (p.x - offset.left) / vp.zoom - vp.scrollX,
+    y: (p.y - offset.top) / vp.zoom - vp.scrollY,
+  };
+}
+
 export function rectToScreen(
   r: Rect,
   vp: Viewport,

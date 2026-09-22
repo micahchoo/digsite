@@ -28,7 +28,7 @@ import type {
   ListBoardsResponse,
   ListGroupsResponse,
   ListMembersResponse,
-  ListSheetsResponse,
+  SheetSummary,
   UpdateBoardRequest,
   UpdateBoardResponse,
   UpdateImagePropertiesRequest,
@@ -44,6 +44,19 @@ export const SERVER_ORIGIN: string =
  * and the upload rows both want to say "a status", not spell out the union
  * every time. */
 export type ImageStatus = BoardImage['status'];
+
+// Phase 2 (docs/phases/2-sheet.md section 6): the sheet list's stats and
+// rename aren't in @digsite/shared/api yet (same TODO as sections/upload
+// status above) — the real server's ListSheetsResponse should grow
+// `imageCount`/`savedAt` to match `SheetSummaryWithStats` below, and add an
+// `UpdateSheetRequest`/`Response` pair for `PATCH /sheets/:id`.
+export type SheetSummaryWithStats = SheetSummary & {
+  imageCount: number;
+  savedAt: string | null;
+};
+export type ListSheetsWithStatsResponse = SheetSummaryWithStats[];
+export type UpdateSheetRequest = { name: string };
+export type UpdateSheetResponse = { name: string };
 
 export class ApiError extends Error {
   constructor(
@@ -161,11 +174,13 @@ export const api = {
 
   // -- sheets ------------------------------------------------------------
   listSheets: (boardId: string) =>
-    request<ListSheetsResponse>(`/boards/${boardId}/sheets`),
+    request<ListSheetsWithStatsResponse>(`/boards/${boardId}/sheets`),
   createSheet: (boardId: string, body: CreateSheetRequest) =>
     request<CreateSheetResponse>(`/boards/${boardId}/sheets`, post(body)),
   getSheet: (sheetId: string) =>
     request<GetSheetResponse>(`/sheets/${sheetId}`),
+  updateSheet: (sheetId: string, body: UpdateSheetRequest) =>
+    request<UpdateSheetResponse>(`/sheets/${sheetId}`, patch(body)),
   getSheetElements: (sheetId: string) =>
     request<GetSheetElementsResponse>(`/sheets/${sheetId}/elements`),
   getSheetForeign: (sheetId: string) =>
