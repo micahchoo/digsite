@@ -1,5 +1,3 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import {
   LADDER,
   type LadderSize,
@@ -25,6 +23,8 @@ import {
   loadImage,
 } from '@napi-rs/canvas';
 import { env } from '../env.ts';
+import { storageFromEnv } from '../storage/index.ts';
+import { withLock } from '../storage/lock.ts';
 
 const PAGE_BYTES = PAGE * PAGE * 4; // decoded RGBA
 const MAX_PAGES = Math.max(
@@ -55,12 +55,12 @@ function cacheSet(key: string, v: Canvas): void {
   }
 }
 
-export function ladderPagePath(
+export function ladderPageKey(
   boardId: string,
   s: LadderSize,
   page: number,
 ): string {
-  return `${env.DATA_DIR}/boards/${boardId}/ladder/${s}/page-${page}.png`;
+  return `boards/${boardId}/ladder/${s}/page-${page}.png`;
 }
 
 async function loadPageCanvas(
@@ -68,13 +68,14 @@ async function loadPageCanvas(
   s: LadderSize,
   page: number,
 ): Promise<Canvas> {
-  const path = ladderPagePath(boardId, s, page);
+  const key = ladderPageKey(boardId, s, page);
   const canvas = createCanvas(PAGE, PAGE);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#222';
   ctx.fillRect(0, 0, PAGE, PAGE);
-  if (existsSync(path)) {
-    const img = await loadImage(readFileSync(path));
+  const bytes = await storageFromEnv().get(key);
+  if (bytes) {
+    const img = await loadImage(Buffer.from(bytes));
     ctx.drawImage(img, 0, 0);
   }
   return canvas;
@@ -94,24 +95,12 @@ export async function getPage(
   return canvas;
 }
 
-// Per-page async lock: two uploads landing on the same page must not race a
-// read-modify-write of the PNG on disk.
-const pageLocks = new Map<string, Promise<unknown>>();
-
-function withPageLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const prior = pageLocks.get(key) ?? Promise.resolve();
-  const run = prior.then(fn, fn);
-  pageLocks.set(
-    key,
-    run.catch(() => {}),
-  );
-  return run;
-}
-
 /**
  * Paints one uploaded image into every ladder size's page, square,
  * contained and centred on #222. Read page, draw, write page, under the
- * page's lock so a concurrent upload to the same page cannot lose a write.
+ * page's lock (storage/lock.ts) so a concurrent upload to the same page
+ * cannot lose a write — the only thing preventing that loss once the write
+ * is a `put` to S3 rather than an in-place file edit (no append there).
  */
 export async function paintLadder(
   boardId: string,
@@ -123,7 +112,7 @@ export async function paintLadder(
   for (const s of LADDER) {
     const { page, x, y } = ladderAddress(slot, s);
     const key = cacheKey(boardId, s, page);
-    await withPageLock(key, async () => {
+    await withLock(key, async () => {
       const canvas = await loadPageCanvas(boardId, s, page);
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#222';
@@ -135,9 +124,12 @@ export async function paintLadder(
       const dy = y + (s - dh) / 2;
       ctx.drawImage(image, dx, dy, dw, dh);
 
-      const path = ladderPagePath(boardId, s, page);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, canvas.encodeSync('png'));
+      const storageKey = ladderPageKey(boardId, s, page);
+      await storageFromEnv().put(
+        storageKey,
+        canvas.encodeSync('png'),
+        'image/png',
+      );
       cacheSet(key, canvas);
     });
   }

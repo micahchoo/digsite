@@ -1,0 +1,17 @@
+# Automatic HTTPS from DOMAIN (Caddy provisions and renews Let's Encrypt
+# certificates for both names below on its own — nothing else to configure
+# as long as DOMAIN and api.DOMAIN both resolve here and 80/443 are
+# reachable from the internet). Two names, not one origin with a path
+# split, because the app already treats the web app and the API as two
+# origins everywhere else (CORS + credentials in server/src/app.ts,
+# SERVER_ORIGIN/WEB_ORIGIN as separate settings) — splitting by subdomain
+# here needs no new routing logic to keep API paths from colliding with
+# the SPA's own client-side routes.
+
+{$DOMAIN} {
+	reverse_proxy web:80
+}
+
+api.{$DOMAIN} {
+	reverse_proxy server:8800
+}

@@ -9,18 +9,25 @@
 // 55%, darker diagonal band, slot number at S=128) is
 // ../../../prototype/board/CONTRACT.md's ladder recipe, ported unchanged.
 // The page file format (path, 512px page, cell offsets) is
-// server/src/boards/ladder.ts#ladderPagePath / paintLadder's own layout —
+// server/src/boards/ladder.ts#ladderPageKey / paintLadder's own layout —
 // imported directly so synth's pages are the same files the upload path
-// would have written for these slots.
+// would have written for these slots. Writes straight to disk under
+// DATA_DIR (never through storage/index.ts's Storage) on purpose: this is
+// a benchmark-only bulk generator for the synthetic million-image board
+// (docs/phases/1-map.md section 4), not a request path, and the whole
+// point is painting pages as fast as raw fs calls allow — a key is,
+// byte-for-byte, its path relative to DATA_DIR (storage/fs.ts), so joining
+// them here reproduces exactly what FsStorage would have written.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   type LadderSize,
   PAGE,
   ladderAddress,
 } from '@digsite/shared/board/ladder';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import { ladderPagePath } from '../src/boards/ladder.ts';
+import { ladderPageKey } from '../src/boards/ladder.ts';
+import { env } from '../src/env.ts';
 
 type PageJob = { size: LadderSize; page: number; slots: number[] };
 type InMsg = { boardId: string; jobs: PageJob[] };
@@ -53,7 +60,7 @@ function paintCell(
 }
 
 async function paintJob(boardId: string, job: PageJob): Promise<void> {
-  const path = ladderPagePath(boardId, job.size, job.page);
+  const path = join(env.DATA_DIR, ladderPageKey(boardId, job.size, job.page));
   const canvas = createCanvas(PAGE, PAGE);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#222';

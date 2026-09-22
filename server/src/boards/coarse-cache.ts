@@ -16,6 +16,13 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { env } from '../env.ts';
 
+// coarseTilesDir below still resolves to a plain filesystem directory (it
+// is DATA_DIR-relative), which only means something under STORAGE=fs.
+// loadResidentSortFromDisk's directory listing has no S3 equivalent — the
+// Storage interface (storage/index.ts) is deliberately just put/get/
+// exists/delete, no "list by prefix" — so it is a no-op there rather than
+// a fifth interface method for one caller. See its own comment below.
+
 type SortEntry = { tiles: Map<string, Buffer>; bytes: number };
 
 // key: "boardId:sortId", LRU by touch order (Map's own iteration order).
@@ -95,12 +102,21 @@ export function setResidentSort(
  * process materialised them). `materialiseSort` calls `setResidentSort`
  * directly with the buffers it just encoded so the tile route's first
  * request after a fresh materialise never re-reads disk at all; this is
- * only for the "files exist, nobody resident" case. */
+ * only for the "files exist, nobody resident" case.
+ *
+ * Under STORAGE=s3 this is a deliberate no-op (always false): a bulk
+ * "everything under this prefix" read needs S3's ListObjectsV2, which the
+ * Storage interface doesn't expose (see this file's header comment) — the
+ * caller (tiles.ts#materialisedTile) already falls back to a single-key
+ * `storage.get` per tile when this returns false, so correctness doesn't
+ * depend on it; only "does a restarted process re-warm a whole sort at
+ * once, or one S3 GET per tile until the next materialise" does. */
 export async function loadResidentSortFromDisk(
   boardId: string,
   sortId: string,
 ): Promise<boolean> {
   if (hasResidentSort(boardId, sortId)) return true;
+  if (env.STORAGE === 's3') return false;
   const dir = coarseTilesDir(boardId, sortId);
   const tiles = new Map<string, Buffer>();
   for (const z of [-3, -4, -5]) {

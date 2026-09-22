@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 // docs/phases/1-map.md "Tests": an upload leaves pending; running the
 // worker once makes it ready with pages painted; a failing decode ends
 // failed after three attempts.
-import { readFileSync } from 'node:fs';
 import { ladderAddress } from '@digsite/shared/board/ladder';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import { ladderPagePath } from '../boards/ladder.ts';
+import { ladderPageKey } from '../boards/ladder.ts';
 import { uploadOne } from '../boards/upload.ts';
 import { pool } from '../db/pool.ts';
+import { storageFromEnv } from '../storage/index.ts';
 import { drain } from '../worker/index.ts';
 
 async function makeBoard(name: string): Promise<string> {
@@ -60,8 +60,10 @@ describe('worker', () => {
     expect(after.rows[0].height).toBeGreaterThan(0);
 
     const { page, x, y } = ladderAddress(uploaded.slot, 32);
-    const path = ladderPagePath(boardId, 32, page);
-    const img = await loadImage(readFileSync(path));
+    const key = ladderPageKey(boardId, 32, page);
+    const bytes = await storageFromEnv().get(key);
+    if (!bytes) throw new Error(`ladder page missing: ${key}`);
+    const img = await loadImage(Buffer.from(bytes));
     const full = createCanvas(img.width, img.height);
     full.getContext('2d').drawImage(img, 0, 0);
     const px = full.getContext('2d').getImageData(x + 16, y + 16, 1, 1).data;

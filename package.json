@@ -4,12 +4,14 @@
   "workspaces": ["shared", "server", "web", "e2e"],
   "scripts": {
     "db:up": "docker compose up -d db",
+    "infra:up": "docker compose --profile s3 up -d --wait db minio minio-init",
     "db:migrate": "bun run --filter @digsite/server migrate",
     "seed": "bun run --filter @digsite/server seed",
     "dev": "bun run scripts/dev.ts",
     "test": "bun run --filter '*' test && bun test scripts",
     "check": "bun run --filter '*' check && biome check . && bun run scripts/lint-seams.ts",
-    "lint:seams": "bun run scripts/lint-seams.ts"
+    "lint:seams": "bun run scripts/lint-seams.ts",
+    "smoke:prod": "bun run --filter @digsite/e2e smoke:prod"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

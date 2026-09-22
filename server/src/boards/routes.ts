@@ -1,13 +1,7 @@
 // Boards (CONTEXT.md "Board", "Image", "Tile"). See docs/design.md
 // "Routes / Boards" for the fixed route shapes.
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname, join } from 'node:path';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   AllowlistRequest,
   AllowlistResponse,
@@ -70,9 +64,10 @@ import {
   requireAuth,
   toWebRequest,
 } from '../http.ts';
+import { presignedGetUrl, storageFromEnv } from '../storage/index.ts';
 import { enqueueMaterialiseJob } from '../worker/jobs.ts';
 import { getPage } from './ladder.ts';
-import { originalPath, previewPath } from './paths.ts';
+import { originalKey, previewKey } from './paths.ts';
 import { ensureRank, forceRebuildRank, imagesInRankOrder } from './ranks.ts';
 import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
@@ -83,7 +78,7 @@ const PREVIEW_LADDER_SIZE = 128;
 
 /** `GET /images/:id/preview`'s first choice: the original, scaled to at
  * most `PREVIEW_MAX_SIDE` on its longer side, encoded once and cached at
- * `previewPath` — a scaled decode is not cheap enough to redo per request
+ * `previewKey` — a scaled decode is not cheap enough to redo per request
  * on a large original. Returns null when there is no original to read
  * (never throws for that; a genuinely corrupt file still throws, and the
  * caller falls back to the ladder). */
@@ -91,19 +86,20 @@ async function originalPreview(
   boardId: string,
   sha256: string,
 ): Promise<Buffer | null> {
-  const cached = previewPath(boardId, sha256);
-  if (existsSync(cached)) return readFileSync(cached);
-  const original = originalPath(boardId, sha256);
-  if (!existsSync(original)) return null;
-  const img = await loadImage(readFileSync(original));
+  const storage = storageFromEnv();
+  const cachedKey = previewKey(boardId, sha256);
+  const cached = await storage.get(cachedKey);
+  if (cached) return Buffer.from(cached);
+  const original = await storage.get(originalKey(boardId, sha256));
+  if (!original) return null;
+  const img = await loadImage(Buffer.from(original));
   const scale = Math.min(1, PREVIEW_MAX_SIDE / Math.max(img.width, img.height));
   const w = Math.max(1, Math.round(img.width * scale));
   const h = Math.max(1, Math.round(img.height * scale));
   const canvas = createCanvas(w, h);
   canvas.getContext('2d').drawImage(img, 0, 0, w, h);
   const buf = canvas.encodeSync('png');
-  mkdirSync(dirname(cached), { recursive: true });
-  writeFileSync(cached, buf);
+  await storage.put(cachedKey, buf, 'image/png');
   return buf;
 }
 
@@ -408,16 +404,25 @@ export function registerBoardRoutes(router: Router) {
     }
 
     // Best-effort file sweep (docs/phases/3-groups.md section 4): every
-    // on-disk path for this board's originals, ladder pages and tiles lives
-    // under this one directory (paths.ts, ladder.ts, materialise.ts,
-    // coarse-cache.ts, tiles.ts all key off `boards/<id>/`).
-    try {
-      rmSync(join(env.DATA_DIR, 'boards', boardId), {
-        recursive: true,
-        force: true,
-      });
-    } catch {
-      // best-effort — the DB rows are already gone regardless.
+    // storage key for this board's originals, ladder pages and tiles lives
+    // under this one prefix (paths.ts, ladder.ts, materialise.ts,
+    // coarse-cache.ts, tiles.ts all key off `boards/<id>/`). fs-only — the
+    // Storage interface has no "delete by prefix" (storage/index.ts's
+    // header comment; materialise.ts's own sweep explains the same gap).
+    // Under S3 the board's objects are left in the bucket; nothing can
+    // reach them (every route needs a live `images`/`boards` row, and both
+    // are gone above), and reclaiming them is the deploy's bucket lifecycle
+    // policy or an operator running `deploy/backup.sh`'s restore-then-prune,
+    // not this best-effort request-path sweep.
+    if (env.STORAGE !== 's3') {
+      try {
+        rmSync(join(env.DATA_DIR, 'boards', boardId), {
+          recursive: true,
+          force: true,
+        });
+      } catch {
+        // best-effort — the DB rows are already gone regardless.
+      }
     }
 
     json(ctx.res, 200, {});
@@ -559,6 +564,7 @@ export function registerBoardRoutes(router: Router) {
         file.name || `upload-${Date.now()}`,
         bytes,
         properties,
+        file.type || 'application/octet-stream',
       );
       ids.push(uploaded.id);
       out.push(uploaded);
@@ -689,20 +695,33 @@ export function registerBoardRoutes(router: Router) {
     json(ctx.res, 200, response);
   });
 
+  // docs/phases/4-deploy.md section 2: with STORAGE=s3, a 302 to a 5-minute
+  // presigned URL, so the original's bytes never pass through the server —
+  // this route only ever proves the caller may see the image (imageForViewing)
+  // and then hands out (or serves) the object. `private, max-age=300` either
+  // way, matching the presigned URL's own lifetime under s3.
   router.get('/images/:id/original', async (ctx) => {
     const userId = requireAuth(ctx);
     const image = await imageForViewing(userId, param(ctx, 'id'));
-    const path = originalPath(image.board_id, image.sha256);
-    try {
-      const buf = readFileSync(path);
-      ctx.res.writeHead(200, {
-        'Content-Type': 'image/png',
-        'Cache-Control': 'private, max-age=3600',
+    const key = originalKey(image.board_id, image.sha256);
+
+    const presigned = await presignedGetUrl(key, 300);
+    if (presigned) {
+      ctx.res.writeHead(302, {
+        Location: presigned,
+        'Cache-Control': 'private, max-age=300',
       });
-      ctx.res.end(buf);
-    } catch {
-      json(ctx.res, 404, { error: 'original missing' });
+      ctx.res.end();
+      return;
     }
+
+    const buf = await storageFromEnv().get(key);
+    if (!buf) return json(ctx.res, 404, { error: 'original missing' });
+    ctx.res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'private, max-age=300',
+    });
+    ctx.res.end(Buffer.from(buf));
   });
 
   // GET /images/:id/preview: a small, fast image for a sheet to show
@@ -770,11 +789,11 @@ export function registerBoardRoutes(router: Router) {
         [image.board_id, image.sha256, image.id],
       );
       if (rows.length === 0) {
-        try {
-          rmSync(originalPath(image.board_id, image.sha256));
-        } catch {
-          // already gone, or never written (upload still pending) — fine.
-        }
+        // storage.delete is force-delete on both adapters (fs.ts, s3.ts) —
+        // "already gone, or never written" needs no separate catch here.
+        await storageFromEnv().delete(
+          originalKey(image.board_id, image.sha256),
+        );
       }
     }
     await pool.query('UPDATE images SET missing = true WHERE id = $1', [

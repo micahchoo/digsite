@@ -10,7 +10,6 @@ import { describe, expect, test } from 'bun:test';
 // uploadOne/the worker for speed — every row and page this writes is what
 // the real upload path writes, just without going through 3,000 HTTP
 // requests.
-import { existsSync, readFileSync } from 'node:fs';
 import {
   CELL,
   type Zoom,
@@ -25,11 +24,12 @@ import { materialiseSort, tileGrid } from '../boards/materialise.ts';
 import { ensureRank, slotsForTile } from '../boards/ranks.ts';
 import {
   composeTile,
-  materialisedTilePath,
+  materialisedTileKey,
   pendingSlotsFor,
   tileFor,
 } from '../boards/tiles.ts';
 import { pool } from '../db/pool.ts';
+import { storageFromEnv } from '../storage/index.ts';
 
 const N = 3000;
 
@@ -92,15 +92,21 @@ describe('materialise', () => {
     const nx = Math.ceil(w / side);
     const ny = Math.ceil(h / side);
     expect(nx * ny).toBeGreaterThan(0);
+    const storage = storageFromEnv();
     for (let y = 0; y < ny; y++) {
       for (let x = 0; x < nx; x++) {
-        const path = materialisedTilePath(boardId, sid, -3, x, y);
-        expect(existsSync(path)).toBe(true);
+        const key = materialisedTileKey(boardId, sid, -3, x, y);
+        expect(await storage.exists(key)).toBe(true);
       }
     }
 
     // materialiseSort hands its own just-encoded buffers to the resident
     // cache — the route must never have to re-read disk for this request.
+    // Decoded, not just checked for the `resident` label: the resident
+    // buffer used to be raw RGBA (materialise.ts's pre-phase-4 bug, fixed
+    // alongside the Storage refactor — see materialise.ts's TileEntry
+    // comment), which this test's earlier form never caught because it
+    // only asserted the cache label, never that the bytes were a real PNG.
     const cacheKey = `/boards/${boardId}/tiles/${sid}/-3/0/0.png`;
     const result = await tileFor(
       boardId,
@@ -112,6 +118,9 @@ describe('materialise', () => {
       cacheKey,
     );
     expect(result.cache).toBe('resident');
+    const decoded = await loadImage(result.png);
+    expect(decoded.width).toBeGreaterThan(0);
+    expect(decoded.height).toBeGreaterThan(0);
   }, 60_000);
 
   test('scatter output is pixel-identical to the per-tile compose, 20 random coarse tiles', async () => {
@@ -143,10 +152,12 @@ describe('materialise', () => {
       });
     }
 
+    const storage = storageFromEnv();
     for (const { z, x, y } of picks) {
-      const scattered = readFileSync(
-        materialisedTilePath(boardId, sid, z, x, y),
-      );
+      const key = materialisedTileKey(boardId, sid, z, x, y);
+      const bytes = await storage.get(key);
+      if (!bytes) throw new Error(`materialised tile missing: ${key}`);
+      const scattered = Buffer.from(bytes);
 
       const slots = await slotsForTile(boardId, DEFAULT_SORT, z, x, y);
       const pendingSlots = await pendingSlotsFor(boardId, slots);

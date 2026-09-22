@@ -8,6 +8,18 @@
 // path calls, then deletes the tus file: a tus upload becomes exactly the
 // same pending row and ladder job either way, and (unlike the multipart
 // route) it never waits for the job — see server/README.md.
+//
+// Staging stays on local disk under DATA_DIR/tus regardless of STORAGE
+// (docs/phases/4-deploy.md section 1 names "tus staging" among what goes
+// through Storage — this is the one exception, and deliberately so):
+// @tus/file-store's resumable-chunk protocol is its own append-in-place
+// format, which the Storage interface's put/get/exists/delete (no append)
+// can't express, and @tus/s3-store would mean a second S3 client and a
+// second failure mode for what is, either way, a few-second-lived scratch
+// file. What matters for phase 4 is that the PERMANENT artifact — the
+// original `uploadOne` writes below — goes through Storage exactly like
+// the multipart route's; that both upload paths share `uploadOne` is what
+// makes that true regardless of what's above this comment.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FileStore } from '@tus/file-store';
@@ -94,7 +106,15 @@ export const tusServer = new Server({
     const bytes = new Uint8Array(
       readFileSync(join(env.DATA_DIR, 'tus', upload.id)),
     );
-    await uploadOne(meta.boardId, meta.userId, filename, bytes, properties);
+    const contentType = upload.metadata?.filetype || 'application/octet-stream';
+    await uploadOne(
+      meta.boardId,
+      meta.userId,
+      filename,
+      bytes,
+      properties,
+      contentType,
+    );
     await fileStore.remove(upload.id).catch(() => {});
 
     return {};

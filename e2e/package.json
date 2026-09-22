@@ -7,6 +7,8 @@
     "test": "bun run src/run.ts",
     "sheet-hour": "bun run src/sheet-hour.ts",
     "groups-life": "bun run src/groups-life.ts",
+    "backup-restore": "bun run src/backup-restore.ts",
+    "smoke:prod": "bun run src/smoke-prod.ts",
     "check": "tsc --noEmit"
   },
   "dependencies": {

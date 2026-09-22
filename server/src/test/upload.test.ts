@@ -5,9 +5,10 @@ import { ladderAddress } from '@digsite/shared/board/ladder';
 // 1-map.md, painting moved to the worker — the request only enqueues the
 // `ladder` job, so this test drains it once before checking the pages.
 import { createCanvas } from '@napi-rs/canvas';
-import { ladderPagePath } from '../boards/ladder.ts';
+import { ladderPageKey } from '../boards/ladder.ts';
 import { uploadOne } from '../boards/upload.ts';
 import { pool } from '../db/pool.ts';
+import { storageFromEnv } from '../storage/index.ts';
 import { drain } from '../worker/index.ts';
 
 async function makeBoard(name: string): Promise<string> {
@@ -47,13 +48,15 @@ describe('upload', () => {
     expect(rows.every((r) => r.status === 'ready')).toBe(true);
 
     const { loadImage } = await import('@napi-rs/canvas');
-    const { readFileSync } = await import('node:fs');
+    const storage = storageFromEnv();
 
     for (const slot of [a.slot, b.slot]) {
       for (const s of [8, 32, 128] as const) {
         const { page, x, y } = ladderAddress(slot, s);
-        const path = ladderPagePath(boardId, s, page);
-        const img = await loadImage(readFileSync(path));
+        const key = ladderPageKey(boardId, s, page);
+        const bytes = await storage.get(key);
+        if (!bytes) throw new Error(`ladder page missing: ${key}`);
+        const img = await loadImage(Buffer.from(bytes));
         const full = createCanvas(img.width, img.height);
         full.getContext('2d').drawImage(img, 0, 0);
         const px = full

@@ -1,0 +1,34 @@
+# Build context is the repo root (`docker build -f deploy/Dockerfile.server .`)
+# — the workspace needs shared/ and server/ together, and bun's workspace
+# install wants every workspace's package.json to resolve the lockfile.
+FROM oven/bun:1
+
+WORKDIR /repo
+COPY package.json bun.lock tsconfig.base.json ./
+COPY shared/package.json shared/package.json
+COPY server/package.json server/package.json
+COPY web/package.json web/package.json
+COPY e2e/package.json e2e/package.json
+RUN bun install --frozen-lockfile
+
+COPY shared shared
+COPY server server
+
+WORKDIR /repo/server
+ENV NODE_ENV=production
+EXPOSE 8800
+
+# Runs migrations, then starts — README.md's "upgrade" story is just
+# "pull, restart": migrate.ts is idempotent (skips an already-applied
+# file), so this is safe to run on every start, not only the first.
+#
+# AUTH_SECRET refused at the example value (.env.production.example's own
+# placeholder) so a deploy can never go live signing sessions with a secret
+# every clone of this repo already knows.
+CMD ["sh", "-c", "\
+  if [ \"$AUTH_SECRET\" = \"replace-with-a-long-random-secret\" ]; then \
+    echo 'AUTH_SECRET is still the .env.production.example placeholder — refusing to start' >&2; \
+    exit 1; \
+  fi; \
+  bun run migrate && exec bun run start \
+"]

@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { TILE, type Zoom } from '@digsite/shared/board/grid';
 import { ladderAddress, sizeFor } from '@digsite/shared/board/ladder';
 // Composing one tile (CONTEXT.md "Tile"): a 256px PNG of the cells in one
@@ -12,7 +11,7 @@ import { ladderAddress, sizeFor } from '@digsite/shared/board/ladder';
 import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { createCanvas } from '@napi-rs/canvas';
 import { pool } from '../db/pool.ts';
-import { env } from '../env.ts';
+import { storageFromEnv } from '../storage/index.ts';
 import { getResidentTile, loadResidentSortFromDisk } from './coarse-cache.ts';
 import { getPage } from './ladder.ts';
 import { slotsForTile } from './ranks.ts';
@@ -22,14 +21,14 @@ import { getComposedTile, setComposedTile } from './tiles-cache.ts';
 // same cell whichever path composed the tile.
 export const PENDING_COLOR = '#333';
 
-export function materialisedTilePath(
+export function materialisedTileKey(
   boardId: string,
   sid: string,
   z: Zoom,
   x: number,
   y: number,
 ): string {
-  return `${env.DATA_DIR}/boards/${boardId}/tiles/${sid}/${z}/${x}-${y}.png`;
+  return `boards/${boardId}/tiles/${sid}/${z}/${x}-${y}.png`;
 }
 
 /** Which of these slots belong to a still-pending image — docs/phases/
@@ -129,9 +128,10 @@ async function materialisedTile(
     if (loaded) return { png: loaded, cache: 'resident' };
   }
 
-  const path = materialisedTilePath(boardId, sid, z, x, y);
-  if (!existsSync(path)) return null;
-  return { png: readFileSync(path), cache: 'disk' };
+  const key = materialisedTileKey(boardId, sid, z, x, y);
+  const bytes = await storageFromEnv().get(key);
+  if (!bytes) return null;
+  return { png: Buffer.from(bytes), cache: 'disk' };
 }
 
 /** Composes (or returns cached, or reads materialised) the PNG for one

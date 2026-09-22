@@ -15,6 +15,10 @@ bun run check              # tsc --noEmit
 `src/env.ts`. `WORKER_CONCURRENCY` (4) sizes the job poller only; the
 PNG-encode pool is sized off CPU count. `MATERIALISE_BUDGET_MB` (2048) and
 `COARSE_BUDGET_MB` (1024) bound the scatter's tiles and the resident cache.
+`STORAGE` (`fs` or `s3`, `src/storage/`) picks where originals, previews,
+ladder pages and materialised tiles live — see that directory and the root
+`README.md`'s deploy section. `GET /healthz`/`GET /readyz` (`src/health.ts`)
+are public and used by `deploy/docker-compose.yml`'s healthchecks.
 
 ## Module map
 - `src/auth.ts` — Better Auth + organization plugin, `member` widened to
@@ -26,10 +30,16 @@ PNG-encode pool is sized off CPU count. `MATERIALISE_BUDGET_MB` (2048) and
 - `src/access/index.ts` — one function per intent; the only reader of
   `member`/`team`/`teamMember`. `src/http.ts` — the router; `src/app.ts`
   wires routes + Better Auth + tus + Socket.IO into one unstarted server.
-- `boards/paths.ts` — the original's on-disk path, shared by `upload.ts`
-  and the worker so they don't import each other. `upload.ts#uploadOne` —
-  hash, store, insert `pending`, enqueue the `ladder` job; both the
-  multipart route and tus's `onUploadFinish` call it.
+- `src/storage/` — the `Storage` port (`put`/`get`/`exists`/`delete`,
+  `index.ts`) and its two adapters, `fs.ts` (today's `DATA_DIR` layout,
+  byte-for-byte) and `s3.ts` (any S3-compatible endpoint, path-style).
+  `lock.ts` is the per-key async lock a page's read-modify-write needs —
+  the only thing preventing a lost update once a write is a `put` to S3
+  rather than an in-place file edit. `boards/paths.ts` builds the keys
+  (originals, previews), shared by `upload.ts` and the worker so they
+  don't import each other. `upload.ts#uploadOne` — hash, store, insert
+  `pending`, enqueue the `ladder` job; both the multipart route and tus's
+  `onUploadFinish` call it.
 - `boards/tus.ts` — `@tus/server` + `@tus/file-store` at
   `/boards/:id/uploads`(`/*`); `onIncomingRequest` gates on
   `boardForUploading`, `onUploadFinish` calls `uploadOne`. Never waits for
