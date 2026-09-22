@@ -1,0 +1,26 @@
+{
+  "name": "@digsite/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./board/grid": "./src/board/grid.ts",
+    "./board/ladder": "./src/board/ladder.ts",
+    "./board/sort": "./src/board/sort.ts",
+    "./sheet/elements": "./src/sheet/elements.ts",
+    "./sheet/fractions": "./src/sheet/fractions.ts",
+    "./sheet/claims": "./src/sheet/claims.ts",
+    "./sheet/merge": "./src/sheet/merge.ts",
+    "./sheet/project": "./src/sheet/project.ts",
+    "./api": "./src/api.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "^1.2.0"
+  }
+}
