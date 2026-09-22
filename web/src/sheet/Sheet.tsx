@@ -45,7 +45,11 @@ export function Sheet() {
 
   const canvasRef = useRef<CanvasHandle | null>(null);
   const imageMetaRef = useRef(new Map<string, ImageMeta>());
-  const rafRef = useRef<number | null>(null);
+  const latestRef = useRef<{
+    elements: SceneElement[];
+    viewport: Viewport;
+  } | null>(null);
+  const flushQueued = useRef(false);
   const [sheetInfo, setSheetInfo] = useState<SheetInfo | null>(null);
   const [files, setFiles] = useState(new Map<string, CanvasFile>());
   const [sceneElements, setSceneElements] = useState<SceneElement[]>([]);
@@ -102,11 +106,20 @@ export function Sheet() {
       const { ops, elements: next } = reconcileLocalChange(scene.elements);
       if (ops.length) handle.apply(ops, { history: false });
       room.sendScene(next);
-      if (rafRef.current === null) {
-        rafRef.current = window.requestAnimationFrame(() => {
-          rafRef.current = null;
-          setSceneElements(next);
-          setViewport(scene.viewport);
+      // Coalesce a burst of changes into one render, but always flush the
+      // LATEST one: an animation-frame closure over the first change dropped
+      // every later change in that frame (a fit right after a relayed scene
+      // never reached the overlay), and a background page may not get a
+      // frame at all. A microtask runs after the burst, everywhere.
+      latestRef.current = { elements: next, viewport: scene.viewport };
+      if (!flushQueued.current) {
+        flushQueued.current = true;
+        queueMicrotask(() => {
+          flushQueued.current = false;
+          const latest = latestRef.current;
+          if (!latest) return;
+          setSceneElements(latest.elements);
+          setViewport(latest.viewport);
         });
       }
       // `room` is a fresh object every render; `sendScene`'s identity is
