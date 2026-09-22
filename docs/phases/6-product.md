@@ -38,6 +38,21 @@ not a costume.
 
 ## Also in this phase: what the brainstorm specified and the build missed
 
+- **Sheets are threads** (brainstorm: "a sheet is a Discord THREAD
+  under a board"). The data model is built; the thread experience is
+  not. In the channel column, a board's sheets nest under it with a
+  thread glyph, most recent activity first, the ones with activity
+  since you last looked in bold. "Start a sheet" sits where Discord's
+  "create thread" does: on the board's selection bar and on an image's
+  context menu, naming it in place. A sheet header shows its board as
+  the parent (`# Field › First pass`) with a way back. A board lists
+  its sheets as a thread browser (name, image count, who has been in
+  it, last activity, a strip of its first images as a preview). Old
+  sheets can be archived: hidden from the column, kept, searchable,
+  reopened by anyone who can see the board. Last-seen per user per
+  sheet is stored server-side (`sheet_reads(user_id, sheet_id,
+  seen_at)`) so unread survives devices.
+
 - **Find and filter on the board**: a search box (name, property
   values) and property filters (`year 1980..1990`, `site = x`) that dim
   non-matching cells on the map as an overlay and count matches; "select
