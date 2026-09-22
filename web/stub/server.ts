@@ -59,16 +59,49 @@ const USERS: Record<UserKey, { id: string; email: string; name: string }> = {
 };
 const USER_KEYS = Object.keys(USERS) as UserKey[];
 type GroupRole = 'owner' | 'admin' | 'member';
-// Partial: a key absent means that user is not in the group. `outsider`
-// starts absent — the join page's happy path signs them up and accepts an
-// invitation, which adds the key (see /invitations/:id/accept).
-const GROUP_ROLE: Partial<Record<UserKey, GroupRole>> = {
-  owner: 'owner',
-  admin: 'admin',
-  member: 'member',
-  listed: 'member',
+// docs/ux/audit.md #8 (shell) needs a second group in the rail, and the
+// shell agent's own finding: every `/groups/:id/*` route used to ignore
+// `:id` entirely, always answering for one hardcoded group regardless of
+// what was in the URL — a garbage id was never a 404, it silently behaved
+// as `g1`. Fixed by keying everything (membership, boards) by group id, the
+// same way boards are already keyed by board id.
+//
+// `GROUP_ROLES[groupId]` partial: a key absent means that user is not in
+// that group. `outsider` starts absent from `g1` — the join page's happy
+// path signs them up and accepts an invitation, which adds the key (see
+// /invitations/:id/accept). `g2` ("Annex") exists only for `owner`, so the
+// shell has a real second group to switch to without disturbing `g1`'s
+// fixture, which every other smoke script depends on unchanged.
+interface Group {
+  id: string;
+  name: string;
+}
+const GROUPS: Record<string, Group> = {
+  g1: { id: 'g1', name: 'Lab' },
+  g2: { id: 'g2', name: 'Annex' },
 };
-const GROUP = { id: 'g1', name: 'Lab' };
+const GROUP_ROLES: Record<string, Partial<Record<UserKey, GroupRole>>> = {
+  g1: { owner: 'owner', admin: 'admin', member: 'member', listed: 'member' },
+  g2: { owner: 'owner' },
+};
+
+function groupOf(groupId: string): Group | null {
+  return GROUPS[groupId] ?? null;
+}
+function roleOf(u: UserKey, groupId: string): GroupRole | undefined {
+  return GROUP_ROLES[groupId]?.[u];
+}
+/** The mutable role map for a group, created on first write — every
+ * membership WRITE (accept, role change, remove, leave) goes through this
+ * instead of an inline `??=` (biome's noAssignInExpressions). */
+function rolesOf(groupId: string): Partial<Record<UserKey, GroupRole>> {
+  let roles = GROUP_ROLES[groupId];
+  if (!roles) {
+    roles = {};
+    GROUP_ROLES[groupId] = roles;
+  }
+  return roles;
+}
 
 function keyForUserId(userId: string): UserKey | null {
   return USER_KEYS.find((k) => USERS[k].id === userId) ?? null;
@@ -85,12 +118,12 @@ function sessionUser(cookieHeader: string | undefined): UserKey | null {
   const key = m?.[1] as UserKey | undefined;
   return key && USERS[key] ? key : null;
 }
-function currentMembers() {
-  return USER_KEYS.filter((k) => GROUP_ROLE[k]).map((k) => ({
+function currentMembers(groupId: string) {
+  return USER_KEYS.filter((k) => GROUP_ROLES[groupId]?.[k]).map((k) => ({
     userId: USERS[k].id,
     email: USERS[k].email,
     name: USERS[k].name,
-    role: GROUP_ROLE[k] as GroupRole,
+    role: GROUP_ROLES[groupId]?.[k] as GroupRole,
   }));
 }
 
@@ -102,6 +135,7 @@ interface Board {
   imageCount: number;
   createdBy: UserKey;
   defaultSort: string;
+  groupId: string;
 }
 const BOARDS: Board[] = [
   {
@@ -111,6 +145,7 @@ const BOARDS: Board[] = [
     imageCount: IMAGE_COUNT,
     createdBy: 'member',
     defaultSort: 'uploaded_at.desc',
+    groupId: 'g1',
   },
   {
     id: 'b2',
@@ -119,6 +154,18 @@ const BOARDS: Board[] = [
     imageCount: 0,
     createdBy: 'admin',
     defaultSort: 'uploaded_at.desc',
+    groupId: 'g1',
+  },
+  // The shell's second group needs at least one board so its channel
+  // column isn't indistinguishable from a broken fetch.
+  {
+    id: 'b3',
+    name: 'Annex board',
+    open: true,
+    imageCount: 0,
+    createdBy: 'owner',
+    defaultSort: 'uploaded_at.desc',
+    groupId: 'g2',
   },
 ];
 // Finds' allowlist deliberately excludes `owner` — the prototype's matrix:
@@ -136,26 +183,27 @@ type Denied = { reason: string };
 function boardOf(boardId: string): Board | null {
   return BOARDS.find((b) => b.id === boardId) ?? null;
 }
-function isMember(u: UserKey): boolean {
-  return !!GROUP_ROLE[u];
+function isMember(u: UserKey, groupId: string): boolean {
+  return !!GROUP_ROLES[groupId]?.[u];
 }
-function groupForViewing(u: UserKey): Denied | null {
-  return isMember(u) ? null : { reason: 'not a member of this group' };
+function groupForViewing(u: UserKey, groupId: string): Denied | null {
+  if (!groupOf(groupId)) return null; // the route decides not-found, after access
+  return isMember(u, groupId) ? null : { reason: 'not a member of this group' };
 }
-function groupForInviting(u: UserKey): Denied | null {
-  const g = groupForViewing(u);
+function groupForInviting(u: UserKey, groupId: string): Denied | null {
+  const g = groupForViewing(u, groupId);
   if (g) return g;
-  const role = GROUP_ROLE[u];
+  const role = roleOf(u, groupId);
   return role === 'owner' || role === 'admin'
     ? null
     : { reason: 'must be a group owner or admin' };
 }
 const groupForManagingMembers = groupForInviting;
 function boardForViewing(u: UserKey, boardId: string): Denied | null {
-  const g = groupForViewing(u);
-  if (g) return g;
   const board = boardOf(boardId);
   if (!board) return null; // the route decides not-found, after access
+  const g = groupForViewing(u, board.groupId);
+  if (g) return g;
   if (board.open) return null;
   return ALLOWLIST[boardId]?.has(u) ? null : { reason: 'not on the allowlist' };
 }
@@ -163,7 +211,7 @@ function isBoardManager(u: UserKey, boardId: string): boolean {
   const board = boardOf(boardId);
   if (!board) return false;
   if (board.createdBy === u) return true;
-  const role = GROUP_ROLE[u];
+  const role = roleOf(u, board.groupId);
   return role === 'owner' || role === 'admin';
 }
 function boardForManagingAllowlist(u: UserKey, boardId: string): Denied | null {
@@ -509,7 +557,7 @@ const INVITATIONS: Record<string, Invitation> = {
   // (docs/phases/3-groups.md section 1: one message for expired and used).
   'inv-closed': {
     id: 'inv-closed',
-    groupId: GROUP.id,
+    groupId: 'g1',
     email: null,
     inviterKey: 'owner',
     createdAt: new Date().toISOString(),
@@ -662,22 +710,27 @@ const httpServer = createServer(async (req, res) => {
   if (url.pathname === '/groups' && req.method === 'GET') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    return json(200, isMember(u) ? [{ ...GROUP, role: GROUP_ROLE[u] }] : []);
+    const mine = Object.values(GROUPS)
+      .filter((g) => isMember(u, g.id))
+      .map((g) => ({ ...g, role: roleOf(u, g.id) }));
+    return json(200, mine);
   }
   if (url.pathname === '/groups' && req.method === 'POST')
-    return json(201, { id: GROUP.id });
+    return json(201, { id: 'g1' });
 
   const groupInvite = url.pathname.match(/^\/groups\/([^/]+)\/invite$/);
   if (groupInvite && req.method === 'POST') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    const denied = groupForInviting(u);
+    const groupId = groupInvite[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
+    const denied = groupForInviting(u, groupId);
     if (denied) return json(403, denied);
     const body = await readJson<{ email?: string }>();
     const id = `inv-${invitationSeq++}`;
     INVITATIONS[id] = {
       id,
-      groupId: GROUP.id,
+      groupId,
       email: body.email ?? null,
       inviterKey: u,
       createdAt: new Date().toISOString(),
@@ -693,10 +746,12 @@ const httpServer = createServer(async (req, res) => {
   if (groupInvitations && req.method === 'GET') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    const denied = groupForInviting(u);
+    const groupId = groupInvitations[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
+    const denied = groupForInviting(u, groupId);
     if (denied) return json(403, denied);
     const pending = Object.values(INVITATIONS)
-      .filter((i) => i.groupId === GROUP.id && invitationIsOpen(i))
+      .filter((i) => i.groupId === groupId && invitationIsOpen(i))
       .map((i) => ({ id: i.id, email: i.email, createdAt: i.createdAt }));
     return json(200, pending);
   }
@@ -709,7 +764,7 @@ const httpServer = createServer(async (req, res) => {
     const inv = INVITATIONS[invitationOne[1] ?? ''];
     if (!inv) return json(404, { reason: 'not found' });
     return json(200, {
-      groupName: GROUP.name,
+      groupName: groupOf(inv.groupId)?.name ?? '',
       inviterName: USERS[inv.inviterKey].name,
       open: invitationIsOpen(inv),
     });
@@ -719,7 +774,7 @@ const httpServer = createServer(async (req, res) => {
     if (!u) return json(401, { reason: 'sign in required' });
     const inv = INVITATIONS[invitationOne[1] ?? ''];
     if (!inv) return json(404, { reason: 'not found' });
-    const denied = groupForInviting(u);
+    const denied = groupForInviting(u, inv.groupId);
     if (denied) return json(403, denied);
     inv.revoked = true;
     return json(200, {});
@@ -734,7 +789,8 @@ const httpServer = createServer(async (req, res) => {
       return json(400, { reason: 'This invitation is no longer open.' });
     }
     inv.used = true;
-    if (!GROUP_ROLE[u]) GROUP_ROLE[u] = 'member';
+    const roles = rolesOf(inv.groupId);
+    if (!roles[u]) roles[u] = 'member';
     return json(200, { groupId: inv.groupId });
   }
 
@@ -744,57 +800,74 @@ const httpServer = createServer(async (req, res) => {
   if (groupMemberOne && req.method === 'PATCH') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
+    const groupId = groupMemberOne[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
     const targetKey = keyForUserId(groupMemberOne[2] ?? '');
-    if (!targetKey || !GROUP_ROLE[targetKey])
+    if (!targetKey || !GROUP_ROLES[groupId]?.[targetKey])
       return json(404, { reason: 'not found' });
-    const denied = groupForManagingMembers(u);
+    const denied = groupForManagingMembers(u, groupId);
     if (denied) return json(403, denied);
     const body = await readJson<{ role: GroupRole }>();
-    const currentRole = GROUP_ROLE[targetKey];
+    const roles = rolesOf(groupId);
+    const currentRole = roles[targetKey];
     if (
       (body.role === 'owner' || currentRole === 'owner') &&
-      GROUP_ROLE[u] !== 'owner'
+      roles[u] !== 'owner'
     ) {
       return json(403, { reason: 'only an owner may change an owner role' });
     }
-    GROUP_ROLE[targetKey] = body.role;
+    roles[targetKey] = body.role;
     return json(200, { userId: USERS[targetKey].id, role: body.role });
   }
   if (groupMemberOne && req.method === 'DELETE') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
+    const groupId = groupMemberOne[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
     const targetKey = keyForUserId(groupMemberOne[2] ?? '');
-    if (!targetKey || !GROUP_ROLE[targetKey])
+    const roles = rolesOf(groupId);
+    if (!targetKey || !roles[targetKey])
       return json(404, { reason: 'not found' });
-    const denied = groupForManagingMembers(u);
+    const denied = groupForManagingMembers(u, groupId);
     if (denied) return json(403, denied);
-    if (GROUP_ROLE[targetKey] === 'owner' && GROUP_ROLE[u] !== 'owner') {
+    if (roles[targetKey] === 'owner' && roles[u] !== 'owner') {
       return json(403, { reason: 'only an owner may remove an owner' });
     }
-    delete GROUP_ROLE[targetKey];
-    for (const set of Object.values(ALLOWLIST)) set.delete(targetKey);
+    delete roles[targetKey];
+    for (const b of BOARDS.filter((board) => board.groupId === groupId)) {
+      ALLOWLIST[b.id]?.delete(targetKey);
+    }
     return json(200, {});
   }
 
-  if (/^\/groups\/[^/]+\/members$/.test(url.pathname) && req.method === 'GET') {
+  const groupMembers = url.pathname.match(/^\/groups\/([^/]+)\/members$/);
+  if (groupMembers && req.method === 'GET') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    const denied = groupForViewing(u);
+    const groupId = groupMembers[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
+    const denied = groupForViewing(u, groupId);
     if (denied) return json(403, denied);
-    return json(200, currentMembers());
+    return json(200, currentMembers(groupId));
   }
-  if (/^\/groups\/[^/]+\/leave$/.test(url.pathname)) {
+  const groupLeave = url.pathname.match(/^\/groups\/([^/]+)\/leave$/);
+  if (groupLeave) {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    if (!isMember(u)) return json(403, { reason: 'not a member' });
-    if (GROUP_ROLE[u] === 'owner') {
-      const owners = USER_KEYS.filter((k) => GROUP_ROLE[k] === 'owner');
+    const groupId = groupLeave[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
+    if (!isMember(u, groupId)) return json(403, { reason: 'not a member' });
+    const roles = rolesOf(groupId);
+    if (roles[u] === 'owner') {
+      const owners = USER_KEYS.filter((k) => roles[k] === 'owner');
       if (owners.length <= 1) {
         return json(400, { reason: 'the sole owner cannot leave the group' });
       }
     }
-    delete GROUP_ROLE[u];
-    for (const set of Object.values(ALLOWLIST)) set.delete(u);
+    delete roles[u];
+    for (const b of BOARDS.filter((board) => board.groupId === groupId)) {
+      ALLOWLIST[b.id]?.delete(u);
+    }
     return json(200, {});
   }
 
@@ -804,10 +877,14 @@ const httpServer = createServer(async (req, res) => {
   if (groupSheetsRecent && req.method === 'GET') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    const denied = groupForViewing(u);
+    const groupId = groupSheetsRecent[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
+    const denied = groupForViewing(u, groupId);
     if (denied) return json(403, denied);
     const visible = new Set(
-      BOARDS.filter((b) => !boardForViewing(u, b.id)).map((b) => b.id),
+      BOARDS.filter(
+        (b) => b.groupId === groupId && !boardForViewing(u, b.id),
+      ).map((b) => b.id),
     );
     const list = Object.keys(SHEET_NAME)
       .filter((id) => visible.has(SHEET_BOARD[id] ?? 'b1'))
@@ -828,9 +905,13 @@ const httpServer = createServer(async (req, res) => {
   if (boardsList && req.method === 'GET') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    const denied = groupForViewing(u);
+    const groupId = boardsList[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
+    const denied = groupForViewing(u, groupId);
     if (denied) return json(403, denied);
-    const visible = BOARDS.filter((b) => !boardForViewing(u, b.id));
+    const visible = BOARDS.filter(
+      (b) => b.groupId === groupId && !boardForViewing(u, b.id),
+    );
     return json(
       200,
       visible.map((b) => ({
@@ -838,7 +919,7 @@ const httpServer = createServer(async (req, res) => {
         name: b.name,
         open: b.open,
         imageCount: b.imageCount,
-        groupId: GROUP.id,
+        groupId: b.groupId,
         sheetCount: Object.keys(SHEET_NAME).filter(
           (id) => (SHEET_BOARD[id] ?? 'b1') === b.id,
         ).length,
@@ -849,7 +930,9 @@ const httpServer = createServer(async (req, res) => {
   if (boardsList && req.method === 'POST') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    const denied = groupForViewing(u); // boardForCreating: any group member
+    const groupId = boardsList[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
+    const denied = groupForViewing(u, groupId); // boardForCreating: any group member
     if (denied) return json(403, denied);
     const body = await readJson<{ name: string; open: boolean }>();
     const id = `b${boardSeq++}`;
@@ -860,6 +943,7 @@ const httpServer = createServer(async (req, res) => {
       imageCount: 0,
       createdBy: u,
       defaultSort: 'uploaded_at.desc',
+      groupId,
     });
     if (!body.open) ALLOWLIST[id] = new Set([u]);
     return json(201, { id });
@@ -880,7 +964,7 @@ const httpServer = createServer(async (req, res) => {
       imageCount: board.imageCount,
       defaultSort: board.defaultSort,
       sortableKeys: SORTABLE_KEYS,
-      groupId: GROUP.id,
+      groupId: board.groupId,
     });
   }
   if (boardOne && req.method === 'PATCH') {
@@ -939,13 +1023,14 @@ const httpServer = createServer(async (req, res) => {
     const denied = boardForViewing(u, boardId);
     if (denied) return json(403, denied);
     const set = ALLOWLIST[boardId] ?? new Set<UserKey>();
+    const board = boardOf(boardId);
     return json(200, {
-      groupId: GROUP.id,
+      groupId: board?.groupId ?? '',
       members: Array.from(set).map((k) => ({
         userId: USERS[k].id,
         email: USERS[k].email,
         name: USERS[k].name,
-        role: GROUP_ROLE[k] ?? 'member',
+        role: (board && roleOf(k, board.groupId)) ?? 'member',
       })),
     });
   }
@@ -957,7 +1042,8 @@ const httpServer = createServer(async (req, res) => {
     if (denied) return json(403, denied);
     const body = await readJson<{ userId: string }>();
     const targetKey = keyForUserId(body.userId);
-    if (!targetKey || !GROUP_ROLE[targetKey]) {
+    const board = boardOf(boardId);
+    if (!targetKey || !board || !roleOf(targetKey, board.groupId)) {
       return json(400, { reason: 'user is not a member of the group' });
     }
     if (!ALLOWLIST[boardId]) ALLOWLIST[boardId] = new Set();
@@ -986,9 +1072,10 @@ const httpServer = createServer(async (req, res) => {
       const others = Array.from(ALLOWLIST[boardId] ?? []).filter(
         (k) => k !== targetKey,
       );
-      const hasManager = others.some(
-        (k) => GROUP_ROLE[k] === 'owner' || GROUP_ROLE[k] === 'admin',
-      );
+      const hasManager = others.some((k) => {
+        const role = board && roleOf(k, board.groupId);
+        return role === 'owner' || role === 'admin';
+      });
       if (!hasManager) {
         return json(400, {
           reason: 'the board would have no manager left on its allowlist',

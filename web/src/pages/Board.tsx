@@ -928,7 +928,9 @@ export function Board() {
       : `${((s.cacheHits / s.cacheTotal) * 100).toFixed(1)}%`;
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 41px)' }}>
+    // Fills the shell's page outlet (shell/shell.css's `.shell-page`) —
+    // no bare top nav to subtract anymore (docs/ux/design.md §3).
+    <div style={{ display: 'flex', height: '100%' }}>
       <div style={{ flex: 1, position: 'relative' }}>
         <canvas
           ref={canvasRef}
@@ -1048,14 +1050,7 @@ export function Board() {
           </div>
         )}
       </div>
-      <div
-        style={{
-          width: 300,
-          borderLeft: '1px solid #ddd',
-          overflow: 'auto',
-          padding: 8,
-        }}
-      >
+      <div className="board-side">
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <RenameInline
             name={board.name}

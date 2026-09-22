@@ -1,4 +1,5 @@
-/* Plain CSS, no UI library (docs/design.md "web/"). */
+/* Plain CSS, no UI library (docs/design.md "web/"). Colour tokens come from
+   theme/tokens.css (docs/ux/design.md §2), loaded first in index.html. */
 
 html,
 body,
@@ -8,13 +9,13 @@ body,
 }
 
 body {
-  font-family: system-ui, sans-serif;
-  color: #1a1a1a;
-  background: #fff;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  background: var(--surface-canvas);
 }
 
 a {
-  color: #1971c2;
+  color: var(--accent);
 }
 
 button,
@@ -25,14 +26,24 @@ select {
 
 button {
   cursor: pointer;
-  border: 1px solid #ccc;
-  background: #f8f9fa;
-  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border-radius: var(--radius-s);
   padding: 4px 10px;
 }
 
 button:hover {
-  background: #e9ecef;
+  background: var(--surface-sunken);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .nav {
@@ -40,8 +51,9 @@ button:hover {
   gap: 12px;
   align-items: center;
   padding: 8px 16px;
-  border-bottom: 1px solid #ddd;
-  font-size: 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-base);
+  background: var(--surface-app);
 }
 
 .nav .spacer {
@@ -51,11 +63,13 @@ button:hover {
 .page {
   padding: 16px;
   max-width: 900px;
+  background: var(--surface-canvas);
 }
 
 .card {
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  border-radius: var(--radius-m);
   padding: 12px;
   margin-bottom: 12px;
 }
@@ -76,17 +90,17 @@ th,
 td {
   text-align: left;
   padding: 4px 8px;
-  border-bottom: 1px solid #eee;
-  font-size: 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-base);
 }
 
 .muted {
-  color: #868e96;
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
 }
 .error {
-  color: #c92a2a;
-  font-size: 13px;
+  color: var(--danger);
+  font-size: var(--text-sm);
 }
 
 /* docs/ux/audit.md #10: a click-to-edit control (RenameInline.tsx) needs a
@@ -115,14 +129,14 @@ td {
 .rename-inline:hover,
 .rename-inline:focus-visible {
   background: none;
-  border-bottom-color: #868e96;
+  border-bottom-color: var(--text-secondary);
 }
 .rename-inline::after {
   content: "✎";
   display: inline-block;
   margin-left: 4px;
   font-size: 0.75em;
-  color: #868e96;
+  color: var(--text-secondary);
   visibility: hidden;
 }
 .rename-inline:hover::after,
@@ -130,16 +144,35 @@ td {
   visibility: visible;
 }
 
+/* docs/ux/audit.md #4 (blocker, mobile): Board.tsx's side panel was a
+   fixed 300px inline style, eating ~77% of a 390px viewport and squeezing
+   the map canvas to a sliver. Slice 2 relocates its content (detail panel,
+   selection tray) into the shell's right column / bottom tray with a real
+   mobile treatment; until then, hide it below 768px so the map gets the
+   width — same fix as sheet/sheet.css's `.sheet-side`. */
+.board-side {
+  width: 300px;
+  border-left: 1px solid var(--line);
+  background: var(--surface-raised);
+  overflow: auto;
+  padding: 8px;
+}
+@media (max-width: 767px) {
+  .board-side {
+    display: none;
+  }
+}
+
 .status-line {
   position: absolute;
   bottom: 8px;
   left: 8px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface-overlay);
   padding: 4px 8px;
-  font-size: 12px;
-  font-family: ui-monospace, monospace;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
   z-index: 5;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
   pointer-events: none;
 }

@@ -12,7 +12,10 @@
 
 .sheet-page {
   display: flex;
-  height: calc(100vh - 41px);
+  /* Fills whatever the shell's page outlet gives it (shell/shell.css's
+     `.shell-page`) — no more a bare route with its own top nav to subtract
+     (docs/ux/design.md §3: "routes render inside" the shell). */
+  height: 100%;
 }
 
 .sheet-canvas-area {
@@ -31,18 +34,18 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
   padding: 4px;
 }
 
 .sheet-toolbar-btn {
   font-weight: 400;
   background: transparent;
-  color: #000;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  color: var(--text-primary);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
   padding: 4px 8px;
 }
 
@@ -55,12 +58,25 @@
 .sheet-toolbar-sep {
   width: 1px;
   align-self: stretch;
-  background: #ddd;
+  background: var(--line);
   margin: 0 2px;
 }
 
+/* docs/ux/audit.md #4: at 390px the toolbar's 9 buttons overflowed both
+   edges — "Edge" read as "dge". Capping its width to the viewport and
+   letting it wrap keeps it centred and fully on-screen (design.md §4.7:
+   "Below 768px this wraps to two rows rather than clipping"). */
+@media (max-width: 767px) {
+  .sheet-toolbar {
+    max-width: calc(100vw - 24px);
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 4px;
+  }
+}
+
 .sheet-toolbar-hint {
-  color: #868e96;
+  color: var(--text-secondary);
   margin-left: 6px;
 }
 
@@ -123,18 +139,30 @@
 
 .sheet-side {
   width: 280px;
-  border-left: 1px solid #ddd;
+  border-left: 1px solid var(--line);
+  background: var(--surface-raised);
   overflow: auto;
+}
+
+/* docs/ux/audit.md #4 (blocker, mobile): a fixed 280px panel left ~77% of
+   a 390px viewport for the panel and squeezed the canvas to a sliver.
+   Slice 3 relocates this into the shell's right column with a proper
+   drawer toggle; until then, hide it below 768px so the canvas — the
+   thing a phone visitor actually came to look at — gets the width. */
+@media (max-width: 767px) {
+  .sheet-side {
+    display: none;
+  }
 }
 
 .sheet-header {
   padding: 8px;
-  border-bottom: 1px solid #eee;
-  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
 }
 
 .sheet-header-meta {
-  color: #868e96;
+  color: var(--text-secondary);
 }
 
 .sheet-presence {
@@ -154,8 +182,8 @@
 
 .sheet-dangling {
   padding: 8px;
-  border-bottom: 1px solid #eee;
-  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
 }
 
 .sheet-dangling-title {
@@ -203,8 +231,8 @@
 .sheet-foreign-box {
   margin-top: 10px;
   padding: 6px;
-  background: #fafafa;
-  border: 1px dashed #bbb;
+  background: var(--surface-sunken);
+  border: 1px dashed var(--line-strong);
 }
 
 /* -- a11y utility -------------------------------------------------------- */

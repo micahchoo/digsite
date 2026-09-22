@@ -35,6 +35,9 @@ const SCRIPTS = [
   'scripts/smoke-canvas-race.ts',
   'scripts/smoke-errors.ts',
   'scripts/smoke-invite.ts',
+  // docs/ux/design.md §7 slice 1 — the shell (rail, channel column, top
+  // bar, quick switcher, responsive collapse).
+  'scripts/smoke-shell.ts',
 ];
 
 function log(msg: string): void {

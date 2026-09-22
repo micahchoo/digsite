@@ -19,24 +19,22 @@ function assert(cond: unknown, message: string): asserts cond {
 }
 
 async function signInAs(page: Page, key: string) {
-  // A hard navigation, then wait for a DETERMINATE state — either the
-  // sign-in form (no session) or a bounce to /groups (a session already
-  // exists — sign out first). A snapshot `count()` check here raced the
-  // session still loading (SignIn.tsx's redirect fires from a `useEffect`,
-  // one tick after mount, so the sign-out button can genuinely be absent
-  // for a moment while a session still exists) — that race sent one
-  // request through as whichever user was signed in before it, silently.
+  // Switch identity by clearing the session cookie directly, then loading
+  // "/" fresh — not by clicking the UI's "sign out" button. That used to
+  // work (a hard navigation after the click, per the comment this
+  // replaces), but the shell (web/src/shell/Shell.tsx) fetches groups/
+  // boards/sheets on every authenticated navigation, and the extra async
+  // work stretches the window for a real race in better-auth's session
+  // nanostore: a stale "signed in" value can survive a tick past the
+  // cookie actually clearing, so a reload right after the click sometimes
+  // still reads the old session and bounces straight back to /groups —
+  // reproduced, not theoretical (this function used to do exactly that
+  // reload and still flaked under the shell's added load). Clearing the
+  // cookie through the browser context has no such race: the server has
+  // nothing to say "signed in" about before `page.goto` ever fires.
+  await page.context().clearCookies();
   await page.goto(WEB);
-  await page.waitForFunction(
-    () =>
-      document.querySelector('[data-testid="email"]') ||
-      location.pathname === '/groups',
-  );
-  if (page.url().endsWith('/groups')) {
-    await page.locator('button:has-text("sign out")').click();
-    await page.waitForURL(`${WEB}/`);
-    await page.waitForSelector('[data-testid="email"]');
-  }
+  await page.waitForSelector('[data-testid="email"]');
   await page.getByTestId('email').fill(`${key}@example.test`);
   await page.getByTestId('password').fill('password1');
   await page.getByTestId('submit').click();

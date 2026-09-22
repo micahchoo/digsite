@@ -1,0 +1,146 @@
+/* docs/ux/design.md §2 — the token set every surface in web/ draws from.
+   Light is the default `:root`; dark applies through EITHER a system
+   preference OR an explicit `data-theme` override, never a class toggle —
+   §2.2's own instruction: "pick one switching mechanism... and use it
+   everywhere." There is no per-user theme preference control yet (that is
+   a later slice); `data-theme="dark"` is the escape hatch a future control
+   sets, wired here now so it needs no CSS changes when that lands. */
+
+:root {
+  /* surfaces */
+  --surface-app: #f5f6f8; /* rail, channel column, top bar */
+  --surface-raised: #ffffff; /* panels, cards, modals, inspector */
+  --surface-sunken: #eceef1; /* inputs, wells */
+  --surface-canvas: #fafafb; /* board map, sheet scene */
+  --surface-overlay: rgba(255, 255, 255, 0.94); /* status pills, hover card */
+
+  /* text */
+  --text-primary: #1a1d21;
+  --text-secondary: #5b6169;
+  --text-faint: #6b7179; /* smallest size this may carry text at */
+
+  /* lines */
+  --line: #dfe2e6;
+  --line-strong: #c4c9d0;
+
+  /* accent + danger */
+  --accent: #4f5dff;
+  --accent-hover: #4048d6;
+  --text-on-accent: #ffffff;
+  --danger: #c9333b;
+  --danger-hover: #a82a31;
+
+  /* claims, on --surface-canvas */
+  --claim-own: #1f8f63; /* solid 2px region stroke */
+  --claim-edge: #b96a1b; /* solid 2px edge/connection stroke */
+  --claim-foreign: #767c85; /* dashed 1.5px, 70% opacity */
+
+  --focus-ring: #4f5dff;
+
+  /* type */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-geo: Verdana, Tahoma, sans-serif; /* .geo-surface only */
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas,
+    monospace;
+
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 32px;
+
+  /* spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 48px;
+  --space-12: 64px;
+
+  /* radii */
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --radius-full: 999px;
+
+  /* shadows */
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.08), 0 1px 1px rgba(0, 0, 0, 0.04);
+  --shadow-m: 0 4px 12px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-l: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+
+  /* presence palette (8) — cursor outlines, selection-in-progress outlines,
+     presence chip dots. Never used as a text background (chip text stays
+     --text-primary). */
+  --presence-1: #e5484d;
+  --presence-2: #d2560c;
+  --presence-3: #b8860b;
+  --presence-4: #46a758;
+  --presence-5: #12a594;
+  --presence-6: #3b82f6;
+  --presence-7: #8b5cf6;
+  --presence-8: #e93d82;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-app: #1e2024;
+    --surface-raised: #26292e;
+    --surface-sunken: #17191c;
+    --surface-canvas: #121316;
+    --surface-overlay: rgba(38, 41, 46, 0.94);
+
+    --text-primary: #edeef0;
+    --text-secondary: #a8aeb6;
+    --text-faint: #7d838b;
+
+    --line: #34383e;
+    --line-strong: #454a52;
+
+    --accent: #7c86ff;
+    --accent-hover: #939cff;
+    --text-on-accent: #12131a;
+    --danger: #ff6b6f;
+    --danger-hover: #ff8286;
+
+    --claim-own: #2aa876;
+    --claim-edge: #e08a2e;
+    --claim-foreign: #9aa0aa;
+
+    --focus-ring: #939cff;
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface-app: #1e2024;
+  --surface-raised: #26292e;
+  --surface-sunken: #17191c;
+  --surface-canvas: #121316;
+  --surface-overlay: rgba(38, 41, 46, 0.94);
+
+  --text-primary: #edeef0;
+  --text-secondary: #a8aeb6;
+  --text-faint: #7d838b;
+
+  --line: #34383e;
+  --line-strong: #454a52;
+
+  --accent: #7c86ff;
+  --accent-hover: #939cff;
+  --text-on-accent: #12131a;
+  --danger: #ff6b6f;
+  --danger-hover: #ff8286;
+
+  --claim-own: #2aa876;
+  --claim-edge: #e08a2e;
+  --claim-foreign: #9aa0aa;
+
+  --focus-ring: #939cff;
+}

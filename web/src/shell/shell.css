@@ -1,0 +1,542 @@
+/* docs/ux/design.md §3 — the shell frame. Tokens from ../theme/tokens.css.
+   Layout at each breakpoint:
+     >=1280px  rail(72) + channel(240) + main(flex) + right(280), all static
+     768-1279  right column becomes a toggled overlay
+     <768      rail+channel merge into a hamburger drawer; right column
+               becomes a toggled overlay too (design's own mobile drawer for
+               the right column is a bottom sheet — this slice keeps the
+               same side-overlay shape at every width below 1280px, a
+               deliberate simplification since the right column carries no
+               content yet; see the handback report). */
+
+.shell-root {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  background: var(--surface-app);
+  position: relative;
+  overflow: hidden;
+}
+
+.shell-drawer-scrim {
+  display: none;
+}
+
+/* -- rail ---------------------------------------------------------------- */
+
+.shell-rail {
+  flex: 0 0 72px;
+  width: 72px;
+  background: var(--surface-app);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-3) 0;
+  overflow-y: auto;
+  z-index: 2;
+}
+
+.shell-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.shell-rail-item {
+  position: relative;
+}
+
+.shell-rail-item:has(.shell-rail-icon--active)::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: var(--radius-s);
+  background: var(--accent);
+}
+
+.shell-rail-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: var(--text-md);
+  text-decoration: none;
+}
+
+.shell-rail-icon--active {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.shell-rail-add {
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  background: var(--surface-sunken);
+}
+
+/* -- channel column -------------------------------------------------------- */
+
+.shell-channel-wrap {
+  flex: 0 0 240px;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-right: 1px solid var(--line);
+  background: var(--surface-app);
+  z-index: 2;
+}
+
+.shell-channel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.shell-channel-empty {
+  padding: var(--space-3);
+}
+
+.shell-channel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+
+.shell-channel-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-channel-gear {
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: var(--radius-s);
+}
+.shell-channel-gear:hover {
+  background: var(--surface-sunken);
+}
+
+.shell-board-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+.shell-board {
+  margin-bottom: 2px;
+}
+
+.shell-board-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.shell-board-toggle {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  color: var(--text-faint);
+  width: 16px;
+  flex: 0 0 16px;
+}
+
+.shell-board-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: var(--radius-s);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: var(--text-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-board-link:hover {
+  background: var(--surface-sunken);
+}
+.shell-board-link--active {
+  background: var(--surface-sunken);
+  font-weight: 600;
+}
+
+.shell-lock {
+  font-size: 10px;
+}
+
+.shell-sheet-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 4px calc(var(--space-4) + 4px);
+}
+
+.shell-sheet-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: var(--radius-s);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-sheet-link:hover {
+  background: var(--surface-sunken);
+}
+.shell-sheet-link--active {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.shell-thread-glyph {
+  color: var(--text-faint);
+  flex: 0 0 auto;
+}
+
+.shell-start-sheet {
+  display: block;
+  padding: 3px 6px;
+  color: var(--text-faint);
+  text-decoration: none;
+  font-size: var(--text-sm);
+}
+.shell-start-sheet:hover {
+  color: var(--text-secondary);
+}
+
+.shell-channel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.shell-user-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* -- main pane / top bar ---------------------------------------------------- */
+
+.shell-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.shell-topbar {
+  flex: 0 0 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-app);
+}
+
+.shell-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--text-primary);
+  padding: 4px 6px;
+}
+
+.shell-breadcrumb {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.shell-crumb-current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.shell-crumb-ancestor {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+.shell-crumb-ancestor:hover {
+  text-decoration: underline;
+}
+
+.shell-topbar-spacer {
+  flex: 1;
+}
+
+.shell-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 4px 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.shell-search-label {
+  white-space: nowrap;
+}
+
+.shell-right-toggle {
+  display: none;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 4px 8px;
+}
+
+.shell-overflow {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+}
+
+.shell-page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  background: var(--surface-canvas);
+}
+
+/* -- right column ------------------------------------------------------------ */
+
+.shell-right {
+  flex: 0 0 280px;
+  width: 280px;
+  background: var(--surface-raised);
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+.shell-right-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  font-weight: 600;
+  font-size: var(--text-lg);
+}
+
+.shell-right-close {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+
+.shell-right-scrim {
+  display: none;
+}
+
+/* -- 768-1279px: right column becomes a toggled overlay --------------------- */
+
+@media (max-width: 1279px) {
+  .shell-right {
+    position: fixed;
+    top: 48px;
+    right: 0;
+    bottom: 0;
+    z-index: 22;
+    box-shadow: var(--shadow-l);
+    transform: translateX(100%);
+    transition: transform 0.15s ease;
+  }
+  .shell-right--open {
+    transform: translateX(0);
+  }
+  .shell-right-toggle {
+    display: inline-flex;
+  }
+  .shell-right-close {
+    display: inline-block;
+  }
+  .shell-right-scrim--open {
+    display: block;
+    position: fixed;
+    inset: 48px 0 0 0;
+    background: rgba(0, 0, 0, 0.24);
+    z-index: 21;
+  }
+}
+
+/* -- <768px: rail + channel merge into a hamburger drawer -------------------- */
+
+@media (max-width: 767px) {
+  .shell-rail,
+  .shell-channel-wrap {
+    display: none;
+  }
+  .shell-hamburger {
+    display: inline-flex;
+  }
+  .shell-topbar {
+    height: 44px;
+    flex-basis: 44px;
+  }
+  .shell-search-label {
+    display: none;
+  }
+  .shell-right {
+    width: 100%;
+  }
+
+  .shell-root--drawer-open .shell-rail,
+  .shell-root--drawer-open .shell-channel-wrap {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 31;
+  }
+  .shell-root--drawer-open .shell-rail {
+    left: 0;
+  }
+  .shell-root--drawer-open .shell-channel-wrap {
+    left: 72px;
+    width: 208px; /* 72 (rail) + 208 = design's 280px drawer */
+    flex-basis: 208px;
+  }
+  .shell-root--drawer-open .shell-drawer-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.24);
+    z-index: 30;
+  }
+}
+
+/* -- quick switcher (Ctrl/Cmd+K) --------------------------------------------- */
+
+.shell-switcher-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.32);
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.shell-switcher {
+  width: 560px;
+  max-width: calc(100vw - var(--space-4) * 2);
+  background: var(--surface-raised);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-l);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell-switcher-input {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-md);
+  background: transparent;
+  color: var(--text-primary);
+}
+.shell-switcher-input:focus-visible {
+  outline: none;
+}
+
+.shell-switcher-results {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.shell-switcher-group {
+  margin-bottom: var(--space-2);
+}
+
+.shell-switcher-group-label {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  padding: var(--space-1) var(--space-2);
+}
+
+.shell-switcher-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: var(--space-2);
+  border-radius: var(--radius-s);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+}
+.shell-switcher-item--active {
+  background: var(--surface-sunken);
+}
+
+.shell-switcher-glyph {
+  color: var(--text-faint);
+  width: 16px;
+  text-align: center;
+  flex: 0 0 16px;
+}
+
+.shell-switcher-sub {
+  margin-left: auto;
+}
+
+.shell-switcher-empty {
+  padding: var(--space-3);
+}
