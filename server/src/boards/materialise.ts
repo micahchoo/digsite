@@ -18,7 +18,7 @@
 // moved onto a pool of real OS threads. The ladder residency cache
 // (ladder.ts) is not touched here on purpose: this reads pages directly off
 // disk so materialising never evicts what a live viewer's pan has resident.
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import os from 'node:os';
 import {
   CELL,
@@ -41,9 +41,10 @@ import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { type Canvas, Image, createCanvas } from '@napi-rs/canvas';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
+import { storageFromEnv } from '../storage/index.ts';
 import { setResidentSort } from './coarse-cache.ts';
-import { ladderPagePath } from './ladder.ts';
-import { PENDING_COLOR, materialisedTilePath } from './tiles.ts';
+import { ladderPageKey } from './ladder.ts';
+import { PENDING_COLOR, materialisedTileKey } from './tiles.ts';
 
 const MATERIALISE_ZOOMS = ZOOMS.filter((z) => z <= -3);
 
@@ -62,9 +63,17 @@ type TileEntry = {
   z: Zoom;
   x: number;
   y: number;
-  path: string;
+  key: string;
   canvas: Canvas;
   ctx: ReturnType<Canvas['getContext']>;
+  // Set by EncodePool.run() once the worker pool has PNG-encoded this
+  // entry's pixels — the bytes actually written through Storage, and the
+  // same bytes installed resident below. `entry.canvas.data()` is raw
+  // RGBA, never this; storing that in the resident cache under a key
+  // served as `Content-Type: image/png` was this file's pre-phase-4 bug
+  // (the route's own test only ever asserted `cache === 'resident'`, never
+  // decoded the bytes — see materialise.test.ts).
+  png?: Buffer;
 };
 
 function tileKey(z: Zoom, x: number, y: number): string {
@@ -107,7 +116,7 @@ function allocateTiles(
           z,
           x,
           y,
-          path: materialisedTilePath(boardId, sid, z, x, y),
+          key: materialisedTileKey(boardId, sid, z, x, y),
           canvas,
           ctx: canvas.getContext('2d'),
         });
@@ -143,11 +152,12 @@ async function paintPageDirect(
   dstCtx: ReturnType<Canvas['getContext']>,
   img: Image, // reused across every page too, same reason as the canvas
 ): Promise<void> {
-  const path = ladderPagePath(boardId, s, page);
+  const key = ladderPageKey(boardId, s, page);
   dstCtx.fillStyle = '#222';
   dstCtx.fillRect(0, 0, PAGE, PAGE);
-  if (existsSync(path)) {
-    img.src = readFileSync(path);
+  const bytes = await storageFromEnv().get(key);
+  if (bytes) {
+    img.src = Buffer.from(bytes);
     await img.decode();
     dstCtx.drawImage(img, 0, 0);
   }
@@ -227,7 +237,14 @@ async function scatterSize(
 /** Round-robins finished tile canvases across a pool of real OS threads for
  * PNG encoding — the CPU cost docs/measurements/phase-1-map.md's Row 4
  * traced the 277s to. `os.cpus().length - 2` leaves two cores for the DB
- * client and the rest of the process. */
+ * client and the rest of the process.
+ *
+ * The worker (tile-encode-worker.ts) does ONLY the encode and hands the PNG
+ * back; this pool writes it through Storage on the main thread. Before
+ * phase 4 the worker wrote straight to disk — a worker thread doing its own
+ * S3 PUT would mean constructing (and authenticating) an S3Client per
+ * thread for no benefit, so the I/O moved here, onto the one Storage the
+ * rest of the process already shares. */
 class EncodePool {
   private workers: Worker[];
 
@@ -237,45 +254,54 @@ class EncodePool {
   }
 
   async run(tiles: TileEntry[]): Promise<void> {
+    const storage = storageFromEnv();
+    const puts: Promise<void>[] = [];
     let next = 0;
-    await Promise.all(
-      this.workers.map(
-        (w) =>
-          new Promise<void>((resolve, reject) => {
-            const onError = (e: ErrorEvent) => {
-              w.removeEventListener('message', onMessage);
-              w.removeEventListener('error', onError);
-              reject(e.error ?? e);
-            };
-            const onMessage = () => {
-              const entry = tiles[next++];
-              if (!entry) {
-                w.removeEventListener('message', onMessage);
-                w.removeEventListener('error', onError);
-                resolve();
-                return;
-              }
-              const buf = entry.canvas.data();
-              const rgba = buf.buffer.slice(
-                buf.byteOffset,
-                buf.byteOffset + buf.byteLength,
-              ) as ArrayBuffer; // Buffer.buffer's type admits SharedArrayBuffer; ours is never shared
-              w.postMessage(
-                {
-                  path: entry.path,
-                  width: TILE,
-                  height: TILE,
-                  rgba,
-                },
-                [rgba],
-              );
-            };
-            w.addEventListener('message', onMessage);
-            w.addEventListener('error', onError);
-            onMessage(); // prime the first job
-          }),
-      ),
-    );
+
+    const runWorker = (w: Worker) =>
+      new Promise<void>((resolve, reject) => {
+        let current: TileEntry | undefined;
+
+        const onError = (e: ErrorEvent) => {
+          w.removeEventListener('message', onMessage);
+          w.removeEventListener('error', onError);
+          reject(e.error ?? e);
+        };
+
+        const dispatchNext = () => {
+          const entry = tiles[next++];
+          current = entry;
+          if (!entry) {
+            w.removeEventListener('message', onMessage);
+            w.removeEventListener('error', onError);
+            resolve();
+            return;
+          }
+          const buf = entry.canvas.data();
+          const rgba = buf.buffer.slice(
+            buf.byteOffset,
+            buf.byteOffset + buf.byteLength,
+          ) as ArrayBuffer; // Buffer.buffer's type admits SharedArrayBuffer; ours is never shared
+          w.postMessage({ width: TILE, height: TILE, rgba }, [rgba]);
+        };
+
+        const onMessage = (ev: MessageEvent<{ png: ArrayBuffer }>) => {
+          const entry = current;
+          if (entry) {
+            const png = Buffer.from(ev.data.png);
+            entry.png = png;
+            puts.push(storage.put(entry.key, png, 'image/png'));
+          }
+          dispatchNext();
+        };
+
+        w.addEventListener('message', onMessage);
+        w.addEventListener('error', onError);
+        dispatchNext(); // prime the first job
+      });
+
+    await Promise.all(this.workers.map(runWorker));
+    await Promise.all(puts);
   }
 
   terminate(): void {
@@ -296,9 +322,21 @@ export async function materialiseSort(
   );
   const count = rows[0]?.image_count ?? 0;
 
-  const dir = `${env.DATA_DIR}/boards/${boardId}/tiles/${sid}`;
-  rmSync(dir, { recursive: true, force: true }); // a stale rebuild deletes the directory before composing
-  mkdirSync(dir, { recursive: true });
+  // A stale rebuild clears the previous run's files before composing, so a
+  // board that shrank doesn't leave orphaned extra tiles around forever.
+  // Storage (storage/index.ts) has no "delete by prefix" — deliberately,
+  // see its header comment — so this is fs-only local disk hygiene; every
+  // tile within the NEW grid is fully overwritten below regardless (the
+  // scatter draws every cell of every allocated tile), so correctness
+  // never depends on this running. Under S3 the old, out-of-grid objects
+  // are simply orphaned — never requested again, since every URL the app
+  // ever generates comes from the current grid — and are left for the
+  // deploy's own bucket lifecycle policy or `deploy/backup.sh`'s operator
+  // to reclaim if their storage cost matters.
+  if (env.STORAGE !== 's3') {
+    const dir = `${env.DATA_DIR}/boards/${boardId}/tiles/${sid}`;
+    rmSync(dir, { recursive: true, force: true });
+  }
 
   const tiles = allocateTiles(boardId, sid, count);
 
@@ -353,7 +391,11 @@ export async function materialiseSort(
   // to per-tile disk reads, same as a cold board after a restart.
   const residentTiles = new Map<string, Buffer>();
   for (const entry of entries) {
-    residentTiles.set(`${entry.z}/${entry.x}-${entry.y}`, entry.canvas.data());
+    if (!entry.png)
+      throw new Error(
+        'materialise: tile encoded with no png (unreachable — EncodePool.run resolves only once every entry received one)',
+      );
+    residentTiles.set(`${entry.z}/${entry.x}-${entry.y}`, entry.png);
   }
   setResidentSort(boardId, sid, residentTiles);
 

@@ -16,5 +16,53 @@ services:
       timeout: 3s
       retries: 10
 
+  # docs/phases/4-deploy.md section 1: so STORAGE=s3 can be exercised
+  # locally, against a real S3 API. Profile `s3` — `bun run db:up` (just
+  # `db`) is untouched; `bun run infra:up` brings up both. Never confuse
+  # with the machine's own `deploy-minio-1` (a different project, a
+  # different bucket, different ports) — this one is `digsite-minio`, API
+  # on 127.0.0.1:9100, console on 9101, neither shared with anything else
+  # on this machine.
+  minio:
+    # Docker Hub's minio/minio repo now denies anonymous pulls (a 2025
+    # licensing-dispute fallout, not anything about this project) — quay.io
+    # is minio's own other registry for the same image, still open.
+    image: quay.io/minio/minio:latest
+    container_name: digsite-minio
+    profiles: ["s3"]
+    command: server /data --console-address ":9101"
+    ports:
+      - "127.0.0.1:9100:9000"
+      - "127.0.0.1:9101:9101"
+    environment:
+      MINIO_ROOT_USER: digsite
+      MINIO_ROOT_PASSWORD: digsite-secret
+    volumes:
+      - digsite-minio:/data
+    healthcheck:
+      # No curl/wget in this image; `mc` ships inside it, so point it at
+      # itself rather than pulling in a second tool just for the probe.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: creates the `digsite` bucket, then exits. `bun run infra:up`
+  # waits on this via `docker compose up --wait`; a bucket that already
+  # exists is a no-op (`mc mb --ignore-existing`), so re-running is safe.
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: digsite-minio-init
+    profiles: ["s3"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 digsite digsite-secret &&
+      mc mb --ignore-existing local/digsite
+      "
+
 volumes:
   digsite-db:
+  digsite-minio:

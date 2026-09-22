@@ -11,11 +11,10 @@
 // unchanged by this phase) until the worker decodes the original and sets
 // the real values alongside status = 'ready'.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { pool } from '../db/pool.ts';
+import { storageFromEnv } from '../storage/index.ts';
 import { enqueueLadderJob } from '../worker/jobs.ts';
-import { originalPath } from './paths.ts';
+import { originalKey } from './paths.ts';
 import { invalidateComposedTiles } from './tiles-cache.ts';
 
 export type UploadedImage = { id: string; slot: number; status: 'pending' };
@@ -26,13 +25,17 @@ export async function uploadOne(
   filename: string,
   bytes: Uint8Array,
   properties: Record<string, unknown> = {},
+  contentType = 'application/octet-stream',
 ): Promise<UploadedImage> {
   const sha256 = createHash('sha256').update(bytes).digest('hex');
 
-  const path = originalPath(boardId, sha256);
-  if (!existsSync(path)) {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, Buffer.from(bytes));
+  const storage = storageFromEnv();
+  const key = originalKey(boardId, sha256);
+  // Content-addressed by sha256 within a board (docs/README's "Known
+  // deviation" note is unrelated) — two uploads of the same bytes already
+  // share one object, so a second upload never overwrites the first.
+  if (!(await storage.exists(key))) {
+    await storage.put(key, bytes, contentType);
   }
 
   const client = await pool.connect();

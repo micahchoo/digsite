@@ -3,15 +3,14 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 // whose images have ladder pages but no original (this task's own
 // coordinator note, not docs/phases/3-groups.md). Under `imageForViewing`,
 // same as `GET /images/:id/original` and `/images/:id`.
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { dirname } from 'node:path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { createHttpServer } from '../app.ts';
 import { paintLadder } from '../boards/ladder.ts';
-import { originalPath, previewPath } from '../boards/paths.ts';
+import { originalKey, previewKey } from '../boards/paths.ts';
 import { pool } from '../db/pool.ts';
+import { storageFromEnv } from '../storage/index.ts';
 
 let server: Server;
 let base = '';
@@ -130,7 +129,9 @@ describe('GET /images/:id/preview', () => {
     const png = paintSquare(120);
     const decoded = await loadImage(png);
     await paintLadder(boardId, slot, decoded, decoded.width, decoded.height);
-    expect(existsSync(originalPath(boardId, sha256))).toBe(false);
+    expect(await storageFromEnv().exists(originalKey(boardId, sha256))).toBe(
+      false,
+    );
 
     const res = await owner.get(`/images/${imageId}/preview`);
     expect(res.status).toBe(200);
@@ -165,17 +166,20 @@ describe('GET /images/:id/preview', () => {
     // longer side is at most 1024, never upscale a small one.
     const big = createCanvas(2000, 1000);
     big.getContext('2d').fillRect(0, 0, 2000, 1000);
-    const path = originalPath(boardId, sha256);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, big.encodeSync('png'));
+    const storage = storageFromEnv();
+    await storage.put(
+      originalKey(boardId, sha256),
+      big.encodeSync('png'),
+      'image/png',
+    );
 
-    expect(existsSync(previewPath(boardId, sha256))).toBe(false);
+    expect(await storage.exists(previewKey(boardId, sha256))).toBe(false);
     const res = await owner.get(`/images/${imageId}/preview`);
     expect(res.status).toBe(200);
     const img = await loadImage(res.buf);
     expect(img.width).toBe(1024);
     expect(img.height).toBe(512);
-    expect(existsSync(previewPath(boardId, sha256))).toBe(true);
+    expect(await storage.exists(previewKey(boardId, sha256))).toBe(true);
 
     // Second request reads the cache — same bytes, not a re-decode.
     const cached = await owner.get(`/images/${imageId}/preview`);

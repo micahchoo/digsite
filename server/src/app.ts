@@ -22,6 +22,7 @@ import { registerBoardRoutes } from './boards/routes.ts';
 import { isTusPath, tusServer } from './boards/tus.ts';
 import { env } from './env.ts';
 import { registerGroupRoutes } from './groups/routes.ts';
+import { registerHealthRoutes } from './health.ts';
 import { Router, json, param } from './http.ts';
 import { mountSheetRoom } from './sheets/room.ts';
 import { registerSheetRoutes } from './sheets/routes.ts';
@@ -52,6 +53,7 @@ accessFns.boardsForListing = boardsForListingIntent;
 
 export function createHttpServer(): Server {
   const router = new Router();
+  registerHealthRoutes(router);
   registerGroupRoutes(router);
   registerBoardRoutes(router);
   registerSheetRoutes(router);

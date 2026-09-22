@@ -1,0 +1,29 @@
+# Build context is the repo root (`docker build -f deploy/Dockerfile.web .`).
+# VITE_SERVER_ORIGIN is baked in at build time — Vite inlines
+# `import.meta.env.VITE_*` into the bundle, so it must be the externally
+# visible API origin (deploy/docker-compose.yml passes `https://api.$DOMAIN`
+# as a build arg), never an internal container hostname.
+FROM oven/bun:1 AS build
+
+WORKDIR /repo
+COPY package.json bun.lock tsconfig.base.json ./
+COPY shared/package.json shared/package.json
+COPY server/package.json server/package.json
+COPY web/package.json web/package.json
+COPY e2e/package.json e2e/package.json
+RUN bun install --frozen-lockfile
+
+COPY shared shared
+COPY web web
+
+ARG VITE_SERVER_ORIGIN
+ENV VITE_SERVER_ORIGIN=$VITE_SERVER_ORIGIN
+RUN bun run --filter @digsite/web build
+
+# The static build, served by its own caddy — no TLS here (deploy/Caddyfile's
+# front `caddy` service terminates TLS and reverse-proxies to this one),
+# just the SPA's `try_files` fallback so a client-side route refreshes to
+# index.html instead of a caddy 404.
+FROM caddy:2-alpine
+COPY --from=build /repo/web/dist /srv
+COPY deploy/web.Caddyfile /etc/caddy/Caddyfile

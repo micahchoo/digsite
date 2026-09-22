@@ -75,4 +75,16 @@ export const env = {
   // tile-cache-is-for-the-second-viewer.md. ~124 MB per sort at 1,000,000
   // images.
   COARSE_BUDGET_MB: Number(process.env.COARSE_BUDGET_MB ?? 1024),
+  // storage/index.ts#storageFromEnv: 'fs' (today's DATA_DIR layout) or 's3'
+  // (any S3-compatible endpoint, path-style — the dev compose's `minio`
+  // service, or a real bucket in production). The S3_* vars are required
+  // only when STORAGE=s3; storage/s3.ts throws its own clear error naming
+  // whichever one is missing, rather than this module throwing a generic
+  // "missing required env var" for a variable most deployments never set.
+  STORAGE: (process.env.STORAGE ?? 'fs') as 'fs' | 's3',
+  S3_ENDPOINT: process.env.S3_ENDPOINT,
+  S3_BUCKET: process.env.S3_BUCKET,
+  S3_ACCESS_KEY: process.env.S3_ACCESS_KEY,
+  S3_SECRET_KEY: process.env.S3_SECRET_KEY,
+  S3_REGION: process.env.S3_REGION ?? 'us-east-1',
 };

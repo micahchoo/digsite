@@ -1,0 +1,116 @@
+# A production deploy: db, an optional minio (profile `s3`), the server
+# (migrates then starts — Dockerfile.server), the web static build behind
+# its own caddy (Dockerfile.web), and one front caddy terminating TLS for
+# both (Caddyfile). `docker compose -f deploy/docker-compose.yml up -d`
+# from the repo root, with `deploy/.env` filled in from
+# .env.production.example — see README.md.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: digsite-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-digsite}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:-digsite}
+    volumes:
+      - digsite-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-digsite} -d ${POSTGRES_DB:-digsite}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Only started with `--profile s3`; skip it entirely when STORAGE=s3
+  # points at a real bucket instead (S3_ENDPOINT in deploy/.env).
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: digsite-minio
+    profiles: ["s3"]
+    command: server /data --console-address ":9101"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-digsite}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY required for the s3 profile}
+    volumes:
+      - digsite-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-digsite}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-digsite}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET required}
+      # SERVER_ORIGIN keeps the bind port (8800) appended by server/src/
+      # env.ts#withPort on purpose (see that file's header comment) — this
+      # is only Better Auth's own internal baseURL, never a URL handed to a
+      # browser (invite links use WEB_ORIGIN — groups/routes.ts — and
+      # cookies are port-agnostic), so the externally-visible origin being
+      # https://api.DOMAIN with no port is unaffected.
+      SERVER_ORIGIN: https://api.${DOMAIN}
+      WEB_ORIGIN: https://${DOMAIN}
+      DATA_DIR: /data
+      STORAGE: ${STORAGE:-fs}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      INVITATION_EXPIRES_IN: ${INVITATION_EXPIRES_IN:-172800}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      LADDER_BUDGET_MB: ${LADDER_BUDGET_MB:-4096}
+      MATERIALISE_BUDGET_MB: ${MATERIALISE_BUDGET_MB:-2048}
+      COARSE_BUDGET_MB: ${COARSE_BUDGET_MB:-1024}
+    volumes:
+      - digsite-data:/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8800/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        VITE_SERVER_ORIGIN: https://api.${DOMAIN}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN required}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - digsite-caddy-data:/data
+      - digsite-caddy-config:/config
+    depends_on:
+      - server
+      - web
+    restart: unless-stopped
+
+volumes:
+  digsite-postgres:
+  digsite-minio:
+  digsite-data:
+  digsite-caddy-data:
+  digsite-caddy-config:

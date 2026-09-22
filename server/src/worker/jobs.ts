@@ -5,14 +5,14 @@
 // disk for one sort). The enqueue* functions here are the only way
 // anything inserts into `jobs` — worker/index.ts only claims and retries
 // them; it does not know what a job means.
-import { readFileSync, writeFileSync } from 'node:fs';
 import { parseSortId, sortId as toSortId } from '@digsite/shared/board/sort';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { paintLadder } from '../boards/ladder.ts';
 import { materialiseSort } from '../boards/materialise.ts';
-import { originalPath } from '../boards/paths.ts';
+import { originalKey } from '../boards/paths.ts';
 import { ensureRank, markBoardRanksStale } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
+import { storageFromEnv } from '../storage/index.ts';
 
 const MAX_SIDE = 4096; // Figma's cap — same bound the request used to apply inline
 
@@ -68,9 +68,11 @@ async function runLadderJob(payload: Record<string, unknown>): Promise<void> {
   const image = rows[0];
   if (!image) return; // the image was deleted before the job ran
 
-  const path = originalPath(boardId, image.sha256);
-  const bytes = readFileSync(path); // throws (retried, then failed) if the original is gone or unreadable
-  const decoded = await loadImage(bytes); // throws on a corrupt/non-image upload
+  const key = originalKey(boardId, image.sha256);
+  const storage = storageFromEnv();
+  const bytes = await storage.get(key);
+  if (!bytes) throw new Error(`original missing: ${key}`); // throws (retried, then failed) if the original is gone or unreadable
+  const decoded = await loadImage(Buffer.from(bytes)); // throws on a corrupt/non-image upload
 
   let width = decoded.width;
   let height = decoded.height;
@@ -83,7 +85,7 @@ async function runLadderJob(payload: Record<string, unknown>): Promise<void> {
     const canvas = createCanvas(nw, nh);
     canvas.getContext('2d').drawImage(decoded, 0, 0, nw, nh);
     const resized = canvas.encodeSync('png');
-    writeFileSync(path, resized); // same content-addressed path, now capped — matches the old inline behaviour
+    await storage.put(key, resized, 'image/png'); // same content-addressed key, now capped — matches the old inline behaviour
     width = nw;
     height = nh;
     paintSource = await loadImage(resized);
