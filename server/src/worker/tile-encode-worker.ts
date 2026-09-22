@@ -13,6 +13,19 @@
 // materialise.ts's EncodePool instead, which writes it through Storage
 // (fs or s3) on the main thread. See EncodePool's own header comment for
 // why the write didn't just move to an S3 call in this file.
+//
+// docs/measurements/phase-5.md "After the leftovers", problem 1, lead
+// review round 2's site audit: the `createCanvas` per message below is NOT
+// pooled, on purpose. `EncodePool` spawns a fresh batch of these workers
+// per `materialiseSort` call and always `terminate()`s them in a `finally`
+// right after — a Bun `Worker.terminate()` tears down the whole OS
+// thread/V8 isolate, which reclaims every canvas this thread ever created
+// regardless of whether @napi-rs/canvas's own finalizer ever runs. Already
+// measured in isolation (phase-1-map.md's own "Fix 2": 5,216 tiles through
+// 30 of these threads, RSS flat at ~400 MB) — a materialise pass's peak
+// here is real but bounded and fully reclaimed at `terminate()`, never
+// compounding across passes the way materialise.ts's own main-thread
+// destination-tile canvases did before this same round pooled those too.
 import { ImageData, createCanvas } from '@napi-rs/canvas';
 
 type InMsg = {

@@ -72,3 +72,73 @@ ms, measured 2026-09-21 (`../prototype/board/RESULTS.md`).
 
 Verify with `cd server && bun test ranks.test.ts tiles.test.ts` and
 `cd shared && bun test`.
+
+## A sort nobody asks for is dead weight in every OTHER sort's index
+
+docs/measurements/phase-5.md "After the leftovers", problem 3. `board_ranks`
+hash-partitions by `board_id` (`0007_board_ranks_partitioned.sql`), but the
+primary key is `(board_id, sort_id, rank)` — partitioning by `board_id`
+alone does nothing for a SINGLE board's own accumulated `sort_id` history.
+The "Synthetic 1M" board had been rank-rebuilt under five different sorts
+across this repo's own testing history; all five shared its one partition,
+so a rebuild of just `uploaded_at.desc` still paid B-tree maintenance
+against ~5,000,000 rows that happened to share its bucket, not the
+1,000,000 the rebuild itself was writing.
+
+**Measured, in order:**
+
+1. Baseline (5 accumulated sorts in the partition, freshly vacuumed):
+   isolated `EXPLAIN (ANALYZE, BUFFERS)` on the rebuild INSERT, 3,119 ms
+   (plus ~309 ms DELETE) — 6,012,293 buffer hits for 1,000,000 rows
+   inserted.
+2. **Sweeping every OTHER (board, sort) globally unrequested for
+   1 hour** (`ranks.ts#sweepStaleRanks`, `scripts/sweep-ranks.ts`) dropped
+   4,125,798 of the database's 5,162,236 `board_ranks` rows (374 stale
+   sort histories, not just this board's) — `VACUUM ANALYZE` afterward
+   confirmed the target board's own partition held almost exactly its
+   live 1,000,000 rows. Re-measured the identical rebuild: 3,119 ms
+   INSERT, buffer hits unchanged. **No measurable improvement.** A
+   B-tree's insert cost is `O(log n)`; going from ~5M to ~1M rows in one
+   partition changes its height by about one level, which this shows
+   doesn't matter next to whatever else 6 buffer touches per inserted row
+   actually costs.
+3. **A dedicated, freshly-created table with no other data and no
+   pre-existing index** (`CREATE TABLE`, unindexed bulk `INSERT` of the
+   same 1,000,000 rows, then `ADD PRIMARY KEY` once): 1,089 ms insert +
+   260 ms index build = **1,349 ms total** — under the 2 s target with
+   room. The difference isn't table size; it's TOUCHING AN ALREADY-BUILT
+   INDEX row by row versus building one once, in bulk, from a sorted set.
+
+**Shipped: the sweep (`sweepStaleRanks`), not the dedicated table.** The
+sweep is real and worth keeping — it deleted 80% of this database's
+`board_ranks` rows as genuine, unrequested-in-an-hour garbage, and a
+production board (one or two live sorts, not five) never reaches this
+board's pathological history in the first place, so the sweep is what
+keeps it from ever compounding into item 3's problem. It does NOT close
+this specific board's gap to 2 s, and that's reported honestly above
+rather than hidden.
+
+The dedicated-table number (item 3) is real and worth someone building on:
+the shape is a per-`(board, sort)` swap-in table (`CREATE TABLE ... AS`
+then rename in), replacing the destination for `slotsForTile`,
+`imagesInRankOrder`, `sections.ts`'s boundary query, `materialise.ts`'s
+rank read, and `routes.ts`'s two direct `board_ranks` queries — four call
+sites outside `ranks.ts`, all of which currently filter a shared table by
+`board_id`/`sort_id` and would need either dynamic-identifier SQL or a
+native partition-per-pair scheme verified to actually prune on those
+columns. That's a schema redesign, not the "small server change" this
+pass's scope allows — flagging for the lead with the number already in
+hand rather than shipping it half-verified against the hot read path.
+
+`sweepStaleRanks` touches only `board_ranks`/`board_rank_state`, global
+across every board (not board-scoped — "sorts nobody has requested," not
+"this board's sorts"), and is safe to run at any time: a swept
+`(board, sort)` rebuilds transparently on its next request, the exact path
+a `stale` one already takes. `last_requested_at` (0009_rank_sweep.sql) is
+bumped by `ensureRank` on every request that finds the rank table already
+fresh, throttled to once an hour per `(board, sort)` so the hottest read
+path in the app doesn't pick up a write on every single tile request.
+
+Verify with `cd server && bun test ranks.test.ts` (`sweepStaleRanks`'s own
+test) and `bun run scripts/sweep-ranks.ts <olderThanDays>` against a real
+database.

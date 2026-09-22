@@ -47,6 +47,30 @@ import { PENDING_COLOR, materialisedTileKey } from './tiles.ts';
 
 const MATERIALISE_ZOOMS = ZOOMS.filter((z) => z <= -3);
 
+// docs/measurements/phase-5.md "After the leftovers", problem 1, lead
+// review round 2's site audit: `allocateTiles` below creates its whole
+// destination-tile batch (5,216 canvases at 1,000,000 images) fresh on
+// EVERY `materialiseSort` call, and — unlike the worker-thread encode
+// pool's canvases (tile-encode-worker.ts), which are reclaimed whole when
+// `EncodePool.terminate()` tears down the thread that made them — these
+// live on the MAIN thread and are simply let go out of scope once their
+// PNG bytes are extracted, so every rebuild permanently leaks its whole
+// batch. A board rebuilt repeatedly (an active board, or this repo's own
+// test/measurement history) compounds this over the process's lifetime.
+// Reused across calls via an uncapped free list, same shape as ladder.ts
+// and tiles.ts: `allocateTiles` draws from it before ever calling
+// `createCanvas`, and `materialiseSort` returns every entry's canvas here
+// once its PNG has been encoded (see its own `finally`).
+const tileCanvasPool: Canvas[] = [];
+
+function acquireMaterialiseTileCanvas(): Canvas {
+  return tileCanvasPool.pop() ?? createCanvas(TILE, TILE);
+}
+
+function releaseMaterialiseTileCanvas(canvas: Canvas): void {
+  tileCanvasPool.push(canvas);
+}
+
 // Exported for the pixel-identity test (materialise.test.ts) and
 // measure-map.ts, which both need the same grid math without duplicating it.
 export function tileGrid(count: number, z: Zoom): { nx: number; ny: number } {
@@ -144,14 +168,21 @@ function allocateTiles(
     const { nx, ny } = grids.get(z) as { nx: number; ny: number };
     for (let y = 0; y < ny; y++) {
       for (let x = 0; x < nx; x++) {
-        const canvas = createCanvas(TILE, TILE);
+        const canvas = acquireMaterialiseTileCanvas();
+        const ctx = canvas.getContext('2d');
+        // A reused canvas can carry a PREVIOUS pass's pixels — the scatter
+        // below only draws cells that have a real slot (ranks.ts#slotsForTile's
+        // "out of range" convention, same as tiles.ts#composeTile), so a
+        // board whose grid has trailing empty cells needs those genuinely
+        // blank, not whatever this canvas last held.
+        ctx.clearRect(0, 0, TILE, TILE);
         tiles.set(tileKey(z, x, y), {
           z,
           x,
           y,
           key: materialisedTileKey(boardId, sid, z, x, y),
           canvas,
-          ctx: canvas.getContext('2d'),
+          ctx,
         });
       }
     }
@@ -459,6 +490,11 @@ export async function materialiseSort(
     await pool_.run(entries, budget);
   } finally {
     pool_.terminate();
+    // Every entry's canvas goes back to the pool regardless of success or
+    // failure — `EncodePool.run` reads pixels via `entry.canvas.data()`
+    // (its own dispatchNext) before this point, so by the time we get here
+    // nothing still needs these.
+    for (const entry of entries) releaseMaterialiseTileCanvas(entry.canvas);
   }
 
   await pool.query(

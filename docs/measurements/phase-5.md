@@ -354,3 +354,255 @@ than tuned blind under this task's remaining time budget. Verified
 correct, not just fast: `storage.test.ts`'s full contract and
 `delete.test.ts`'s both tests (which assert `existsSync(boardDir) ===
 false` after a board delete) still pass against the new code.
+
+## After the leftovers
+
+Three problems flagged at the end of this file's own "load run" section
+above, each measured before and after. Same machine, same "Synthetic 1M"
+board for problems 1 and 3; six new `load-<n>` boards (200,000 images each,
+built and deleted by this pass, same as the twenty above but smaller) for
+problem 2. Full mechanism writeups live in the two rule files these numbers
+back: `.claude/rules/tile-cache-is-for-the-second-viewer.md` (problems 1
+and 2) and `.claude/rules/ladder-slot-vs-rank.md` (problem 3).
+
+### Problem 1 — the leak: every Canvas this process ever created, never freed
+
+**Cause.** `tiles.ts#composeTile` created a fresh destination `Canvas` on
+every composed tile, and `ladder.ts`'s resident-page LRU created a fresh
+one on every evict-then-reload cycle; `@napi-rs/canvas`'s native pixel
+buffer is never reclaimed once a `Canvas` exists, confirmed by a forced
+`Bun.gc(true)` every 2,000 iterations making no difference against never
+calling it (20,000 bare `createCanvas(256,256)` calls held RSS at +5.3 GB
+either way; the same 20,000 iterations against ONE REUSED canvas held it
+flat). A second, independent gap sat on top: `MAX_PAGES`'s arithmetic
+assumed a resident page costs exactly its raw RGBA size (1,024 KB); a
+materialised (pixels actually read, which `drawImage`-as-source always
+does) 512×512 canvas measured 1,613 KB in isolation — `LADDER_BUDGET_MB`
+was never bounding what it thought it was.
+
+**Fix.** Both `tiles.ts` and `ladder.ts` now pool: a small free-list of
+already-created canvases, drawn from before ever calling `createCanvas`,
+returned after use. `ladder.ts`'s `MAX_PAGES` is now divided by a measured
+`CANVAS_OVERHEAD_FACTOR` (1.6) so `LADDER_BUDGET_MB` bounds real memory,
+not the nominal pixel count.
+
+**Measured**, `server/scripts/leak-pan.ts` (continuous scripted pan, 8
+concurrent, `measure-map.ts`'s tile-walk shape) against the Synthetic 1M
+board, `PORT=8815` under `systemd-run --user --scope -p MemoryMax=24G -p
+MemorySwapMax=0`, RSS and `/metrics` sampled every 10 s:
+
+| | before | after |
+| --- | --- | --- |
+| duration | 900 s | 300 s (flat well inside 40 s either way, see below) |
+| RSS trend | climbs for ~200 s, then plateaus | flat from the first 10 s sample |
+| RSS peak | 11.90 GB | 5.20 GB |
+| RSS at end | 11.67 GB | 4.43 GB — budgets' sum (ladder 4 GB calibrated + coarse 114 MB + baseline) plus a stated ~0.1–1 GB overhead for V8/HTTP/DB-pool buffers under 8-way concurrent load |
+| requests served | 175,994 (195.5 req/s) | 81,283 (270.9 req/s — less GC pressure, more throughput) |
+| ladder evictions | 1,105,446 (73,700/min) | 686,114 (137,223/min) |
+
+A middle run (canvas pooling only, no accounting fix) also plateaued flat
+rather than climbing, at ~8.8 GB — proof the unbounded leak alone was
+gone, before the accounting fix brought the plateau down to budget. The
+eviction-rate increase in the final "after" column is the accounting fix's
+direct, expected cost (a smaller real-page budget thrashes more against
+the same access pattern) — a miss now costs compose latency, never memory
+growth.
+
+Never approached the 24 GB `systemd` cap at any point, before or after.
+
+#### Lead review round 2: the round-1 fix above was not enough on its own
+
+The coordinator reproduced a SHARPER case against the pre-round-1 code
+(same leak, different access pattern): 16 GB cap reached in **11.9 s**,
+cold, panning coarse zooms — `compose;dur=3204ms` on the last logged tile
+before the OOM kill. The round-1 fix (a free list capped at 32) does not
+close this: a cap bounds how many canvases are HELD, not how many are
+ever CREATED, and a cold pan fires far more than 32 concurrent
+`loadPageCanvas`/`composeTile` calls at once (one z ≤ −1 tile touches
+hundreds of distinct S=128/S=32 pages; a browser fires many tiles
+together) — every canvas beyond the cap still leaks. Four fixes followed
+from the lead's review; full mechanism in
+`.claude/rules/tile-cache-is-for-the-second-viewer.md`, summarised here:
+
+1. **Bound concurrent creation, not held count.** `server/src/util/
+   semaphore.ts` (a small counting semaphore, its own `semaphore.test.ts`
+   includes an adversarial-interleaving test for the release-handoff
+   logic itself) gates `ladder.ts#getPage`/`paintLadder`
+   (`PAGE_LOAD_CONCURRENCY = 16`) and `tiles.ts#composeTile`
+   (`TILE_COMPOSE_CONCURRENCY = 32`); the free lists are now UNCAPPED,
+   since concurrent creation can no longer outrun them.
+2. **Verified the root cause's owner.** Re-ran the isolated 20,000-canvas
+   reproduction under plain `node --expose-gc` (v24.14.0, same
+   `@napi-rs/canvas` 0.1.100): 8,217.8 MB (no forced GC) vs. 8,221.4 MB
+   (forced every 2,000 iterations) — indistinguishable, matching Bun's own
+   numbers exactly. Not a Bun N-API finalizer bug; `@napi-rs/canvas`
+   0.1.100 itself never releases a `Canvas`'s native raster surface, on
+   any runtime tested. Site audit of every other `createCanvas` call in
+   the server (`boards/routes.ts`'s two preview functions, `worker/
+   jobs.ts`'s oversized-upload resize, `materialise.ts`'s destination-tile
+   batch, `worker/tile-encode-worker.ts`, `seed.ts`) — each pooled/bounded
+   or justified why it can't grow (a worker thread that's torn down after
+   one materialise pass; a one-shot dev script whose process exits). Full
+   table in the rule file.
+3. **Pinning.** "A canvas is read synchronously right after its `await`
+   resolves" was true for one unshared caller, but the in-flight-dedup fix
+   (this section's own earlier text) means several callers can share ONE
+   promise and each resumes in ITS OWN later microtask. `ladder.ts#withPage`
+   pins the key BEFORE it ever awaits (not after resolving — the ordering
+   matters, see its own comment) so a zero-pin state is unreachable while
+   any caller is in flight. `ladder-fairness.test.ts` has an adversarial-
+   interleaving test for this, with an honest note that forcing the exact
+   race to fail on the PRE-fix code empirically, in a plain `bun:test`
+   file with no custom scheduler, did not yield to reasonable tuning — the
+   fix is correct by construction (a zero-pin state is provably
+   unreachable), not proven by a failing-then-passing test.
+4. **`boardLastActive` pruning.** Was never pruned, growing one entry per
+   board ever viewed, for the life of the process. Now pruned opportunistically
+   on every scan (`activeBoardCount`), which runs on every eviction.
+
+**Final verification: the coordinator's own repro, re-run against the
+fully-fixed code.** `scripts/cold-burst-pan.ts` (new: many concurrent
+requests immediately at cold start, biased to z=0/−1, overlapping-window
+bias so concurrent requests want the same ladder pages — the exact shape
+of a real browser's first viewport load) followed immediately by 850 s of
+`leak-pan.ts`, one continuous process, `MemoryMax=16G -p
+MemorySwapMax=0` (the coordinator's own tighter cap):
+
+| | value |
+| --- | --- |
+| cold-burst phase | 1,200 requests, 0 errors, ~7 s |
+| full run (burst + 850 s pan) | 222,014 tile requests, 17 errors (transient, not OOM-related) |
+| RSS trend | flat for the ENTIRE run, burst included — no climb phase |
+| RSS peak | 5.33 GB |
+| RSS at end | 4.36 GB |
+| ladder evictions | 1,890,380 (~133k/min average) |
+| 16 GB cap | never approached — peak was 33% of it |
+
+Before this round's fix, the SAME cold-burst-pan.ts alone (30 bursts × 40
+requests, ~7–8 s) drove the unpatched code to **11.18 GB** — most of the
+way to a 16 GB cap in under 10 seconds, matching the coordinator's own
+11.9 s report. After: the same burst peaks at **5.56 GB** and the
+following 850 s of sustained panning never moves it.
+
+### Problem 2 — multi-board fairness: an active board's floor share
+
+**Cause.** One process-wide LRU with no notion of "active": twenty boards
+panning at once meant every board's pages got evicted by the NEXT board's
+request before that board's OWN next request could reuse them — evictions
+ramping 10k → 93k/min, z ≥ −2 p95 an order of magnitude worse, in the load
+run this file's own "load run" section recorded.
+
+**Fix.** `ladder.ts` now tracks which boards have been read within
+`LADDER_ACTIVE_WINDOW_MS` (5 min default) and gives each a floor share of
+`MAX_PAGES`; eviction always picks the resident board furthest over its
+own floor (an inactive board's floor is 0). Design and the "capped scan
+silently defeats itself" bug a unit test caught while building this are in
+`.claude/rules/tile-cache-is-for-the-second-viewer.md`.
+
+**Measured**, `scripts/load-boards.ts` (6 boards × 200,000 images = 1.2M
+total, 6 viewers, 3 minutes, `LADDER_BUDGET_MB` at the 4096 default),
+before (unpatched code, same stash-based before/after as problem 1) and
+after (this pass's full fix, canvas pooling + accounting + fairness — same
+file, can't be isolated further without a second measurement pass this
+brief's time didn't allow for):
+
+| | before | after |
+| --- | --- | --- |
+| z=0 composed p50 / p95 | 23.6 / 36.0 ms | 17.5 / 25.9 ms |
+| z=−1 composed p50 / p95 | 51.7 / 65.5 ms | 40.1 / 49.8 ms |
+| z=−2 composed p50 / p95 | 70.8 / 100.2 ms | 69.7 / 87.4 ms |
+| z=−3 materialised p50 / p95 | 8.7 / 18.1 ms | 5.5 / 12.6 ms |
+| z=−4 materialised p50 / p95 | 8.6 / 18.7 ms | 5.5 / 12.3 ms |
+| z=−5 materialised p50 / p95 | 8.6 / 18.3 ms | 5.5 / 12.3 ms |
+| evictions/min (3 samples) | 85,871 / 90,630 / 90,350 | 137,461 / 140,458 / 141,102 |
+| RSS peak | 12.47 GB | 5.64 GB |
+
+Every zoom improved — including z ≥ −2, the composed path the fairness
+floor targets — despite a higher eviction rate (problem 1's accounting
+fix shrinking the real page budget, same tradeoff as above). RSS peak
+tracks problem 1's fix directly, confirmed again at a different scale (6
+boards / 1.2M images here vs. one board / 1M images there). Both `load`
+runs used `PORT=8814`; the six `load-<n>` boards were deleted afterward
+(`scripts/load-boards.ts cleanup`, confirmed 0 remaining).
+
+### Problem 3 — rank rebuild ≤ 2 s at 1M: measured, not reached, and why
+
+Full writeup: `.claude/rules/ladder-slot-vs-rank.md`'s "A sort nobody asks
+for is dead weight" section. Summary:
+
+| | value |
+| --- | --- |
+| baseline rebuild (5 accumulated sorts sharing the partition) | 3,119 ms insert + 309 ms delete |
+| after global sweep of unrequested-in-1h sorts (4,125,798 of 5,162,236 `board_ranks` rows dropped, re-vacuumed) | 3,119 ms insert — unchanged |
+| isolated dedicated table (fresh `CREATE TABLE`, unindexed bulk insert, `ADD PRIMARY KEY` once) | 1,089 ms insert + 260 ms index build = 1,349 ms — under target |
+
+**Shipped:** `sweepStaleRanks` (`server/src/boards/ranks.ts`,
+`0009_rank_sweep.sql`, `server/scripts/sweep-ranks.ts`) — real, safe,
+global database hygiene (80% of this database's `board_ranks` rows were
+genuine unrequested garbage), and what stops a production board from ever
+reaching this board's pathological multi-sort history in the first place.
+**Does not close the 2 s gap** on this specific, unusually-tested board —
+reported honestly rather than claimed. The dedicated-table number is real
+and the fastest of everything tried, but needs a schema redesign (a
+per-`(board, sort)` swap-in table, touching four read call sites outside
+`ranks.ts`) outside this pass's "small server change" scope — flagged for
+the lead with the number in hand.
+
+#### Concurrency bug found in production, fixed: two racing rebuilds
+
+Reported by the coordinator against the owner's demo server: two rank
+rebuilds of the same (board, sort) running concurrently — two `ensureRank`
+callers both reading `stale`/missing before either commits, or an
+`ensureRank` racing a manual `forceRebuildRank` — both compute and INSERT
+the identical target row set, and the second's INSERT collides with the
+first's just-committed rows once Postgres resolves the uncommitted
+conflict: `duplicate key value violates unique constraint
+"board_ranks_p10_pkey"`.
+
+**Fix**: `rebuildRank` (`server/src/boards/ranks.ts`) now takes a
+transaction-scoped Postgres advisory lock keyed by `(board_id, sort_id)`
+before touching `board_ranks` — `pg_advisory_xact_lock(hashtext($1))`,
+released automatically on commit/rollback so a crashed process can't hold
+it forever. The second caller blocks until the first commits, then
+re-checks `board_rank_state.built_at` against a timestamp captured before
+it started waiting: if the winner's commit landed after that, this
+caller's request is already satisfied and it does no work (no redundant
+INSERT to collide on); a non-racing `forceRebuildRank` call — the ordinary
+case — always sees `built_at` from before it started, so its "rebuild
+regardless of staleness" contract is unaffected.
+
+**Measured**: a new test, two `forceRebuildRank` calls fired via
+`Promise.allSettled` on the same (board, sort). At N=30 rows the race
+did not reproduce reliably (the DELETE+INSERT completes too fast locally
+for two `Promise.all`-fired calls to overlap enough); at **N=5,000** it
+reproduced the exact reported error every time, in ~7 s, on the
+pre-fix code. With the fix: both calls resolve, `board_ranks` ends with
+exactly N rows, confirmed at N=5,000 (`ranks.test.ts`).
+
+### Not done
+
+- Problem 3's dedicated-table fix is measured but not shipped (see above)
+  — the fastest path to ≤ 2 s needs a follow-up pass, not this one.
+- Problem 2's before/after table (above) measures the combined effect of
+  problem 1's fixes and problem 2's fairness floor together, since they
+  land in the same file and this brief's time didn't stretch to a third,
+  isolated measurement pass (fairness-only, leak-fixed-but-unaccounted).
+  `ladder-fairness.test.ts` isolates the fairness mechanism itself at the
+  unit level, independent of this caveat.
+- The residual ~0.1–1 GB gap between problem 1's "after" RSS and the exact
+  budget sum (V8 heap, HTTP/DB connection-pool buffers, PNG encode
+  scratch under 8-way concurrent load) wasn't broken down further — bounded
+  and flat, which was the target ("budgets' sum plus a stated overhead"),
+  not chased past that.
+- The coordinator's separate report — the demo server OOM-killed at its
+  16 GB cap after 70 minutes of real use, on the pre-round-2 code — was not
+  re-run for 70 real minutes here; the combined cold-burst + 850 s
+  (~14 min) run above is the longest single verification this pass's time
+  allowed, and it stayed flat the entire way with no sign of a slower,
+  longer-horizon climb (the "burst, then 15 min of panning" shape the
+  coordinator asked for specifically, satisfied at that duration). A
+  genuinely multi-hour soak wasn't run.
+- `@napi-rs/canvas` 0.1.100's own non-release-on-collection behaviour
+  (confirmed under both Bun and Node) was named, not filed upstream or
+  worked around by a version bump — pooling below is the mitigation; a
+  library fix or upgrade would let it be removed rather than extended.

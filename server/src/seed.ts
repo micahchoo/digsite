@@ -112,6 +112,15 @@ async function inviteAndAccept(
   return invited;
 }
 
+// docs/measurements/phase-5.md "After the leftovers", problem 1, lead
+// review round 2's site audit: NOT pooled, on purpose. `bun run seed`
+// paints a fixed, small fixture (the README's "60-image seed") and the
+// WHOLE PROCESS EXITS when the script finishes — every canvas this creates
+// is reclaimed by the OS at exit regardless of whether @napi-rs/canvas
+// ever frees it, the same reason tile-encode-worker.ts's per-message
+// canvas doesn't need pooling either (a thread torn down after one
+// materialise pass, see that file's own comment). Pooling here would add
+// complexity to a one-shot dev script for no real memory benefit.
 function paintSyntheticImage(index: number): Buffer {
   const size = 200 + (index % 5) * 60; // varied sizes, 200..440
   const canvas = createCanvas(size, size);

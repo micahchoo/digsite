@@ -42,6 +42,74 @@ function orderExpr(sort: Sort): string {
   return `(properties->>'${property}')${cast} ${dir} NULLS LAST, slot ASC`;
 }
 
+// docs/measurements/phase-5.md "After the leftovers", problem 3: a sort
+// nobody has asked for in a long time is dead weight in board_ranks_pkey
+// that every OTHER sort on the same board's partition pays to maintain —
+// see 0009_rank_sweep.sql's header for the full root-cause chain. Bumping
+// last_requested_at on literally every ensureRank call (i.e. every tile
+// request) would add a write to the hottest read path in the app for no
+// real precision a sweep measured in days needs — throttled to once per
+// this interval instead.
+const TOUCH_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+
+async function touchLastRequested(boardId: string, sid: string): Promise<void> {
+  await pool.query(
+    `UPDATE board_rank_state SET last_requested_at = now()
+     WHERE board_id = $1 AND sort_id = $2`,
+    [boardId, sid],
+  );
+}
+
+/** Deletes board_ranks + board_rank_state for every (board, sort) pair
+ * nobody has requested in `olderThanDays` — the fix for problem 3's actual
+ * root cause (a board's own accumulated multi-sort history, not board-to-
+ * board sharing, which partitioning by board_id alone cannot touch). Global
+ * across every board, matching the brief's own framing ("sorts nobody has
+ * requested"). Safe to run at any time: `ensureRank` already rebuilds a
+ * missing (board, sort) row transparently on the next request — the same
+ * path it takes for a `stale` one today — so a sweep never produces a wrong
+ * answer, only, occasionally, one slow rebuild for a sort that turns out to
+ * still be wanted. Call from an operator's cron, not wired to a timer here
+ * (worker/index.ts's poll loop is per-job, not a place to hang a
+ * once-a-day sweep) — server/scripts/sweep-ranks.ts is the entry point. */
+export async function sweepStaleRanks(
+  olderThanDays: number,
+): Promise<{ sorts: number; rows: number }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const stale = await client.query(
+      `SELECT board_id, sort_id FROM board_rank_state
+       WHERE last_requested_at < now() - ($1 || ' days')::interval`,
+      [String(olderThanDays)],
+    );
+    let rows = 0;
+    for (const s of stale.rows) {
+      const del = await client.query(
+        'DELETE FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
+        [s.board_id, s.sort_id],
+      );
+      rows += del.rowCount ?? 0;
+    }
+    await client.query(
+      `DELETE FROM board_rank_state
+       WHERE last_requested_at < now() - ($1 || ' days')::interval`,
+      [String(olderThanDays)],
+    );
+    await client.query('COMMIT');
+    for (const s of stale.rows) {
+      invalidateComposedTiles(s.board_id as string);
+      invalidateResidentSort(s.board_id as string);
+    }
+    return { sorts: stale.rows.length, rows };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function markBoardRanksStale(boardId: string): Promise<void> {
   await pool.query(
     'UPDATE board_rank_state SET stale = true WHERE board_id = $1',
@@ -61,11 +129,45 @@ export async function forceRebuildRank(
   return rebuildRank(boardId, sort);
 }
 
+/** Reported by the coordinator against the owner's demo server (same code,
+ * shared database): two rank rebuilds of the same (board, sort) running
+ * concurrently — two `ensureRank` callers both reading `stale`/missing
+ * before either commits, or an `ensureRank` racing a manual
+ * `forceRebuildRank` — both compute and INSERT the IDENTICAL target row
+ * set (same images, same sort => same ranks), and under READ COMMITTED
+ * the second transaction's INSERT collides with the first's just-committed
+ * rows: `duplicate key value violates unique constraint
+ * "board_ranks_p10_pkey"`. `rebuildRank` now serialises per (board, sort)
+ * with a transaction-scoped Postgres advisory lock (released automatically
+ * on commit/rollback, so a crashed process can't leave one held) — the
+ * second caller blocks here until the first commits, then re-checks
+ * `built_at` against a timestamp captured BEFORE this call even started
+ * waiting: if the winner's commit landed after that (a genuine race), this
+ * caller's own request is already satisfied and it does no work, instead
+ * of redoing the identical INSERT the lock exists to prevent colliding on.
+ * A NON-racing `forceRebuildRank` call (the ordinary case — an admin
+ * clicking "rebuild" once) always sees `built_at <= requestedAt` here
+ * (there was no time for anyone else's commit to land after this call's
+ * own start), so its "rebuild regardless of staleness" contract is
+ * unaffected. See ranks.test.ts's concurrent-rebuild test. */
 async function rebuildRank(boardId: string, sort: Sort): Promise<void> {
   const sid = sortId(sort);
+  const requestedAt = new Date();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `${boardId}:${sid}`,
+    ]);
+    const { rows: raced } = await client.query(
+      'SELECT built_at FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
+      [boardId, sid],
+    );
+    const builtAt = raced[0]?.built_at as Date | undefined;
+    if (builtAt && builtAt > requestedAt) {
+      await client.query('COMMIT');
+      return;
+    }
     await client.query(
       'DELETE FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
       [boardId, sid],
@@ -77,9 +179,9 @@ async function rebuildRank(boardId: string, sort: Sort): Promise<void> {
       [boardId, sid],
     );
     await client.query(
-      `INSERT INTO board_rank_state (board_id, sort_id, built_at, stale)
-       VALUES ($1, $2, now(), false)
-       ON CONFLICT (board_id, sort_id) DO UPDATE SET built_at = now(), stale = false`,
+      `INSERT INTO board_rank_state (board_id, sort_id, built_at, stale, last_requested_at)
+       VALUES ($1, $2, now(), false, now())
+       ON CONFLICT (board_id, sort_id) DO UPDATE SET built_at = now(), stale = false, last_requested_at = now()`,
       [boardId, sid],
     );
     await client.query('COMMIT');
@@ -101,10 +203,21 @@ export async function ensureRank(
 ): Promise<{ built: boolean; ms: number }> {
   const sid = sortId(sort);
   const { rows } = await pool.query(
-    'SELECT stale FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
+    'SELECT stale, last_requested_at FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
     [boardId, sid],
   );
-  if (rows.length > 0 && !rows[0].stale) return { built: false, ms: 0 };
+  if (rows.length > 0 && !rows[0].stale) {
+    // One extra UPDATE round-trip per tile request (this is on the hottest
+    // read path in the app) only when actually due — the throttle window
+    // read back here, decided client-side, instead of a WHERE clause that
+    // would still cost a full round-trip every time even on the (typical)
+    // no-op case.
+    const lastRequested = rows[0].last_requested_at as Date;
+    if (Date.now() - lastRequested.getTime() > TOUCH_THROTTLE_MS) {
+      await touchLastRequested(boardId, sid);
+    }
+    return { built: false, ms: 0 };
+  }
   const start = performance.now();
   await rebuildRank(boardId, sort);
   return { built: true, ms: performance.now() - start };

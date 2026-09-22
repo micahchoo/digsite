@@ -1,5 +1,6 @@
 import { residentBytes as coarseBytes } from './boards/coarse-cache.ts';
 import {
+  activeBoardsForMetrics as ladderActiveBoards,
   residentBytes as ladderBytes,
   evictionCount as ladderEvictions,
 } from './boards/ladder.ts';
@@ -131,6 +132,11 @@ export async function renderMetrics(): Promise<string> {
   lines.push('# HELP digsite_ladder_evictions_total Ladder pages evicted.');
   lines.push('# TYPE digsite_ladder_evictions_total counter');
   lines.push(`digsite_ladder_evictions_total ${ladderEvictions()}`);
+  lines.push(
+    '# HELP digsite_ladder_active_boards Boards with a ladder read within LADDER_ACTIVE_WINDOW_MS.',
+  );
+  lines.push('# TYPE digsite_ladder_active_boards gauge');
+  lines.push(`digsite_ladder_active_boards ${ladderActiveBoards()}`);
   lines.push('# HELP digsite_coarse_resident_bytes Coarse tiles held.');
   lines.push('# TYPE digsite_coarse_resident_bytes gauge');
   lines.push(`digsite_coarse_resident_bytes ${coarseBytes()}`);

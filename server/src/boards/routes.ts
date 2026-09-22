@@ -38,7 +38,7 @@ import {
   parseSortId,
   sortId as toSortId,
 } from '@digsite/shared/board/sort';
-import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { type Canvas, createCanvas, loadImage } from '@napi-rs/canvas';
 import { fromNodeHeaders } from 'better-auth/node';
 import {
   type BoardRow,
@@ -70,8 +70,9 @@ import {
   presignedGetUrl,
   storageFromEnv,
 } from '../storage/index.ts';
+import { Semaphore } from '../util/semaphore.ts';
 import { enqueueMaterialiseJob } from '../worker/jobs.ts';
-import { getPage } from './ladder.ts';
+import { withPage } from './ladder.ts';
 import { originalKey, previewKey } from './paths.ts';
 import { ensureRank, forceRebuildRank, imagesInRankOrder } from './ranks.ts';
 import { sectionsFor } from './sections.ts';
@@ -81,6 +82,42 @@ import { validateUpload } from './validate.ts';
 
 const PREVIEW_MAX_SIDE = 1024;
 const PREVIEW_LADDER_SIZE = 128;
+
+// docs/measurements/phase-5.md "After the leftovers", problem 1, lead
+// review round 2's site audit: both preview functions below used to call
+// `createCanvas` per request. Each result is cached permanently
+// (`originalPreview` to `previewKey`/disk; `ladderPreview`'s own caller,
+// the /images/:id/preview route, doesn't cache it — a synthetic board with
+// no originals, like every board this whole task measured against, calls
+// it on EVERY request for such an image), so this was a slower-growing
+// leak than the tile/ladder ones (bounded by distinct images previewed,
+// not by request volume, for `originalPreview`) but the same defect class.
+//
+// `originalPreview`'s output size varies per image (scaled to fit
+// PREVIEW_MAX_SIDE), so a plain same-size free list doesn't apply the way
+// it did for TILE/PAGE-sized canvases — instead this reuses ONE canvas
+// across requests by resizing it (`canvas.width =`/`canvas.height =`,
+// which clears it — the same behaviour image-graph's
+// `image-graph-atlas-tiles.md` rule documents for this canvas library, and
+// exactly what's wanted here since the whole canvas gets redrawn anyway).
+// `ladderPreview`'s output is always exactly PREVIEW_LADDER_SIZE square, so
+// its own pool is the same shape as ladder.ts's page pool. Both are gated
+// by a semaphore, same invariant as ladder.ts/tiles.ts: canvases ever
+// created <= concurrency limit, not bounded by a capped free list.
+const PREVIEW_CONCURRENCY = 8;
+const previewSemaphore = new Semaphore(PREVIEW_CONCURRENCY);
+const originalPreviewPool: Canvas[] = [];
+const ladderPreviewPool: Canvas[] = [];
+
+function acquireOriginalPreviewCanvas(w: number, h: number): Canvas {
+  const canvas = originalPreviewPool.pop();
+  if (canvas) {
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    return canvas;
+  }
+  return createCanvas(w, h);
+}
 
 /** `GET /images/:id/preview`'s first choice: the original, scaled to at
  * most `PREVIEW_MAX_SIDE` on its longer side, encoded once and cached at
@@ -98,41 +135,61 @@ async function originalPreview(
   if (cached) return Buffer.from(cached);
   const original = await storage.get(originalKey(boardId, sha256));
   if (!original) return null;
-  const img = await loadImage(Buffer.from(original));
-  const scale = Math.min(1, PREVIEW_MAX_SIDE / Math.max(img.width, img.height));
-  const w = Math.max(1, Math.round(img.width * scale));
-  const h = Math.max(1, Math.round(img.height * scale));
-  const canvas = createCanvas(w, h);
-  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-  const buf = canvas.encodeSync('png');
-  await storage.put(cachedKey, buf, 'image/png');
-  return buf;
+  return previewSemaphore.run(async () => {
+    const img = await loadImage(Buffer.from(original));
+    const scale = Math.min(
+      1,
+      PREVIEW_MAX_SIDE / Math.max(img.width, img.height),
+    );
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = acquireOriginalPreviewCanvas(w, h);
+    try {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      const buf = canvas.encodeSync('png');
+      await storage.put(cachedKey, buf, 'image/png');
+      return buf;
+    } finally {
+      originalPreviewPool.push(canvas);
+    }
+  });
 }
 
 /** The fallback when the original is gone (CONTEXT.md "Missing" — the
  * synthetic million-image board's own shape: ladder pages painted at
  * upload, no original ever kept): this image's S=128 ladder cell, cropped
- * out of its resident page. `getPage` never throws for a missing page file
- * (paints the `#222` background instead — boards/ladder.ts), so this is
- * cheap and always produces something for any real slot. */
+ * out of its resident page. `withPage` never throws for a missing page
+ * file (paints the `#222` background instead — boards/ladder.ts), so this
+ * is cheap and always produces something for any real slot. */
 async function ladderPreview(boardId: string, slot: number): Promise<Buffer> {
   const { page, x, y } = ladderAddress(slot, PREVIEW_LADDER_SIZE);
-  const pageCanvas = await getPage(boardId, PREVIEW_LADDER_SIZE, page);
-  const canvas = createCanvas(PREVIEW_LADDER_SIZE, PREVIEW_LADDER_SIZE);
-  canvas
-    .getContext('2d')
-    .drawImage(
-      pageCanvas,
-      x,
-      y,
-      PREVIEW_LADDER_SIZE,
-      PREVIEW_LADDER_SIZE,
-      0,
-      0,
-      PREVIEW_LADDER_SIZE,
-      PREVIEW_LADDER_SIZE,
-    );
-  return canvas.encodeSync('png');
+  return previewSemaphore.run(() =>
+    withPage(boardId, PREVIEW_LADDER_SIZE, page, (pageCanvas) => {
+      const canvas =
+        ladderPreviewPool.pop() ??
+        createCanvas(PREVIEW_LADDER_SIZE, PREVIEW_LADDER_SIZE);
+      try {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, PREVIEW_LADDER_SIZE, PREVIEW_LADDER_SIZE);
+        ctx.drawImage(
+          pageCanvas,
+          x,
+          y,
+          PREVIEW_LADDER_SIZE,
+          PREVIEW_LADDER_SIZE,
+          0,
+          0,
+          PREVIEW_LADDER_SIZE,
+          PREVIEW_LADDER_SIZE,
+        );
+        return canvas.encodeSync('png');
+      } finally {
+        ladderPreviewPool.push(canvas);
+      }
+    }),
+  );
 }
 
 /** A role string from `member`/`teamMember` joins can be comma-joined

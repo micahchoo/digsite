@@ -3,7 +3,11 @@
 // upload marks the state stale and the next ensureRank rebuilds.
 import { describe, expect, test } from 'bun:test';
 import { type Sort, sortId } from '@digsite/shared/board/sort';
-import { ensureRank } from '../boards/ranks.ts';
+import {
+  ensureRank,
+  forceRebuildRank,
+  sweepStaleRanks,
+} from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 
 async function makeBoard(name: string): Promise<string> {
@@ -103,4 +107,108 @@ describe('ranks', () => {
     const skipped = await ensureRank(boardId, nameSort);
     expect(skipped.built).toBe(false);
   });
+
+  test('sweepStaleRanks drops only (board, sort) pairs unrequested past the threshold, and ensureRank transparently rebuilds one it swept', async () => {
+    const boardId = await makeBoard(`sweep-test-${Date.now()}`);
+    for (let i = 0; i < 5; i++) {
+      await makeImage(boardId, i, `img-${i}`, {});
+    }
+    await pool.query('UPDATE boards SET image_count = $1 WHERE id = $2', [
+      5,
+      boardId,
+    ]);
+
+    const freshSort: Sort = { key: 'uploaded_at', dir: 'desc' };
+    const staleSort: Sort = { key: 'name', dir: 'asc' };
+    await ensureRank(boardId, freshSort);
+    await ensureRank(boardId, staleSort);
+
+    // backdate only the stale sort's last_requested_at past the threshold —
+    // touchLastRequested (ranks.ts) is throttled to update on read, so a
+    // test exercising the sweep itself has to set the clock back directly,
+    // the same way markBoardRanksStale's own caller (upload) sets `stale`
+    // directly rather than going through a request.
+    await pool.query(
+      `UPDATE board_rank_state SET last_requested_at = now() - interval '10 days'
+       WHERE board_id = $1 AND sort_id = $2`,
+      [boardId, sortId(staleSort)],
+    );
+
+    const swept = await sweepStaleRanks(7);
+    expect(swept.sorts).toBeGreaterThanOrEqual(1);
+    expect(swept.rows).toBeGreaterThanOrEqual(5);
+
+    const { rows: staleRows } = await pool.query(
+      'SELECT 1 FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
+      [boardId, sortId(staleSort)],
+    );
+    expect(staleRows.length).toBe(0);
+    const { rows: staleRankRows } = await pool.query(
+      'SELECT 1 FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
+      [boardId, sortId(staleSort)],
+    );
+    expect(staleRankRows.length).toBe(0);
+
+    const { rows: freshRows } = await pool.query(
+      'SELECT 1 FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
+      [boardId, sortId(freshSort)],
+    );
+    expect(freshRows.length).toBe(1);
+
+    // swept sort rebuilds transparently on its next request, same path a
+    // stale one already takes.
+    const { built } = await ensureRank(boardId, staleSort);
+    expect(built).toBe(true);
+    const { rows: rebuiltRows } = await pool.query(
+      'SELECT rank, slot FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
+      [boardId, sortId(staleSort)],
+    );
+    expect(rebuiltRows.length).toBe(5);
+  });
+
+  test('two concurrent rebuilds of the same (board, sort) both resolve and the table ends with exactly N rows', async () => {
+    const boardId = await makeBoard(`concurrent-rebuild-test-${Date.now()}`);
+    const N = 5000;
+    for (let i = 0; i < N; i++) {
+      await makeImage(boardId, i, `img-${String(N - i).padStart(3, '0')}`, {});
+    }
+    await pool.query('UPDATE boards SET image_count = $1 WHERE id = $2', [
+      N,
+      boardId,
+    ]);
+
+    const sort: Sort = { key: 'name', dir: 'asc' };
+
+    // Before the advisory lock (server/src/boards/ranks.ts#rebuildRank),
+    // two rebuilds racing like this reproduced
+    // `duplicate key value violates unique constraint "board_ranks_..._pkey"`
+    // on the owner's demo server — both compute and INSERT the identical
+    // target row set. Firing forceRebuildRank (never skips on `stale`, so
+    // both calls definitely attempt a real rebuild, not one short-circuiting
+    // on ensureRank's own pre-check) twice at once is the sharpest
+    // reproduction of that race. N=5000 matters: confirmed by hand that a
+    // smaller N (30) does not reliably overlap two Promise.all-fired calls
+    // enough to trigger it — the DELETE+INSERT completes too fast locally
+    // for the race window to open reliably at that size, even without the
+    // fix. Reverting the lock+re-check above and re-running this test at
+    // N=5000 reproduces the exact reported error in ~7s.
+    const results = await Promise.allSettled([
+      forceRebuildRank(boardId, sort),
+      forceRebuildRank(boardId, sort),
+    ]);
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        throw new Error(`concurrent rebuild rejected: ${r.reason}`);
+      }
+    }
+
+    const { rows } = await pool.query(
+      'SELECT rank, slot FROM board_ranks WHERE board_id = $1 AND sort_id = $2 ORDER BY rank',
+      [boardId, sortId(sort)],
+    );
+    expect(rows.length).toBe(N);
+    const ranks = rows.map((r) => r.rank).sort((a, b) => a - b);
+    expect(ranks).toEqual([...Array(N).keys()]);
+  }, 20_000); // two real 5,000-row rebuilds exceed bun:test's default 5s
+  // per-test timeout even on the fixed, non-racing path.
 });

@@ -116,6 +116,17 @@ export const env = {
   // opts in on purpose, same posture as AUTH_SECRET.
   METRICS_TOKEN: process.env.METRICS_TOKEN,
   LADDER_BUDGET_MB: Number(process.env.LADDER_BUDGET_MB ?? 4096),
+  // boards/ladder.ts's per-board eviction floor (docs/measurements/
+  // phase-5.md "After the leftovers", problem 2): a board counts as
+  // "active" — and gets a floor share of LADDER_BUDGET_MB protected from
+  // eviction by every OTHER board's traffic — while it has been read from
+  // within this window. 5 minutes: long enough to survive a viewer
+  // reading one tile then thinking for a moment, short enough that a
+  // board nobody's looked at in a while stops holding a floor share other
+  // open boards could use.
+  LADDER_ACTIVE_WINDOW_MS: Number(
+    process.env.LADDER_ACTIVE_WINDOW_MS ?? 5 * 60 * 1000,
+  ),
   INVITATION_EXPIRES_IN: Number(process.env.INVITATION_EXPIRES_IN ?? 172800),
   // The in-process worker's poll concurrency (docs/phases/1-map.md "Upload
   // as a worker"). No longer materialise.ts's parallelism — see

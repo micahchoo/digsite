@@ -6,7 +6,12 @@
 // anything inserts into `jobs` — worker/index.ts only claims and retries
 // them; it does not know what a job means.
 import { parseSortId, sortId as toSortId } from '@digsite/shared/board/sort';
-import { type Image, createCanvas, loadImage } from '@napi-rs/canvas';
+import {
+  type Canvas,
+  type Image,
+  createCanvas,
+  loadImage,
+} from '@napi-rs/canvas';
 import { paintLadder } from '../boards/ladder.ts';
 import { materialiseSort } from '../boards/materialise.ts';
 import { originalKey } from '../boards/paths.ts';
@@ -16,6 +21,29 @@ import { env } from '../env.ts';
 import { storageFromEnv } from '../storage/index.ts';
 
 const MAX_SIDE = 4096; // Figma's cap — same bound the request used to apply inline
+
+// docs/measurements/phase-5.md "After the leftovers", problem 1, lead
+// review round 2's site audit: an oversized upload's resize used to
+// `createCanvas` per job. Rarer than the tile/ladder leaks (only images
+// past MAX_SIDE hit this branch, and WORKER_CONCURRENCY — 4 by default —
+// already bounds how many run at once, unlike the unbounded HTTP paths
+// fixed elsewhere), but the same defect on a long-running worker process:
+// every resize permanently leaks its canvas. Variable dimensions per
+// image, same reuse-by-resize trick as boards/routes.ts's
+// `originalPreview` — an uncapped free list, correctness following from
+// WORKER_CONCURRENCY already bounding concurrent jobs rather than from a
+// separate semaphore here.
+const resizePool: Canvas[] = [];
+
+function acquireResizeCanvas(w: number, h: number): Canvas {
+  const canvas = resizePool.pop();
+  if (canvas) {
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    return canvas;
+  }
+  return createCanvas(w, h);
+}
 
 // Phase 5 section 4 (docs/phases/5-hardening.md "Operability", the worker
 // bullet): a decode failure is deterministic — the same bytes fail the
@@ -128,9 +156,16 @@ async function runLadderJob(payload: Record<string, unknown>): Promise<void> {
     const scale = MAX_SIDE / Math.max(width, height);
     const nw = Math.round(width * scale);
     const nh = Math.round(height * scale);
-    const canvas = createCanvas(nw, nh);
-    canvas.getContext('2d').drawImage(decoded, 0, 0, nw, nh);
-    const resized = canvas.encodeSync('png');
+    const canvas = acquireResizeCanvas(nw, nh);
+    let resized: Buffer;
+    try {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, nw, nh);
+      ctx.drawImage(decoded, 0, 0, nw, nh);
+      resized = canvas.encodeSync('png');
+    } finally {
+      resizePool.push(canvas);
+    }
     await storage.put(key, resized, 'image/png'); // same content-addressed key, now capped — matches the old inline behaviour
     width = nw;
     height = nh;
