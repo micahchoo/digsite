@@ -419,8 +419,9 @@ Field holding images 0..11; sheet "Faces" holding 6..17. Idempotent.
 - `ranks.test.ts` — a board of 20 images; each sort's ranks are a
   permutation of the slots; a property sort puts missing values last;
   an upload marks the state stale and the next `ensureRank` rebuilds.
-- `tiles.test.ts` — tile `(0,0,0)` of the seeded board has four painted
-  cells; `X-Cache` is `miss` then `hit`.
+- `tiles.test.ts` — tile `(0,0,0)` of the seeded board has its two
+  first-row cells painted (ranks 0 and 1; ranks 1024 and 1025 need a
+  board of 1,026 images); `X-Cache` is `miss` then `hit`.
 - `snapshot.test.ts` — merge by version; project a scene with one image,
   one region, one edge; the rows match; a stale scene cannot roll back.
 

@@ -1,0 +1,106 @@
+// docs/design.md "Tests": a board of 20 images; each sort's ranks are a
+// permutation of the slots; a property sort puts missing values last; an
+// upload marks the state stale and the next ensureRank rebuilds.
+import { describe, expect, test } from 'bun:test';
+import { type Sort, sortId } from '@digsite/shared/board/sort';
+import { ensureRank } from '../boards/ranks.ts';
+import { pool } from '../db/pool.ts';
+
+async function makeBoard(name: string): Promise<string> {
+  const { rows } = await pool.query(
+    'INSERT INTO boards (org_id, name, open, created_by) VALUES ($1,$2,true,$3) RETURNING id',
+    [`org-test-${Date.now()}`, name, 'test-user'],
+  );
+  return rows[0].id;
+}
+
+async function makeImage(
+  boardId: string,
+  slot: number,
+  name: string,
+  properties: Record<string, unknown>,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO images (board_id, slot, sha256, name, width, height, uploaded_by, properties)
+     VALUES ($1,$2,$3,$4,100,100,'tester',$5)`,
+    [
+      boardId,
+      slot,
+      `sha-${slot}-${Date.now()}`,
+      name,
+      JSON.stringify(properties),
+    ],
+  );
+}
+
+describe('ranks', () => {
+  test('ranks are a permutation of slots; property sort NULLS LAST; stale marks a rebuild', async () => {
+    const boardId = await makeBoard(`ranks-test-${Date.now()}`);
+    const N = 20;
+    const missingSlots = new Set<number>();
+
+    for (let i = 0; i < N; i++) {
+      const hasYear = i % 5 !== 0;
+      if (!hasYear) missingSlots.add(i);
+      const properties = hasYear ? { year: 2000 + ((N - i) % N) } : {};
+      // zero-padded names in reverse order so name.asc isn't slot order —
+      // a real permutation, not a coincidence of insertion order.
+      await makeImage(
+        boardId,
+        i,
+        `img-${String(N - i).padStart(3, '0')}`,
+        properties,
+      );
+    }
+    await pool.query('UPDATE boards SET image_count = $1 WHERE id = $2', [
+      N,
+      boardId,
+    ]);
+
+    const nameSort: Sort = { key: 'name', dir: 'asc' };
+    const sorts: Sort[] = [
+      nameSort,
+      { key: 'uploaded_at', dir: 'desc' },
+      { key: { property: 'year', type: 'number' }, dir: 'asc' },
+    ];
+
+    for (const sort of sorts) {
+      const { built } = await ensureRank(boardId, sort);
+      expect(built).toBe(true);
+      const { rows } = await pool.query(
+        'SELECT rank, slot FROM board_ranks WHERE board_id = $1 AND sort_id = $2 ORDER BY rank',
+        [boardId, sortId(sort)],
+      );
+      expect(rows.length).toBe(N);
+      const ranks = rows.map((r) => r.rank).sort((a, b) => a - b);
+      expect(ranks).toEqual([...Array(N).keys()]);
+      const slots = rows.map((r) => r.slot).sort((a, b) => a - b);
+      expect(slots).toEqual([...Array(N).keys()]);
+    }
+
+    // property sort ascending: images with no "year" property sort last.
+    const propSort: Sort = {
+      key: { property: 'year', type: 'number' },
+      dir: 'asc',
+    };
+    const { rows: propRanked } = await pool.query(
+      'SELECT rank, slot FROM board_ranks WHERE board_id = $1 AND sort_id = $2 ORDER BY rank',
+      [boardId, sortId(propSort)],
+    );
+    const tail = propRanked.slice(N - missingSlots.size);
+    for (const row of tail) expect(missingSlots.has(row.slot)).toBe(true);
+    const head = propRanked.slice(0, N - missingSlots.size);
+    for (const row of head) expect(missingSlots.has(row.slot)).toBe(false);
+
+    // an upload (simulated here by the same stale flag it sets) marks the
+    // state stale; ensureRank rebuilds once, then reports no rebuild needed.
+    await pool.query(
+      'UPDATE board_rank_state SET stale = true WHERE board_id = $1',
+      [boardId],
+    );
+    const rebuilt = await ensureRank(boardId, nameSort);
+    expect(rebuilt.built).toBe(true);
+    const skipped = await ensureRank(boardId, nameSort);
+    expect(skipped.built).toBe(false);
+  });
+});

@@ -1,0 +1,28 @@
+{
+  "name": "@digsite/server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "migrate": "bun run src/db/migrate.ts",
+    "seed": "bun run src/seed.ts",
+    "test": "bun test",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@digsite/shared": "workspace:*",
+    "better-auth": "^1.7.5",
+    "pg": "^8.23.0",
+    "socket.io": "^4.8.3",
+    "@napi-rs/canvas": "^0.1.65"
+  },
+  "devDependencies": {
+    "@better-auth/cli": "^1.4.21",
+    "@types/pg": "^8.23.1",
+    "socket.io-client": "^4.8.3",
+    "typescript": "^5.7.0",
+    "@types/bun": "^1.2.0"
+  }
+}
