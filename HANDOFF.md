@@ -2,37 +2,32 @@
 
 Updated 2026-09-22 evening. Phases 0–4 done and committed; the native canvas adapter (phase 2 §8) is in flight; phase 5 (hardening) is where the autonomous run stops. Roadmap: `docs/roadmap.md`.
 
-## Where things stand
+## Where things stand (2026-09-22, paused by the owner)
 
-The repo was scaffolded from the brainstorm record
-(`../.brainstorm/sessions/0001-shared-image-canvas.md`) and the three
-prototypes' numbers, not their code. Build order, each step by a Sonnet
-subagent against `docs/design.md`:
+Committed on `main` (49 commits): phases 0–4, phase 5 hardening
+(access audit, limits, sessions, logs, metrics, CI with a fresh-database
+e2e, scale debts, the canvas leak fix, ladder fairness, serialised rank
+rebuilds), the UX audit and design (`docs/ux/`), the UX defect fixes,
+and slice 1 of the design (the Discord shell).
 
-1. root + `shared/` — DONE. 41 tests, tsc and Biome clean.
-2. `server/` and `web/` — DONE, each committed.
-3. `e2e/` walking-skeleton run — DONE, 10/10 (`e2e/RESULTS.md`).
-4. Phase 1 server (worker, tus, materialise, sections) — DONE, committed.
-5. Phase 1 web (sections, hover, selection, detail, uploads) — DONE, committed.
-6. Phase 1 scale run — DONE, committed (`docs/measurements/phase-1-map.md`): rank rebuild 6.5 s, materialise 277 s, coarse p95 10 ms miss target; causes diagnosed. FIX IN FLIGHT (drop the rank FK, scatter materialisation over pages with worker-thread PNG encoding, resident coarse tiles) on ports 8801/5181; uncommitted edits under `server/src/boards/**`, `worker/`, migration 0004.
-7. Phase 2 web (drawing, inspector, dangling, rename) — DONE, committed.
-8. Phase 3 web (join, members, allowlist, delete flows) — DONE, committed; the stub in `web/stub/server.ts` is the contract the server halves must match.
-9. Phase 2 server (presence, neighbourhood, sheet stats + rename, ring layout, projection keeps dangling edges) — DONE, committed.
-10. Phase 2 web step 2 — DONE, committed; `e2e/src/sheet-hour.ts` dry-run against the stub only.
-11. Seam linter (`scripts/seams/lint.ts`, checks in each rule's frontmatter, `bun run lint:seams`, part of `bun run check`) — DONE, committed.
-12. Phase 3 server — DONE, committed; `groups-life.ts` 9/9 for real.
-13. Phase 4 (storage port fs/s3, deploy/, backups, health) — DONE, committed (merged from a worktree branch).
-14. Canvas seam: Excalidraw isolated in `web/src/sheet/canvas/` — DONE; then four real-server defects fixed (snapshot index order, stale overlay after a programmatic viewport change, first-change-per-frame drop, float4 fractions).
-15. Real-server suites on the demo (`../demo`, a worktree on main, server 8800 + vite 5180 running in the background): `run.ts` 8/10 (1 and 2 fail only on fixture debris), `sheet-hour.ts` 7/7, `groups-life.ts` 9/9.
-16. Native adapter — DONE, committed: `web/src/sheet/canvas/native/` (camera, gestures, scene, spatial, render, history) behind the same `CanvasHandle`; `VITE_CANVAS=native` or `?canvas=native`; both adapters share the persisted element JSON. Passes the same smokes, e2e 6–10 and the hour run. Not yet exercised in a browser by any suite: grip resize and marquee select. Routing is straight lines. Deleting Excalidraw needs those plus a rewrite of `foreign-never-in-scene.md` for a renderer that draws foreign claims itself.
-17. Excalidraw adapter: two applies in one tick no longer lose the first (pending list until Excalidraw reports it), and `apply` emits `onChange` itself because Excalidraw batches or reorders its reports (two connects reached the server as one edge in 4 of 5 runs before). Smokes and the stub take `WEB_ORIGIN`/`SERVER_ORIGIN`/`PORT`. The e2e workspace's script is `e2e`, not `test`, so root `bun run test` no longer drives the live demo.
-18. NEXT: phase 5 hardening (`docs/roadmap.md`) — the autonomous run stops here.
+PAUSED, UNCOMMITTED in the working tree — review the diff before
+committing anything:
+- Slice 2, board and selection (web/**, web/stub, shared/src/api.ts):
+  the agent reported 11/11 smokes green just before it was stopped;
+  its own final cleanup did not run.
+- Phase 6 server work (server/**, migrations 0010+): stopped mid-way,
+  last step was wiring property indexes into rank rebuild. Incomplete.
 
-The demo worktree at `../demo` runs the app for the owner; move it with `git checkout --detach main` and restart the server by pid when server code changes (vite reloads web on its own).
+OPEN DEFECT: the demo server was OOM-killed at its 16 GB cap 11 s
+after a restart on the leak-fixed code. Not startup (flat at 190 MB),
+not a single tile per zoom. The request that did it never finished,
+so it is not in the log. A 1 s RSS sampler writes to the session
+scratchpad `demo-rss.log`; correlate a spike with the journal
+(`journalctl --user -u digsite-demo-server`).
 
-Crash note: the session died twice (02:05, 08:08) from the kernel OOM-killing a `bun` worker at ~84 GB during the scatter materialisation; a third at 93 GB was killed by hand. The fix agent must cap memory (`MATERIALISE_BUDGET_MB`) and run heavy steps under `systemd-run --user --scope -p MemoryMax=40G`.
-
-Committed at each phase boundary on `main`, no attribution trailers (user instruction).
+The demo runs as a user service: `systemctl --user status
+digsite-demo-server` (16 GB cap), from `../demo` (a worktree on main);
+vite for the demo on 5180 runs separately. Demo users use `password1`.
 
 ## Read first
 
