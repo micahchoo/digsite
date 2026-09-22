@@ -8,6 +8,7 @@ import type {
   GetSheetRowsResponse,
   GetStatsResponse,
   ListSheetsResponse,
+  SheetFootprint,
   SheetImage,
   UpdateSheetRequest,
   UpdateSheetResponse,
@@ -23,6 +24,7 @@ import {
 import {
   boardForCreatingSheet,
   boardForViewing,
+  sheetForDeleting,
   sheetForEditing,
 } from '../access/index.ts';
 import { pool } from '../db/pool.ts';
@@ -270,6 +272,62 @@ export function registerSheetRoutes(router: Router) {
     ]);
     const response: UpdateSheetResponse = { name };
     json(ctx.res, 200, response);
+  });
+
+  // GET /sheets/:id/footprint (docs/phases/3-groups.md section 4): how many
+  // OTHER sheets hold an image carrying a claim (region or edge) this sheet
+  // made — the delete confirmation's count. A claim counts as held the same
+  // way GET /sheets/:id/foreign does: a region by its image, an edge by
+  // BOTH endpoint images.
+  router.get('/sheets/:id/footprint', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForDeleting(userId, param(ctx, 'id'));
+    const { rows } = await pool.query(
+      `SELECT COUNT(DISTINCT other_sheet) AS count FROM (
+         SELECT r.sheet_id AS other_sheet FROM regions r
+         WHERE r.sheet_id != $1
+           AND r.image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)
+         UNION
+         SELECT e.sheet_id AS other_sheet FROM edges e
+         WHERE e.sheet_id != $1
+           AND e.src_image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)
+           AND e.dst_image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)
+       ) other_sheets`,
+      [sheet.id],
+    );
+    const response: SheetFootprint = { foreignViews: Number(rows[0].count) };
+    json(ctx.res, 200, response);
+  });
+
+  // DELETE /sheets/:id (docs/phases/3-groups.md section 4): the snapshot and
+  // this sheet's own rows. Claims other sheets saw as foreign simply vanish
+  // from their next poll (GET /sheets/:id/foreign already filters by
+  // `sheet_id != $1` against live rows); their own copies (made via
+  // copyForeign, ordinary own regions from the moment they exist — see
+  // .claude/rules/foreign-never-in-scene.md) stay untouched.
+  router.del('/sheets/:id', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForDeleting(userId, param(ctx, 'id'));
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM edges WHERE sheet_id = $1', [sheet.id]);
+      await client.query('DELETE FROM regions WHERE sheet_id = $1', [sheet.id]);
+      await client.query('DELETE FROM sheet_snapshots WHERE sheet_id = $1', [
+        sheet.id,
+      ]);
+      await client.query('DELETE FROM sheet_images WHERE sheet_id = $1', [
+        sheet.id,
+      ]);
+      await client.query('DELETE FROM sheets WHERE id = $1', [sheet.id]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+    json(ctx.res, 200, {});
   });
 
   router.get('/sheets/:id/elements', async (ctx) => {

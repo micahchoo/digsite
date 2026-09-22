@@ -6,6 +6,7 @@
   "scripts": {
     "test": "bun run src/run.ts",
     "sheet-hour": "bun run src/sheet-hour.ts",
+    "groups-life": "bun run src/groups-life.ts",
     "check": "tsc --noEmit"
   },
   "dependencies": {

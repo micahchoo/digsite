@@ -1,8 +1,12 @@
 // One request type and one response type per route in docs/design.md's
 // "Routes" section, so web/ never spells a payload by hand, plus the
 // Socket.IO event payloads for a sheet room. A GET with no body has no
-// Request type. Binary routes (the tile PNG, the original image) are not
-// JSON and are not typed here.
+// Request type. Binary routes (the tile PNG, the original image, and
+// `GET /images/:id/preview` — the original scaled to <=1024px, or the
+// image's S=128 ladder cell when there is no original) are not JSON and
+// are not typed here. `web/src/lib/api.ts`'s `originalUrl` builder gets a
+// `previewUrl` sibling the same way, not a typed field — neither route
+// answers with a URL in a JSON body anywhere in this file today.
 
 import type { SortKey } from './board/sort.ts';
 import type { EdgeRow, Foreign, RegionRow } from './sheet/claims.ts';
@@ -19,7 +23,10 @@ export type Group = { id: string; name: string; role: Role };
 export type ListGroupsResponse = Group[];
 
 export type InviteRequest = { email: string };
-export type InviteResponse = { invitationId: string };
+// Phase 3 (docs/phases/3-groups.md section 1): widened with the join URL
+// (`WEB_ORIGIN/join/<invitationId>`) the group page shows with a copy
+// button — every existing reader of `invitationId` is unaffected.
+export type InviteResponse = { invitationId: string; url: string };
 
 export type AcceptInvitationResponse = { groupId: string };
 
@@ -31,13 +38,40 @@ export type Member = {
 };
 export type ListMembersResponse = Member[];
 
+// Phase 3 section 1: GET /invitations/:id is public (no session) — the
+// join page's preview before signing in or up.
+export type GetInvitationResponse = {
+  groupName: string;
+  inviterName: string;
+  open: boolean;
+};
+
+// Phase 3 section 1: GET /groups/:id/invitations, under groupForInviting.
+export type PendingInvitation = {
+  id: string;
+  email: string | null;
+  createdAt: string;
+};
+export type ListPendingInvitationsResponse = PendingInvitation[];
+
+// Phase 3 section 2: PATCH /groups/:id/members/:userId, under
+// groupForManagingMembers.
+export type UpdateMemberRoleRequest = { role: Role };
+export type UpdateMemberRoleResponse = { userId: string; role: Role };
+
 // -- Boards ----------------------------------------------------------------
 
+// Phase 3 section 5 (docs/phases/3-groups.md): GET /groups/:id/boards widens
+// this with the group home's stats — every existing reader of
+// id/name/open/imageCount is unaffected.
 export type BoardSummary = {
   id: string;
   name: string;
   open: boolean;
   imageCount: number;
+  groupId: string;
+  sheetCount: number;
+  lastActivity: string | null;
 };
 export type ListBoardsResponse = BoardSummary[];
 
@@ -45,6 +79,9 @@ export type CreateBoardRequest = { name: string; open: boolean };
 export type CreateBoardResponse = { id: string };
 
 export type SortableKey = { key: SortKey; label: string };
+// Phase 3: widened with the board's group id, so a board page (which has no
+// group id in its own URL) can fetch group members for the allowlist's
+// "add" control.
 export type GetBoardResponse = {
   id: string;
   name: string;
@@ -52,6 +89,7 @@ export type GetBoardResponse = {
   imageCount: number;
   defaultSort: string;
   sortableKeys: SortableKey[];
+  groupId: string;
 };
 
 export type UpdateBoardRequest = { defaultSort: string };
@@ -59,6 +97,49 @@ export type UpdateBoardResponse = { defaultSort: string };
 
 export type AllowlistRequest = { userId: string };
 export type AllowlistResponse = { userId: string }[];
+
+// Phase 3 section 4: PATCH /boards/:id {name} — the same route as
+// UpdateBoardRequest/Response above (defaultSort), branched on which field
+// the body carries.
+export type RenameBoardRequest = { name: string };
+export type RenameBoardResponse = { name: string };
+
+// Phase 3 section 4: DELETE confirmation counts, under boardForDeleting.
+export type BoardFootprint = {
+  images: number;
+  sheets: number;
+  regions: number;
+  edges: number;
+};
+// Phase 3 section 4: DELETE /sheets/:id confirmation, under sheetForDeleting
+// — count of OTHER sheets holding an image with a claim from this sheet.
+export type SheetFootprint = { foreignViews: number };
+
+// Phase 3 section 3: GET /boards/:id/allowlist, under boardForViewing.
+export type GetBoardAllowlistResponse = { groupId: string; members: Member[] };
+
+// Phase 2 section 4 (docs/phases/2-sheet.md): sheet-from-a-neighbourhood.
+// `ids=<comma-separated image ids>` on GET /boards/:id/images answers with
+// exactly those images, order preserved, each carrying its RANK under the
+// `sort` param passed alongside it (via ensureRank first).
+export type BoardImageWithRank = BoardImage & { rank?: number };
+export type ListBoardImagesByIdsResponse = { images: BoardImageWithRank[] };
+
+// Phase 2 section 4: GET /boards/:id/relations — distinct relations across
+// every sheet's own edges on this board, for the Explore panel's relation
+// filter.
+export type GetBoardRelationsResponse = string[];
+
+// Phase 3 section 5: recent sheets across boards a user can see, for the
+// group home page.
+export type RecentSheet = {
+  id: string;
+  name: string;
+  boardId: string;
+  boardName: string;
+  savedAt: string | null;
+};
+export type ListRecentSheetsResponse = RecentSheet[];
 
 // Phase 1 (docs/phases/1-map.md "Upload as a worker"): the request enqueues
 // a ladder job and reports each image's status instead of always being

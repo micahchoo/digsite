@@ -99,3 +99,99 @@ Delete is phase 3.
 1. drawing + inspector (web) ‖ presence + neighbourhood + rename (server)
 2. sheet-from-neighbourhood UI + dangling (web)
 3. the hour run
+
+## 7. The canvas seam — Excalidraw becomes an implementation detail
+
+Added 2026-09-22 after using the app: with an edge selected the page
+shows Excalidraw's whole properties panel (stroke, sloppiness, font,
+layers), its menu, library, help button and footer, its hand-drawn
+font on labels, and our toolbar and a debug status line beside them.
+It reads as Excalidraw with extras. `Sheet.tsx` is 675 lines mixing
+the socket, image loading, the change pipeline, presence, polling and
+layout, and the stock toolbar is hidden by a CSS override.
+
+The split, in the vocabulary of `codebase-design`: one deep module
+owns Excalidraw; the rest of the sheet is product UI that talks to it
+through a small interface and never imports the package.
+
+### `web/src/sheet/canvas/` — the module
+
+The only directory that imports `@excalidraw/*`. Enforced by the seam
+linter (`.claude/rules/sheet-canvas-seam.md`).
+
+```ts
+// canvas/Canvas.tsx
+export type CanvasProps = {
+  initial: SceneElement[];            // the snapshot
+  files: Map<string, string>;          // fileId -> object URL, loaded by the caller
+  tool: Tool;                          // 'select' | 'region' | 'edge' | 'pan'
+  onChange(scene: SceneChange): void;  // elements (own), viewport, selection
+  onPointer?(p: PointerEvent): void;   // scene coords, for presence and DrawLayer
+};
+export type SceneChange = { elements: SceneElement[]; viewport: Viewport; selectedIds: string[] };
+export type CanvasHandle = {
+  elements(): SceneElement[];          // live, including deleted within the tombstone window
+  apply(patch: ScenePatch, opts?: { history?: boolean }): void; // add/update/remove by id
+  applyRemote(elements: SceneElement[]): void;                   // reconcile, never in history
+  select(ids: string[]): void;
+  viewport(): Viewport; setViewport(v: Partial<Viewport>): void;
+  zoomToFit(ids?: string[]): void;
+  undo(): void; redo(): void;
+};
+```
+
+`SceneElement`, `Viewport`, `ScenePatch` and `Tool` are ours, in
+`canvas/types.ts`, and are the only shapes that cross the seam; the
+Excalidraw element type never leaves the directory. Behind the seam:
+`UIOptions` that turn off every stock control (main menu, welcome
+screen, library, help, footer, zoom, undo, the properties panel), the
+`excalidrawAPI` callback identity trap, `CaptureUpdateAction`,
+`reconcileElements`, `convertToExcalidrawElements`, version bumps,
+`restoreElements`, the theme (`theme: 'light'`, our font set through
+Excalidraw's font family as the app's UI font, no sloppiness, no
+roughness), `renderTopRightUI`/`renderCustomStats` returning null, and
+the CSS import. The properties panel is hidden by `UIOptions`; if
+0.18 has no option for it the module hides it and says so in one
+comment, the only CSS override allowed, inside the directory.
+
+Interface facts a caller must know, in `canvas/README.md` (≤ 40
+lines): `apply` with `history: false` never enters undo; `applyRemote`
+never enters undo; `onChange` fires after every committed change with
+OUR element type; element ids are stable strings; pointer coordinates
+are scene coordinates.
+
+### The product UI around it
+
+- `Sheet.tsx` becomes composition only (≤ 200 lines): loads the sheet,
+  owns the socket (`room.ts`, moved out of Sheet.tsx: join, scene in
+  and out, presence, peers), owns the foreign poll, and lays out the
+  page. Everything imperative goes through `CanvasHandle`.
+- `tools.ts` is rewritten against `CanvasHandle` and `SceneElement`;
+  the `window.__digsite` hook names and behaviours stay identical
+  (e2e and every smoke depend on them).
+- `Toolbar.tsx` gains our own zoom out/in/fit and undo/redo, so no
+  stock footer is needed. Bottom-centre stays.
+- The status line becomes a presence strip in the side panel header:
+  the sheet name (rename inline), image count, who is here as named
+  chips in their cursor colours, and a quiet "saved n s ago" from the
+  last snapshot. The `data-testid="status"` element stays, visually
+  hidden, carrying the same text for e2e.
+- The side panel is `SidePanel.tsx` composed of `Header`, `Dangling`
+  and `Inspector`, in the app's own CSS (`web/src/sheet/sheet.css`),
+  no inline styles.
+- Labels and relations render in the app's UI font at a fixed size;
+  the region stroke, the edge stroke and the foreign dashed stroke use
+  three colour tokens in `sheet.css`, and the selection outline is
+  Excalidraw's, restyled through its CSS variables if it exposes them,
+  else left.
+- Images with no original load `/images/:id/preview` (server route,
+  phase 3 server half adds it); a `missing` image keeps the placeholder.
+
+### Done when
+
+`bun run lint:seams` proves no `@excalidraw` import outside
+`web/src/sheet/canvas/`; `web/test/canvas.test.ts` covers the
+pure parts of the seam (patch application, scene-change diffing,
+type conversion both ways); every smoke script and the e2e ten still
+pass unchanged; and a screenshot of a sheet with an edge selected
+shows only our toolbar, our side panel and the canvas.

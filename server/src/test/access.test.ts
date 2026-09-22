@@ -15,10 +15,14 @@ import { createCanvas } from '@napi-rs/canvas';
 import {
   AccessDenied,
   boardForCreating,
+  boardForDeleting,
   boardForManagingAllowlist,
   boardForViewing,
   boardsForListing,
+  groupForManagingMembers,
   groupForViewing,
+  imageForDeleting,
+  sheetForDeleting,
   sheetForEditing,
 } from '../access/index.ts';
 import { createHttpServer } from '../app.ts';
@@ -263,7 +267,8 @@ describe('access matrix', () => {
     const b2OpenId = withId(b2Open.json).id;
 
     // The matrix (prototype/groups/CONTRACT.md), same 7 columns, this
-    // fixture's object ids.
+    // fixture's object ids, plus phase 3's four new intents
+    // (docs/phases/3-groups.md, .claude/rules/access-one-function-per-intent.md).
     const columns: [
       string,
       (u: string, o: string) => Promise<unknown>,
@@ -280,14 +285,87 @@ describe('access matrix', () => {
       ['boardForCreating(G1)', boardForCreating, g1Id],
       ['sheetForEditing(S-private)', sheetForEditing, sPrivateId],
       ['boardForViewing(B2-open)', boardForViewing, b2OpenId],
+      ['groupForManagingMembers(G1)', groupForManagingMembers, g1Id],
+      ['boardForDeleting(B-private)', boardForDeleting, bPrivateId],
+      // S-private and its one image were both created by `admin`
+      // (bPrivateImageId's board is B-private, created by admin too), so
+      // sheetForDeleting/imageForDeleting land on the same cells as
+      // boardForManagingAllowlist(B-private) here — see this file's
+      // sheetForDeleting/imageForDeleting comment below.
+      ['sheetForDeleting(S-private)', sheetForDeleting, sPrivateId],
+      [
+        'imageForDeleting(image on B-private)',
+        imageForDeleting,
+        bPrivateImageId,
+      ],
     ];
 
     const expected: Record<string, boolean[]> = {
-      owner: [true, true, false, false, true, false, false],
-      admin: [true, true, true, true, true, true, false],
-      member: [true, true, false, false, true, false, false],
-      listed: [true, true, true, false, true, true, false],
-      outsider: [false, false, false, false, false, false, true],
+      owner: [
+        true,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+      ],
+      admin: [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true,
+        true,
+        true,
+        true,
+      ],
+      member: [
+        true,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+      ],
+      listed: [
+        true,
+        true,
+        true,
+        false,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+      ],
+      outsider: [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+      ],
     };
     const users: Record<string, SignedIn> = {
       owner,

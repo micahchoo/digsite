@@ -64,3 +64,23 @@ export async function allowlistOf(
   );
   return rows;
 }
+
+/** GET /boards/:id/allowlist's full member rows (name/email/role), not just
+ * ids — `role` comes from the org's own `member` row, since a team row
+ * carries none of its own. `orgId` is the board's org, always known by the
+ * caller (BoardRow#org_id) — a second query, not a join guess. */
+export async function allowlistMembersOf(
+  teamId: string,
+  orgId: string,
+  db: Pool = pool,
+): Promise<MemberListed[]> {
+  const { rows } = await db.query(
+    `SELECT tm."userId", u.email, u.name, m.role FROM "teamMember" tm
+     JOIN "user" u ON u.id = tm."userId"
+     JOIN "member" m ON m."userId" = tm."userId" AND m."organizationId" = $2
+     WHERE tm."teamId" = $1
+     ORDER BY u.name`,
+    [teamId, orgId],
+  );
+  return rows;
+}

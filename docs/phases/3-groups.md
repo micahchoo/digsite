@@ -13,12 +13,15 @@ outcome and side effect is asserted.
 
 ## 1. Invitation links (`server/src/groups/`, `web/src/pages/`)
 
-`POST /groups/:id/invite {email?}` returns `{invitationId, url}` where
+`POST /groups/:id/invite {email}` returns `{invitationId, url}` where
 `url` is `WEB_ORIGIN/join/<invitationId>`. `/join/:id` shows the group
 name and inviter (`GET /invitations/:id` — public, returns only name,
 inviter name and whether it is still open, or 404), and on accept
-signs the user in or up first. An expired or used invitation shows one
-message for both cases; the plugin cannot tell them apart. Pending
+signs the user in or up first. The email is required: the plugin
+refuses acceptance by any other address
+(`YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION`), so an address-free
+link cannot exist without forking it. An expired or used invitation
+shows one message for both cases; the plugin cannot tell them apart. Pending
 invitations are listed on the group page for owners and admins with
 revoke (`DELETE /invitations/:id` → `groupForInviting`).
 

@@ -219,3 +219,74 @@ export async function imageForViewing(
   await boardForViewing(userId, image.board_id, db);
   return image;
 }
+
+// -- Phase 3 (docs/phases/3-groups.md): four new intents. Every route that
+// manages members, or deletes a board/sheet/image, names one of these — see
+// .claude/rules/access-one-function-per-intent.md.
+
+/** PATCH/DELETE /groups/:id/members/:userId. Owner or admin — the plugin's
+ * own update-member-role/remove-member endpoints separately refuse a
+ * non-owner touching an owner (crud-members.mjs), so this intent only gates
+ * "may touch members of this group at all", same predicate as
+ * groupForInviting. */
+export async function groupForManagingMembers(
+  userId: string,
+  orgId: string,
+  db: Pool = pool,
+): Promise<MemberRow> {
+  return groupForInviting(userId, orgId, db);
+}
+
+/** PATCH/DELETE /boards/:id, GET /boards/:id/footprint — creator or org
+ * owner/admin, same predicate as boardForManagingAllowlist (an owner/admin
+ * not on a private board's allowlist still cannot delete it — ownership
+ * does not bypass the allowlist, CONTEXT.md). */
+export async function boardForDeleting(
+  userId: string,
+  boardId: string,
+  db: Pool = pool,
+): Promise<BoardRow> {
+  return boardForManagingAllowlist(userId, boardId, db);
+}
+
+/** DELETE /sheets/:id, GET /sheets/:id/footprint — the sheet's own creator,
+ * or the board's manager (boardForDeleting's predicate). Must be able to
+ * view the board at all first. */
+export async function sheetForDeleting(
+  userId: string,
+  sheetId: string,
+  db: Pool = pool,
+): Promise<SheetRow> {
+  const { rows } = await db.query('SELECT * FROM sheets WHERE id = $1', [
+    sheetId,
+  ]);
+  const sheet = rows[0];
+  if (!sheet) deny('sheet not found');
+  await boardForViewing(userId, sheet.board_id, db);
+  if (sheet.created_by === userId) return sheet;
+  try {
+    await boardForManagingAllowlist(userId, sheet.board_id, db);
+    return sheet;
+  } catch (err) {
+    if (err instanceof AccessDenied) {
+      deny("not the sheet creator or the board's manager");
+    }
+    throw err;
+  }
+}
+
+/** DELETE /images/:id — same rule as boardForDeleting, applied to the
+ * image's board. */
+export async function imageForDeleting(
+  userId: string,
+  imageId: string,
+  db: Pool = pool,
+): Promise<ImageRow> {
+  const { rows } = await db.query('SELECT * FROM images WHERE id = $1', [
+    imageId,
+  ]);
+  const image = rows[0];
+  if (!image) deny('image not found');
+  await boardForDeleting(userId, image.board_id, db);
+  return image;
+}
