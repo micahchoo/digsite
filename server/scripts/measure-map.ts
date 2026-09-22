@@ -322,7 +322,7 @@ async function cmdMaterialise(boardId: string): Promise<void> {
   // `rank` step's auto-enqueued materialise job is still sitting there
   // pending; without clearing, starting a worker for this step would also
   // drain those, contending with the one job we're timing.
-  await pool.query(`DELETE FROM jobs`);
+  await pool.query('DELETE FROM jobs');
 
   const worker = Bun.spawn(['bun', 'run', 'worker'], {
     cwd: new URL('..', import.meta.url).pathname,
