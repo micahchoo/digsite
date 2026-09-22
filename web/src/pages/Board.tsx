@@ -45,6 +45,7 @@ import {
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Detail } from '../board/Detail.tsx';
+import { Explore } from '../board/Explore.tsx';
 import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
 import {
@@ -74,6 +75,14 @@ declare global {
       selectRange: (a: number, b: number) => void;
       clear: () => void;
       getLayerIds: () => string[];
+      // Phase 2 section 4 (docs/phases/2-sheet.md): Explore.tsx's
+      // "the result becomes the map selection" — resolves ranks through
+      // ONE `GET /boards/:id/images?ids=` call (lib/api.ts's
+      // `getBoardImagesByIds`; not on the real server yet, see that
+      // file's header comment). Falls back to marking the selection by
+      // id in the side panel only when the server has no ranks to give
+      // back (the endpoint is missing, or answers with none).
+      selectImages: (ids: string[]) => void;
     };
   }
 }
@@ -347,6 +356,55 @@ export function Board() {
 
   const currentSortId = sort ? sortId(sort) : DEFAULT_SORT.key.toString();
 
+  // Refs, not the values themselves: `window.__digsiteBoard` is assigned
+  // once with an empty dependency array (see that effect's own comment —
+  // every function there closes over refs so it never goes stale), and
+  // `selectImagesById` needs the CURRENT boardId/sort at call time.
+  const boardIdRef = useRef(boardId);
+  boardIdRef.current = boardId;
+  const currentSortIdRef = useRef(currentSortId);
+  currentSortIdRef.current = currentSortId;
+
+  // Explore.tsx's "the result becomes the map selection" (docs/phases/2-sheet.md
+  // section 4): resolves ranks through ONE `GET /boards/:id/images?ids=`
+  // call (lib/api.ts's getBoardImagesByIds — a param the real server
+  // doesn't have yet, see that file's header comment). When the server
+  // gives back no ranks at all (the param is unsupported, or every id came
+  // back rank-less), falls back to marking the selection by id in the side
+  // panel only, per the task's own fallback.
+  const selectImagesById = useCallback(async (ids: string[]) => {
+    if (!ids.length) return;
+    try {
+      const { images: found } = await api.getBoardImagesByIds(
+        boardIdRef.current,
+        currentSortIdRef.current,
+        ids,
+      );
+      const cache = sortCache(imageCacheRef.current, currentSortIdRef.current);
+      const ranks: number[] = [];
+      for (const img of found) {
+        if (typeof img.rank === 'number') {
+          ranks.push(img.rank);
+          cache.set(img.rank, img);
+        }
+      }
+      if (ranks.length) {
+        setSelectedRanks(new Set(ranks));
+      } else {
+        // No rank came back for anything (the `ids` param isn't honoured,
+        // or nothing matched under this sort) — mark the selection by id
+        // in the side panel only. Deliberately does NOT touch
+        // `selectedRanks`: that state drives the map's own polygon
+        // overlay AND the effect that re-derives `selectedImages` from
+        // it, so clearing it here would have that effect overwrite this
+        // fallback moments later with an empty list.
+        setSelectedImages(found);
+      }
+    } catch {
+      // the ids param isn't supported by this server; nothing to select
+    }
+  }, []);
+
   function changeSort(next: Sort) {
     setSort(next);
     localStorage.setItem(storageKey(boardId), sortId(next));
@@ -449,8 +507,14 @@ export function Board() {
         ((deckRef.current?.props.layers ?? []) as { id?: string }[])
           .map((l) => l?.id)
           .filter((x): x is string => !!x),
+      selectImages: (ids: string[]) => void selectImagesById(ids),
     };
-  }, []);
+    // selectImagesById is itself a stable useCallback (empty deps, reads
+    // boardId/currentSortId through refs) — including it here costs
+    // nothing and keeps this effect honest with the linter, per this
+    // effect's own "every function here closes over refs or stable
+    // setters" comment above.
+  }, [selectImagesById]);
 
   // -- sections: refetch on sort change -----------------------------------
   useEffect(() => {
@@ -1172,6 +1236,13 @@ export function Board() {
             onRemoveProperty={removeDetailProperty}
             onDelete={() => void deleteDetailImage()}
             onClose={() => setDetailImage(null)}
+          />
+        )}
+        {detailImage && !detailImage.missing && (
+          <Explore
+            boardId={boardId}
+            imageId={detailImage.id}
+            onSelectImages={selectImagesById}
           />
         )}
       </div>

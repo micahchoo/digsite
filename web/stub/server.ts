@@ -5,6 +5,8 @@
 // fixture stays honest about the contract.
 import { createServer } from 'node:http';
 import {
+  type EdgeRow,
+  SHEET_LIMIT,
   type SceneElement,
   type Sort,
   arrowheadsFor,
@@ -18,6 +20,7 @@ import {
 } from '@digsite/shared';
 import { createCanvas } from '@napi-rs/canvas';
 import { type Socket, Server as SocketServer } from 'socket.io';
+import { centreToTopLeft, fitScale } from '../src/board/explore-layout.ts';
 
 const PORT = Number(process.env.PORT) || 8800;
 const WEB_ORIGIN = 'http://localhost:5180';
@@ -27,6 +30,12 @@ const COOKIE_PREFIX = 'digsite.stub_session';
 // uploads accept at 202 and flip to ready once the ladder is painted; here
 // that's just a timer.
 const READY_DELAY_MS = 1000;
+// Matches server/src/sheets/routes.ts's own CELL — the grid-fallback
+// spacing for a sheet-from-a-neighbourhood whose image has no explicit
+// `positions` centre (see the ids-vs-neighbourhood POST /boards/:id/sheets
+// handler below). SHEET_FIT lives in ../src/board/explore-layout.ts
+// (imported as `fitScale`'s default) since that half is unit-tested.
+const SHEET_CELL = 320;
 
 const range = (a: number, b: number): number[] =>
   Array.from({ length: b - a }, (_, i) => a + i);
@@ -390,9 +399,14 @@ const elementsBySheet: Record<string, SceneElement[]> = {
   s1: seedS1(),
   s2: grid(SHEET_IMAGES.s2.map((slot) => `img-${slot}`)),
 };
-const peersBySheet: Record<string, Set<string>> = {
-  s1: new Set(),
-  s2: new Set(),
+// socketId -> {id, name} — a name per peer (docs/phases/2-sheet.md section
+// 3: "the status line shows names"), same shape as the real room.ts.
+const peersBySheet: Record<
+  string,
+  Map<string, { id: string; name: string }>
+> = {
+  s1: new Map(),
+  s2: new Map(),
 };
 // GET /boards/:id/sheets "savedAt" (docs/phases/2-sheet.md section 6) — the
 // stub's stand-in for sheet_snapshots.saved_at, bumped on every 'scene'
@@ -1001,6 +1015,24 @@ const httpServer = createServer(async (req, res) => {
       key: 'uploaded_at' as const,
       dir: 'desc' as const,
     };
+    // Phase 2 section 4 (docs/phases/2-sheet.md): `ids` — not a param the
+    // real server has yet (web/src/lib/api.ts's header comment on
+    // `getBoardImagesByIds`) — answers with exactly those images, in the
+    // order given, each carrying its RANK under `sort` so Board.tsx's
+    // `selectImages(ids)` can highlight the map with one call. Ignores
+    // from/count; a rank lookup by id has no notion of a page.
+    const idsParam = url.searchParams.get('ids');
+    if (idsParam) {
+      const wanted = idsParam.split(',').filter(Boolean);
+      const rankByImageId = new Map(
+        rankedImages(boardId, sort).map((img, i) => [img.id, i]),
+      );
+      const found = wanted
+        .map((id) => images.find((i) => i.id === id && i.boardId === boardId))
+        .filter((i): i is Img => !!i)
+        .map((img) => ({ ...img, rank: rankByImageId.get(img.id) }));
+      return json(200, { images: found });
+    }
     const from = Number(url.searchParams.get('from') ?? '0');
     const count = Number(url.searchParams.get('count') ?? '50');
     return json(200, {
@@ -1070,6 +1102,100 @@ const httpServer = createServer(async (req, res) => {
       dir: 'desc' as const,
     };
     return json(200, computeSections(boardId, sort));
+  }
+
+  // GET /boards/:id/relations — not on the real server yet
+  // (web/src/lib/api.ts's header comment): the distinct relations across
+  // every sheet's own edges on this board, for Explore.tsx's relation
+  // filter dropdown.
+  const boardRelations = url.pathname.match(/^\/boards\/([^/]+)\/relations$/);
+  if (boardRelations && req.method === 'GET') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = boardRelations[1] ?? '';
+    const denied = boardForViewing(u, boardId);
+    if (denied) return json(403, denied);
+    const sheetIds = Object.keys(SHEET_NAME).filter(
+      (id) => (SHEET_BOARD[id] ?? 'b1') === boardId,
+    );
+    const set = new Set<string>();
+    for (const id of sheetIds) {
+      const { edges } = project(id, elementsBySheet[id] ?? []);
+      for (const e of edges) if (e.relation) set.add(e.relation);
+    }
+    return json(200, Array.from(set).sort());
+  }
+
+  // GET /boards/:id/neighbourhood?from=&hops=&relation= (docs/phases/2-sheet.md
+  // section 4) — mirrors server/src/sheets/neighbourhood.ts's contract:
+  // breadth-first over the board's WHOLE graph (every sheet's edges
+  // unioned, CONTEXT.md "The union"), nearest-first, capped at SHEET_LIMIT.
+  const boardNeighbourhood = url.pathname.match(
+    /^\/boards\/([^/]+)\/neighbourhood$/,
+  );
+  if (boardNeighbourhood && req.method === 'GET') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = boardNeighbourhood[1] ?? '';
+    const denied = boardForViewing(u, boardId);
+    if (denied) return json(403, denied);
+    const from = url.searchParams.get('from');
+    if (!from) return json(400, { error: 'from required' });
+    const hops = Number(url.searchParams.get('hops'));
+    if (!Number.isInteger(hops) || hops < 1 || hops > 3) {
+      return json(400, { error: 'hops must be an integer 1..3' });
+    }
+    const relation = url.searchParams.get('relation') || undefined;
+    const fromImg = images.find((i) => i.id === from && i.boardId === boardId);
+    if (!fromImg) {
+      return json(400, { error: 'from is not an image on this board' });
+    }
+
+    const sheetIds = Object.keys(SHEET_NAME).filter(
+      (id) => (SHEET_BOARD[id] ?? 'b1') === boardId,
+    );
+    const allEdges: EdgeRow[] = [];
+    for (const id of sheetIds) {
+      allEdges.push(...project(id, elementsBySheet[id] ?? []).edges);
+    }
+    const relevant = relation
+      ? allEdges.filter((e) => e.relation === relation)
+      : allEdges;
+    const adj = new Map<string, Set<string>>();
+    function link(a: string, b: string) {
+      if (!adj.has(a)) adj.set(a, new Set());
+      adj.get(a)?.add(b);
+    }
+    for (const e of relevant) {
+      link(e.source.imageId, e.target.imageId);
+      link(e.target.imageId, e.source.imageId);
+    }
+
+    const distances = new Map<string, number>([[from, 0]]);
+    const queue = [from];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (!cur) continue;
+      const d = distances.get(cur) ?? 0;
+      if (d >= hops) continue;
+      for (const next of adj.get(cur) ?? []) {
+        if (!distances.has(next)) {
+          distances.set(next, d + 1);
+          queue.push(next);
+        }
+      }
+    }
+
+    const ordered = Array.from(distances.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([id, hopsAway]) => ({ id, hops: hopsAway }));
+    const truncated = ordered.length > SHEET_LIMIT;
+    const imagesOut = ordered.slice(0, SHEET_LIMIT);
+    const idSet = new Set(imagesOut.map((i) => i.id));
+    const edgesOut = relevant.filter(
+      (e) => idSet.has(e.source.imageId) && idSet.has(e.target.imageId),
+    );
+    return json(200, { images: imagesOut, edges: edgesOut, truncated });
   }
 
   const tileMatch = url.pathname.match(
@@ -1161,7 +1287,16 @@ const httpServer = createServer(async (req, res) => {
     const boardId = sheetsList[1] ?? '';
     const denied = boardForViewing(u, boardId); // boardForCreatingSheet: same rule
     if (denied) return json(403, denied);
-    const body = await readJson<{ name: string; imageIds: string[] }>();
+    const body = await readJson<{
+      name: string;
+      imageIds: string[];
+      // Phase 2 section 4: a sheet made from a neighbourhood carries
+      // explicit CENTRES, one per imageId (shared/sheet/layout.ts's
+      // ringLayout) — mirrors server/src/sheets/routes.ts's own reading of
+      // this field exactly (SHEET_CELL/SHEET_FIT match that route's
+      // CELL/FIT), so the stub is an honest stand-in for it.
+      positions?: Record<string, { x: number; y: number }>;
+    }>();
     const id = `s${sheetSeq++}`;
     SHEET_NAME[id] = body.name;
     SHEET_BOARD[id] = boardId;
@@ -1169,8 +1304,42 @@ const httpServer = createServer(async (req, res) => {
     SHEET_IMAGES[id] = body.imageIds.map((imgId) =>
       Number(imgId.replace('img-', '')),
     );
-    elementsBySheet[id] = grid(body.imageIds);
-    peersBySheet[id] = new Set();
+    const ordered = body.imageIds
+      .map((imgId) =>
+        images.find((i) => i.id === imgId && i.boardId === boardId),
+      )
+      .filter((i): i is Img => !!i);
+    const cols = Math.max(1, Math.ceil(Math.sqrt(ordered.length)));
+    elementsBySheet[id] = ordered.map((img, i) => {
+      const scale = fitScale(img.width, img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      const centre = body.positions?.[img.id];
+      let x: number;
+      let y: number;
+      if (centre) {
+        const placed = centreToTopLeft(centre, img.width, img.height);
+        x = placed.x;
+        y = placed.y;
+      } else {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        x = col * SHEET_CELL + (SHEET_CELL - w) / 2;
+        y = row * SHEET_CELL + (SHEET_CELL - h) / 2;
+      }
+      return el({
+        id: `el-img-${img.id}`,
+        type: 'image',
+        x,
+        y,
+        width: w,
+        height: h,
+        fileId: fileId(img.id),
+        customData: { kind: 'image', imageId: img.id },
+        groupIds: [imageGroupId(img.id)],
+      });
+    });
+    peersBySheet[id] = new Map();
     sheetSavedAt[id] = new Date().toISOString();
     return json(201, { id });
   }
@@ -1249,6 +1418,20 @@ const io = new SocketServer(httpServer, {
   cors: { origin: WEB_ORIGIN, credentials: true },
 });
 
+// Presence (docs/phases/2-sheet.md section 3): mirrors
+// server/src/sheets/room.ts's own per-socket rate limit exactly, so a
+// dry run against this stub exercises the same throttle shape the real
+// server enforces.
+const POINTER_RATE_PER_S = 20;
+
+function peerList(sheetId: string): { id: string; name: string }[] {
+  return Array.from(peersBySheet[sheetId]?.values() ?? []);
+}
+function peersPayloadFor(sheetId: string) {
+  const list = peerList(sheetId);
+  return { users: list.map((p) => p.id), peers: list };
+}
+
 io.on('connection', (socket: Socket) => {
   socket.on('join', ({ sheetId }: { sheetId: string }) => {
     if (!SHEET_NAME[sheetId]) {
@@ -1270,10 +1453,18 @@ io.on('connection', (socket: Socket) => {
     }
     socket.join(sheetId);
     socket.data.sheetId = sheetId;
-    peersBySheet[sheetId]?.add(socket.id);
-    const peers = Array.from(peersBySheet[sheetId] ?? []);
-    socket.emit('joined', { elements: elementsBySheet[sheetId], peers });
-    io.to(sheetId).emit('peers', { users: peers });
+    socket.data.userId = u ? USERS[u].id : socket.id;
+    socket.data.userName = u ? USERS[u].name : '';
+    if (!peersBySheet[sheetId]) peersBySheet[sheetId] = new Map();
+    peersBySheet[sheetId]?.set(socket.id, {
+      id: socket.data.userId,
+      name: socket.data.userName,
+    });
+    socket.emit('joined', {
+      elements: elementsBySheet[sheetId],
+      peers: peerList(sheetId).map((p) => p.id),
+    });
+    io.to(sheetId).emit('peers', peersPayloadFor(sheetId));
   });
 
   socket.on('scene', ({ elements }: { elements: SceneElement[] }) => {
@@ -1287,13 +1478,38 @@ io.on('connection', (socket: Socket) => {
     socket.to(sheetId).emit('scene', { elements, from: socket.id });
   });
 
+  // A peer's pointer (docs/phases/2-sheet.md section 3): relayed, never
+  // persisted, rate-limited per socket exactly like room.ts.
+  socket.on(
+    'pointer',
+    (payload: { x: number; y: number; selectedIds: string[] }) => {
+      const sheetId = socket.data.sheetId as string | undefined;
+      const userId = socket.data.userId as string | undefined;
+      if (!sheetId || !userId) return;
+      const now = Date.now();
+      const windowStart = (socket.data.pointerWindowStart as number) || 0;
+      if (now - windowStart >= 1000) {
+        socket.data.pointerWindowStart = now;
+        socket.data.pointerCount = 0;
+      }
+      socket.data.pointerCount =
+        ((socket.data.pointerCount as number) || 0) + 1;
+      if (socket.data.pointerCount > POINTER_RATE_PER_S) return;
+      socket.to(sheetId).emit('pointer', {
+        x: payload.x,
+        y: payload.y,
+        selectedIds: payload.selectedIds,
+        user: userId,
+        name: (socket.data.userName as string) || '',
+      });
+    },
+  );
+
   socket.on('disconnect', () => {
     const sheetId = socket.data.sheetId as string | undefined;
     if (!sheetId) return;
     peersBySheet[sheetId]?.delete(socket.id);
-    io.to(sheetId).emit('peers', {
-      users: Array.from(peersBySheet[sheetId] ?? []),
-    });
+    io.to(sheetId).emit('peers', peersPayloadFor(sheetId));
   });
 });
 

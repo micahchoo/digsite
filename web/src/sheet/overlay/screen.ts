@@ -116,6 +116,15 @@ export type ForeignShape =
       label: string;
       sheetName: string;
       row: ForeignEdge;
+      // Dangling from a vanished foreign region (docs/phases/2-sheet.md
+      // section 5, the overlay side): true when that end's `regionSourceId`
+      // is set but no region with that claim id came back in THIS SAME
+      // poll — the owning sheet deleted it (or this poll simply landed
+      // between its two queries; either way, nothing here to bind to).
+      // Overlay.tsx draws a hollow marker at a true end. Never a scene
+      // change — see ../../../.claude/rules/foreign-never-in-scene.md.
+      danglingStart: boolean;
+      danglingEnd: boolean;
     };
 
 /**
@@ -175,26 +184,34 @@ export function foreignShapes(
     });
   }
 
-  function endpoint(edgeSheetId: string, end: EdgeEnd): Point | null {
+  function endpoint(
+    edgeSheetId: string,
+    end: EdgeEnd,
+  ): { point: Point; dangling: boolean } | null {
     const image = images.get(end.imageId);
-    if (!image) return null;
+    if (!image) return null; // the image itself is gone from THIS scene: omitted, not an error
     if (end.regionSourceId) {
       const claimed = regionCenterByClaim.get(
         `${edgeSheetId}:${end.regionSourceId}`,
       );
-      if (claimed) return claimed;
+      if (claimed) return { point: claimed, dangling: false };
+      // The region end vanished (or a poll race) — draw to the image's
+      // rect instead, marked dangling for Overlay.tsx's hollow marker.
+      return { point: centerOf(image), dangling: true };
     }
-    return centerOf(image);
+    return { point: centerOf(image), dangling: false };
   }
 
   for (const e of rows.edges) {
     const from = endpoint(e.sheetId, e.source);
     const to = endpoint(e.sheetId, e.target);
-    if (!from || !to) continue; // dangling: tolerated by omission, not an error
+    if (!from || !to) continue; // an end's image is gone: tolerated by omission, not an error
     shapes.push({
       id: `edge-${e.id}`,
       kind: 'edge',
-      line: [from, to],
+      line: [from.point, to.point],
+      danglingStart: from.dangling,
+      danglingEnd: to.dangling,
       label: e.relation,
       sheetName: e.sheetName,
       row: e,

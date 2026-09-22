@@ -114,6 +114,111 @@ describe('foreignShapes', () => {
   });
 });
 
+describe('foreignShapes: dangling from a vanished foreign region (docs/phases/2-sheet.md section 5)', () => {
+  test('an edge end whose regionSourceId is not among the current foreign regions draws to the image and is marked dangling', () => {
+    const rows: Foreign = {
+      regions: [], // the region backing this edge's start end is gone from THIS poll
+      edges: [
+        {
+          id: 'other:e1',
+          sheetId: 'other',
+          sourceId: 'e1',
+          source: { imageId: 'img-1', regionSourceId: 'gone-region' },
+          target: { imageId: 'img-2' },
+          direction: 'forward',
+          relation: 'r',
+          properties: {},
+          sheetName: 'Other sheet',
+        },
+      ],
+    };
+    const elements = [
+      image('e1', 'img-1', 0, 0, 200, 200),
+      image('e2', 'img-2', 500, 0, 200, 200),
+    ];
+    const shapes = foreignShapes(rows, elements);
+    const edge = shapes.find((s) => s.kind === 'edge');
+    if (!edge || edge.kind !== 'edge')
+      throw new Error('expected an edge shape');
+    expect(edge.danglingStart).toBe(true);
+    expect(edge.danglingEnd).toBe(false);
+    // drawn to the image's rect — its centre, same as a plain image end.
+    expect(edge.line[0]).toEqual({ x: 100, y: 100 });
+  });
+
+  test('an edge end whose region IS among the current foreign regions is not dangling', () => {
+    const rows: Foreign = {
+      regions: [
+        {
+          id: 'other:r1',
+          sheetId: 'other',
+          sourceId: 'r1',
+          imageId: 'img-1',
+          fx: 0,
+          fy: 0,
+          fw: 0.5,
+          fh: 0.5,
+          label: '',
+          properties: {},
+          sheetName: 'Other sheet',
+        },
+      ],
+      edges: [
+        {
+          id: 'other:e1',
+          sheetId: 'other',
+          sourceId: 'e1',
+          source: { imageId: 'img-1', regionSourceId: 'r1' },
+          target: { imageId: 'img-2' },
+          direction: 'forward',
+          relation: 'r',
+          properties: {},
+          sheetName: 'Other sheet',
+        },
+      ],
+    };
+    const elements = [
+      image('e1', 'img-1', 0, 0, 200, 200),
+      image('e2', 'img-2', 500, 0, 200, 200),
+    ];
+    const shapes = foreignShapes(rows, elements);
+    const edge = shapes.find((s) => s.kind === 'edge');
+    if (!edge || edge.kind !== 'edge')
+      throw new Error('expected an edge shape');
+    expect(edge.danglingStart).toBe(false);
+    expect(edge.danglingEnd).toBe(false);
+  });
+
+  test('a plain image-to-image end (no regionSourceId) is never dangling', () => {
+    const rows: Foreign = {
+      regions: [],
+      edges: [
+        {
+          id: 'other:e1',
+          sheetId: 'other',
+          sourceId: 'e1',
+          source: { imageId: 'img-1' },
+          target: { imageId: 'img-2' },
+          direction: 'forward',
+          relation: 'r',
+          properties: {},
+          sheetName: 'Other sheet',
+        },
+      ],
+    };
+    const elements = [
+      image('e1', 'img-1', 0, 0, 200, 200),
+      image('e2', 'img-2', 500, 0, 200, 200),
+    ];
+    const shapes = foreignShapes(rows, elements);
+    const edge = shapes.find((s) => s.kind === 'edge');
+    if (!edge || edge.kind !== 'edge')
+      throw new Error('expected an edge shape');
+    expect(edge.danglingStart).toBe(false);
+    expect(edge.danglingEnd).toBe(false);
+  });
+});
+
 describe('foreignCopyRect', () => {
   test('is the fraction applied to the image rect it is given — never a cached one', () => {
     const row = { fx: 0.1, fy: 0.2, fw: 0.3, fh: 0.4 };

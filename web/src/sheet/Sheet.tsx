@@ -4,6 +4,11 @@
 // foreign overlay (overlay/) — which never touches this scene, per
 // ../.claude/rules/foreign-never-in-scene.md.
 import { dataOf, fileId } from '@digsite/shared';
+import type {
+  Direction,
+  PeersPayload,
+  PointerBroadcastPayload,
+} from '@digsite/shared';
 import {
   CaptureUpdateAction,
   Excalidraw,
@@ -17,8 +22,8 @@ import type {
   AppState,
   ExcalidrawImperativeAPI,
 } from '@excalidraw/excalidraw/types';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useParams } from 'react-router';
 import { type Socket, io } from 'socket.io-client';
 import { RenameInline } from '../components/RenameInline.tsx';
 import { SERVER_ORIGIN, api } from '../lib/api.ts';
@@ -35,10 +40,25 @@ import {
   type Rect,
   type Viewport,
   foreignShapes,
+  screenToScene,
 } from './overlay/screen.ts';
 import { useForeign } from './overlay/useForeign.ts';
+import { canSendPointer, peerCursors } from './presence.ts';
 import { isSyncable, signature } from './sync.ts';
 import { type SyncStatus, createTools } from './tools.ts';
+
+/** `POST /boards/:id/sheets`'s "copy connections" (docs/phases/2-sheet.md
+ * section 4): passed through `navigate(..., {state})` from Board.tsx's
+ * Explore panel, applied once the new sheet's own scene has loaded — see
+ * the effect below. By imageId, not element id: this sheet's own image
+ * elements' ids are a server/stub implementation detail this file has no
+ * business assuming. */
+export interface PendingCopyEdge {
+  sourceImageId: string;
+  targetImageId: string;
+  relation: string;
+  direction: Direction;
+}
 
 declare global {
   interface Window {
@@ -117,6 +137,7 @@ function placeholderDataURL(name: string): string {
 export function Sheet() {
   const { id } = useParams<{ id: string }>();
   const sheetId = id ?? '';
+  const location = useLocation();
   const { data: session } = useSession();
 
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
@@ -141,12 +162,22 @@ export function Sheet() {
   const selectedForeignRef = useRef<string | null>(null);
   const foreignShapesRef = useRef<ForeignShape[]>([]);
   const toolsRef = useRef<ReturnType<typeof createTools> | null>(null);
+  // Presence (docs/phases/2-sheet.md section 3): the last pointer WE sent,
+  // for the client-side throttle, and the copy-connections effect's
+  // once-only guard.
+  const lastPointerSentRef = useRef<number | null>(null);
+  const copyEdgesAppliedRef = useRef(false);
 
   const [sheetInfo, setSheetInfo] = useState<Awaited<
     ReturnType<typeof api.getSheet>
   > | null>(null);
   const [denied, setDenied] = useState<string | null>(null);
   const [peers, setPeers] = useState<string[]>([]);
+  // Every peer's last-reported pointer, by user id — pruned on every
+  // 'peers' roster update so a departed peer's cursor doesn't linger.
+  const [peerPointers, setPeerPointers] = useState<PointerBroadcastPayload[]>(
+    [],
+  );
   const [selectedForeignId, setSelectedForeignIdState] = useState<
     string | null
   >(null);
@@ -335,10 +366,30 @@ export function Sheet() {
         },
       );
 
-      socket.on('peers', ({ users }: { users: string[] }) => {
-        setPeers(users);
-        statsRef.current = { ...statsRef.current, peers: users };
+      // `peers` carries {id,name} objects (PeersPayload, phase 2 section 3)
+      // — the stub sends them too (web/stub/server.ts); `users` (ids only)
+      // is read as a fallback so this still degrades against a peers
+      // payload with no names. Also prunes peerPointers for anyone who
+      // just left, so a departed peer's cursor never lingers.
+      socket.on('peers', (payload: PeersPayload) => {
+        const list = payload.peers?.length
+          ? payload.peers
+          : payload.users.map((u) => ({ id: u, name: u }));
+        const names = list.map((p) => p.name || p.id);
+        setPeers(names);
+        statsRef.current = { ...statsRef.current, peers: names };
+        const live = new Set(list.map((p) => p.id));
+        setPeerPointers((prev) => prev.filter((p) => live.has(p.user)));
         rerender();
+      });
+
+      // A peer's pointer (docs/phases/2-sheet.md section 3): never
+      // persisted, replaced by user id on every event.
+      socket.on('pointer', (payload: PointerBroadcastPayload) => {
+        setPeerPointers((prev) => [
+          ...prev.filter((p) => p.user !== payload.user),
+          payload,
+        ]);
       });
 
       socket.on('scene', ({ elements: remote }: { elements: unknown[] }) => {
@@ -452,6 +503,62 @@ export function Sheet() {
     [scheduleOverlayUpdate, rerender],
   );
 
+  // Presence (docs/phases/2-sheet.md section 3): `pointer {x,y,selectedIds}`
+  // on pointer move, throttled to 20/s client-side (presence.ts#canSendPointer)
+  // on top of the server's own per-socket rate limit. Attached to the whole
+  // page wrapper — Excalidraw's canvas doesn't stop propagation on
+  // pointermove, so a move over it still bubbles here.
+  const onPointerMoveForPresence = useCallback(
+    (e: React.PointerEvent) => {
+      const socket = socketRef.current;
+      const liveApi = apiRef.current;
+      if (!socket) return;
+      const now = Date.now();
+      if (!canSendPointer(now, lastPointerSentRef.current)) return;
+      lastPointerSentRef.current = now;
+      const box = e.currentTarget.getBoundingClientRect();
+      const client = { x: e.clientX - box.left, y: e.clientY - box.top };
+      const scene = screenToScene(client, viewport, { left: 0, top: 0 });
+      const ids = liveApi?.getAppState().selectedElementIds ?? {};
+      const selectedIds = Object.keys(ids).filter((id) => ids[id]);
+      socket.emit('pointer', { x: scene.x, y: scene.y, selectedIds });
+    },
+    [viewport],
+  );
+
+  const peerCursorList = useMemo(
+    () => peerCursors(peerPointers, sceneElements),
+    [peerPointers, sceneElements],
+  );
+
+  // "Copy connections" (docs/phases/2-sheet.md section 4): Board.tsx's
+  // Explore panel navigates here with `state.copyEdges` when the owner
+  // ticked the box on "New sheet". Applied once the new sheet's own scene
+  // has loaded (sceneElements non-empty), by imageId — every edge this
+  // creates is an ordinary OWN edge from the moment it exists, same as any
+  // other `tools.connect` call; nothing here is foreign.
+  useEffect(() => {
+    const pending = (location.state as { copyEdges?: PendingCopyEdge[] } | null)
+      ?.copyEdges;
+    if (!pending?.length) return;
+    if (copyEdgesAppliedRef.current) return;
+    if (!sceneElements.length) return;
+    copyEdgesAppliedRef.current = true;
+    const elements = tools.getElements();
+    const imageElByImageId = new Map<string, ExcalidrawElement>();
+    for (const el of elements) {
+      const data = dataOf(el);
+      if (data?.kind === 'image') imageElByImageId.set(data.imageId, el);
+    }
+    for (const edge of pending) {
+      const fromEl = imageElByImageId.get(edge.sourceImageId);
+      const toEl = imageElByImageId.get(edge.targetImageId);
+      if (!fromEl || !toEl) continue;
+      tools.connect(fromEl.id, toEl.id, edge.relation, edge.direction);
+    }
+    rerender();
+  }, [sceneElements, location.state, tools, rerender]);
+
   if (denied) {
     return <div className="page">join denied: {denied}</div>;
   }
@@ -477,7 +584,10 @@ export function Sheet() {
       <style>
         {'.digsite-sheet .shapes-section { display: none !important; }'}
       </style>
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div
+        style={{ flex: 1, position: 'relative' }}
+        onPointerMove={onPointerMoveForPresence}
+      >
         <Excalidraw excalidrawAPI={setApi} onChange={onChange} />
         <DrawLayer
           tool={tool}
@@ -498,6 +608,7 @@ export function Sheet() {
             tools.select(sid);
             rerender();
           }}
+          peers={peerCursorList}
         />
         <Toolbar tool={tool} onChange={applyTool} pendingEdge={pendingEdge} />
         <div className="status-line" data-testid="status">

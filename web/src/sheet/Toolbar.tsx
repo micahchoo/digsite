@@ -58,8 +58,14 @@ export function Toolbar({ tool, onChange, pendingEdge }: Props) {
       className="row"
       style={{
         position: 'absolute',
-        top: 8,
-        left: 8,
+        // Bottom-centre, not the scene's default top-left corner: at
+        // scroll 0 the seed grid's row 0 sits under (0,0) and a top-left
+        // toolbar overlaps it (docs/phases/2-sheet.md's prior step found
+        // this). Bottom-centre stays clear of both the grid and the zoom
+        // controls, which Excalidraw itself pins to its own bottom-left.
+        bottom: 16,
+        left: '50%',
+        transform: 'translateX(-50%)',
         zIndex: 5, // above Excalidraw's own layerUI (--zIndex-layerUI: 4)
         background: 'rgba(255,255,255,0.95)',
         border: '1px solid #ccc',

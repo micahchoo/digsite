@@ -17,6 +17,7 @@ import type {
   CreateSheetResponse,
   GetBoardResponse,
   GetImageResponse,
+  GetNeighbourhoodResponse,
   GetSectionsResponse,
   GetSheetElementsResponse,
   GetSheetForeignResponse,
@@ -135,6 +136,26 @@ export type SheetImageWithStatus = {
 export type GetSheetResponseWithStatus = Omit<GetSheetResponse, 'images'> & {
   images: SheetImageWithStatus[];
 };
+
+// Phase 2 section 4 (docs/phases/2-sheet.md): sheet-from-a-neighbourhood.
+// Two params `GET /boards/:id/images` does not have on the real server
+// today — see this file's report back to the lead:
+//
+// - `ids=<comma-separated image ids>`: an explicit id list, order
+//   preserved, ignoring `from`/`count`. Needed so Board.tsx's
+//   `selectImages(ids)` can turn a neighbourhood's image ids into a map
+//   selection with ONE call instead of one `GET /images/:id` per id.
+// - a `rank` on each returned `BoardImage`, present only when `ids` was
+//   used, computed against the `sort` param passed alongside it — the
+//   caller already knows the sort it wants ranks for.
+//
+// `GET /boards/:id/relations` — distinct edge relations on the board
+// (union of every sheet's own edges), for the Explore panel's relation
+// filter. Also not on the real server today; until it exists (or if this
+// call 404s) the panel derives relations from a neighbourhood response's
+// own edges instead (docs/phases/2-sheet.md section 4's own fallback).
+export type BoardImageWithRank = BoardImage & { rank?: number };
+export type ListBoardImagesByIdsResponse = { images: BoardImageWithRank[] };
 
 export class ApiError extends Error {
   constructor(
@@ -263,6 +284,28 @@ export const api = {
     request<GetSectionsResponse>(
       `/boards/${boardId}/sections?sort=${encodeURIComponent(sort)}`,
     ),
+  // Phase 2 section 4: see ListBoardImagesByIdsResponse's header comment —
+  // `ids`/per-image `rank` are not in the real server's contract yet.
+  getBoardImagesByIds: (boardId: string, sort: string, ids: string[]) =>
+    request<ListBoardImagesByIdsResponse>(
+      `/boards/${boardId}/images?sort=${encodeURIComponent(sort)}&ids=${ids.map(encodeURIComponent).join(',')}`,
+    ),
+  getNeighbourhood: (
+    boardId: string,
+    from: string,
+    hops: number,
+    relation?: string,
+  ) =>
+    request<GetNeighbourhoodResponse>(
+      `/boards/${boardId}/neighbourhood?from=${encodeURIComponent(from)}&hops=${hops}${
+        relation ? `&relation=${encodeURIComponent(relation)}` : ''
+      }`,
+    ),
+  // Not in the real server's contract yet — see ListBoardImagesByIdsResponse's
+  // header comment. Board.tsx's Explore panel falls back to deriving
+  // relations from a neighbourhood response when this 404s.
+  getBoardRelations: (boardId: string) =>
+    request<string[]>(`/boards/${boardId}/relations`),
   getImage: (imageId: string) =>
     request<GetImageResponse>(`/images/${imageId}`),
   originalUrl: (imageId: string) =>
