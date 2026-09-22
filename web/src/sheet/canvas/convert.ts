@@ -299,6 +299,26 @@ export function applyPatch(
   return elements;
 }
 
+/** Array order must agree with fractional-index order before Excalidraw's
+ * `syncInvalidIndices` sees it: an index that is not greater than its array
+ * predecessor's is "invalid" and gets reassigned, which is how an arrow
+ * stored as `b0c` came back as `b0z`, past its own label. Elements without
+ * an index keep their relative order, after the indexed ones. Pure. */
+export function orderByIndex<T extends { index?: string | null }>(
+  elements: T[],
+): T[] {
+  const indexed = elements
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => e.index != null);
+  const bare = elements.filter((e) => e.index == null);
+  indexed.sort((a, b) => {
+    const ai = a.e.index as string;
+    const bi = b.e.index as string;
+    return ai < bi ? -1 : ai > bi ? 1 : a.i - b.i;
+  });
+  return [...indexed.map(({ e }) => e), ...bare];
+}
+
 /** Excalidraw's invariant: a bound text sorts after its container by
  * fractional index, and its dev build throws `InvalidFractionalIndexError`
  * on a snapshot that breaks it. A persisted scene can (a server merge once
@@ -346,7 +366,7 @@ export function reconcileRemote(
 ): ExcalidrawElement[] {
   const restored = restoreElements(
     // biome-ignore lint/suspicious/noExplicitAny: raw is the server's JSON
-    repairBoundTextOrder(raw as any[]) as any,
+    repairBoundTextOrder(orderByIndex(raw as any[])) as any,
     null,
   ) as unknown as ExcalidrawElement[];
   return reconcileElements(

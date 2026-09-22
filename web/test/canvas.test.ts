@@ -475,3 +475,23 @@ describe('repairBoundTextOrder', () => {
     expect(repairBoundTextOrder(els)).toEqual(els);
   });
 });
+
+describe('orderByIndex', () => {
+  test('sorts by fractional index, keeps unindexed elements last in input order', () => {
+    const els: { id: string; index?: string | null }[] = [
+      { id: 'text', index: 'b0d' },
+      { id: 'fresh1' },
+      { id: 'arrow', index: 'b0c' },
+      { id: 'fresh2', index: null },
+      { id: 'rect', index: 'ah' },
+    ];
+    const out = orderByIndex(els);
+    expect(out.map((e) => e.id)).toEqual([
+      'rect',
+      'arrow',
+      'text',
+      'fresh1',
+      'fresh2',
+    ]);
+  });
+});
