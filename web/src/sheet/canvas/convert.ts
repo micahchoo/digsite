@@ -303,7 +303,10 @@ export function applyPatch(
  * `syncInvalidIndices` sees it: an index that is not greater than its array
  * predecessor's is "invalid" and gets reassigned, which is how an arrow
  * stored as `b0c` came back as `b0z`, past its own label. Elements without
- * an index keep their relative order, after the indexed ones. Pure. */
+ * an index are the seeded images and containers made before indices were
+ * kept; they go FIRST, in their own order, so images stay at the bottom of
+ * the z-order and a container precedes the label that was indexed later.
+ * Pure. */
 export function orderByIndex<T extends { index?: string | null }>(
   elements: T[],
 ): T[] {
@@ -316,7 +319,7 @@ export function orderByIndex<T extends { index?: string | null }>(
     const bi = b.e.index as string;
     return ai < bi ? -1 : ai > bi ? 1 : a.i - b.i;
   });
-  return [...indexed.map(({ e }) => e), ...bare];
+  return [...bare, ...indexed.map(({ e }) => e)];
 }
 
 /** Excalidraw's invariant: a bound text sorts after its container by
@@ -327,29 +330,41 @@ export function orderByIndex<T extends { index?: string | null }>(
  * that position. Pure; the input is the server's JSON, so fields are read
  * defensively. */
 export function repairBoundTextOrder<
-  T extends { id: string; containerId?: string | null; index?: string | null },
+  T extends {
+    id: string;
+    containerId?: string | null;
+    index?: string | null;
+    boundElements?: { id: string; type: string }[] | null;
+  },
 >(elements: T[]): T[] {
   const byId = new Map(elements.map((e) => [e.id, e]));
-  const moved = new Set<string>();
-  const out: T[] = [];
+  // A label knows its container by `containerId`, or only the container
+  // knows it, through `boundElements`; both spellings occur in stored scenes.
+  const containerOf = new Map<string, T>();
+  for (const el of elements) {
+    if (el.containerId && byId.has(el.containerId))
+      containerOf.set(el.id, byId.get(el.containerId) as T);
+    for (const b of el.boundElements ?? []) {
+      if (b.type === 'text' && byId.has(b.id) && !containerOf.has(b.id))
+        containerOf.set(b.id, el);
+    }
+  }
   const isBefore = (text: T, container: T) =>
     text.index == null ||
     container.index == null ||
     text.index <= container.index;
+  const moved = new Set<string>();
+  for (const [textId, container] of containerOf) {
+    const text = byId.get(textId) as T;
+    if (isBefore(text, container)) moved.add(textId);
+  }
+  const out: T[] = [];
   for (const el of elements) {
     if (moved.has(el.id)) continue;
-    const container = el.containerId ? byId.get(el.containerId) : undefined;
-    if (container && isBefore(el, container)) {
-      // Emitted later, right after its container.
-      moved.add(el.id);
-      continue;
-    }
     out.push(el);
-    for (const text of elements) {
-      if (text.containerId === el.id && isBefore(text, el)) {
-        moved.add(text.id);
-        out.push({ ...text, index: null });
-      }
+    for (const [textId, container] of containerOf) {
+      if (container.id === el.id && moved.has(textId))
+        out.push({ ...(byId.get(textId) as T), index: null });
     }
   }
   return out;

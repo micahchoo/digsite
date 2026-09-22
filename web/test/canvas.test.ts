@@ -9,6 +9,7 @@ import { imageGroupId } from '@digsite/shared';
 import {
   applyPatch,
   fitViewport,
+  orderByIndex,
   repairBoundTextOrder,
   toSceneElement,
   zoomBy,
@@ -467,6 +468,19 @@ describe('repairBoundTextOrder', () => {
     expect(out.find((e) => e.id === 'label')?.index).toBeNull();
     expect(out.find((e) => e.id === 'fine')?.index).toBe('b0T');
   });
+  test('a text bound only through boundElements, container unindexed, follows its container', () => {
+    const els = [
+      { id: 'label', index: 'aQ' },
+      {
+        id: 'rect',
+        index: null,
+        boundElements: [{ id: 'label', type: 'text' }],
+      },
+    ];
+    const out = repairBoundTextOrder(els);
+    expect(out.map((e) => e.id)).toEqual(['rect', 'label']);
+    expect(out[1]?.index).toBeNull();
+  });
   test('leaves a well-ordered scene untouched', () => {
     const els = [
       { id: 'arrow', index: 'a1' },
@@ -477,7 +491,7 @@ describe('repairBoundTextOrder', () => {
 });
 
 describe('orderByIndex', () => {
-  test('sorts by fractional index, keeps unindexed elements last in input order', () => {
+  test('sorts by fractional index, unindexed elements first in input order', () => {
     const els: { id: string; index?: string | null }[] = [
       { id: 'text', index: 'b0d' },
       { id: 'fresh1' },
@@ -487,11 +501,11 @@ describe('orderByIndex', () => {
     ];
     const out = orderByIndex(els);
     expect(out.map((e) => e.id)).toEqual([
+      'fresh1',
+      'fresh2',
       'rect',
       'arrow',
       'text',
-      'fresh1',
-      'fresh2',
     ]);
   });
 });
