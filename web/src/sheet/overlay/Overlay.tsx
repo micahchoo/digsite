@@ -41,27 +41,21 @@ export function Overlay({
   const shapes = useMemo(() => foreignShapes(rows, elements), [rows, elements]);
 
   return (
+    // Excalidraw's own interactive canvas sits at z-index 2
+    // (--zIndex-interactiveCanvas); an unset z-index here paints below it
+    // regardless of DOM order, hiding every foreign shape. `.sheet-overlay-svg`
+    // (sheet.css) sits at 3 — above the drawing, below the chrome.
     <svg
       data-testid="foreign-overlay"
       role="img"
       aria-label="Claims from other sheets on this board"
-      style={{
-        position: 'absolute',
-        inset: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        // Excalidraw's own interactive canvas sits at z-index 2
-        // (--zIndex-interactiveCanvas); an unset z-index here paints below
-        // it regardless of DOM order, hiding every foreign shape. Its
-        // toolbar/library UI is --zIndex-layerUI: 4, so 3 sits between the
-        // two — above the drawing, below the chrome.
-        zIndex: 3,
-      }}
+      className="sheet-overlay-svg"
     >
       {shapes.map((shape) => {
         const selected = shape.id === selectedId;
-        const stroke = selected ? '#1971c2' : '#868e96';
+        const stroke = selected
+          ? 'var(--region-stroke)'
+          : 'var(--foreign-stroke)';
         const strokeWidth = selected ? 2 : 1.5;
         const handlePointerDown = (e: React.PointerEvent) => {
           e.stopPropagation();
@@ -86,7 +80,7 @@ export function Overlay({
                 strokeWidth={strokeWidth}
                 strokeDasharray="6 4"
                 opacity={0.7}
-                style={{ pointerEvents: 'all', cursor: 'pointer' }}
+                className="sheet-overlay-hit"
                 onPointerDown={handlePointerDown}
               />
               {shape.label && (
@@ -95,7 +89,7 @@ export function Overlay({
                   y={r.y + 14}
                   fontSize={11}
                   fill={stroke}
-                  style={{ pointerEvents: 'none' }}
+                  className="sheet-overlay-static"
                 >
                   {shape.label}
                 </text>
@@ -122,7 +116,7 @@ export function Overlay({
               strokeWidth={strokeWidth}
               strokeDasharray="6 4"
               opacity={0.7}
-              style={{ pointerEvents: 'all', cursor: 'pointer' }}
+              className="sheet-overlay-hit"
               onPointerDown={handlePointerDown}
             />
             {/* Dangling from a vanished foreign region (docs/phases/2-sheet.md
@@ -138,7 +132,7 @@ export function Overlay({
                 fill="none"
                 stroke={stroke}
                 strokeWidth={1.5}
-                style={{ pointerEvents: 'none' }}
+                className="sheet-overlay-static"
               />
             )}
             {shape.danglingEnd && (
@@ -150,7 +144,7 @@ export function Overlay({
                 fill="none"
                 stroke={stroke}
                 strokeWidth={1.5}
-                style={{ pointerEvents: 'none' }}
+                className="sheet-overlay-static"
               />
             )}
             {shape.label && (
@@ -159,7 +153,7 @@ export function Overlay({
                 y={my}
                 fontSize={11}
                 fill={stroke}
-                style={{ pointerEvents: 'none' }}
+                className="sheet-overlay-static"
               >
                 {shape.label}
               </text>
@@ -175,7 +169,7 @@ export function Overlay({
             data-testid="peer-cursor"
             data-peer-user={p.user}
             data-peer-name={p.name}
-            style={{ pointerEvents: 'none' }}
+            className="sheet-overlay-static"
           >
             {p.rects.map((r) => {
               const rr = rectToScreen(r, viewport, offset);

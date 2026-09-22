@@ -79,17 +79,10 @@ export function Inspector({
           <b>kind:</b> {shape.kind} (foreign)
         </div>
         {shape.label && <div>label: {shape.label}</div>}
-        <div
-          style={{
-            marginTop: 10,
-            padding: 6,
-            background: '#fafafa',
-            border: '1px dashed #bbb',
-          }}
-        >
+        <div className="sheet-foreign-box">
           <div>foreign from: {shape.sheetName}</div>
           <Link to={`/s/${shape.row.sheetId}`}>Jump to sheet</Link>
-          <div style={{ marginTop: 6 }}>
+          <div className="sheet-field">
             <button
               type="button"
               data-testid="copy-foreign"
@@ -126,7 +119,7 @@ export function Inspector({
 
   return (
     <div data-testid="inspector">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
+      <div className="sheet-row-between">
         <span>
           <b>kind:</b> {data.kind}
         </span>
@@ -146,7 +139,7 @@ export function Inspector({
       </div>
 
       {(data.kind === 'region' || data.kind === 'edge') && (
-        <div style={{ marginTop: 6 }}>
+        <div className="sheet-field">
           <label>
             {data.kind === 'region' ? 'label' : 'relation'}:{' '}
             <input
@@ -165,7 +158,7 @@ export function Inspector({
       )}
 
       {data.kind === 'edge' && (
-        <div style={{ marginTop: 6 }}>
+        <div className="sheet-field">
           <label>
             direction:{' '}
             <select
@@ -185,29 +178,13 @@ export function Inspector({
       )}
 
       {(data.kind === 'region' || data.kind === 'edge') && (
-        <div style={{ marginTop: 10 }}>
+        <div className="sheet-field-lg">
           <div>
             <b>properties</b>
           </div>
           {Object.entries(data.properties).map(([k, v]) => (
-            <div
-              key={k}
-              style={{
-                display: 'flex',
-                gap: 4,
-                alignItems: 'center',
-                marginTop: 4,
-              }}
-            >
-              <span
-                style={{
-                  width: 70,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {k}
-              </span>
+            <div key={k} className="sheet-prop-row">
+              <span className="sheet-prop-key">{k}</span>
               <select
                 value={typeOf(v)}
                 onChange={(e) =>
@@ -226,7 +203,7 @@ export function Inspector({
                 <option value="boolean">boolean</option>
               </select>
               <input
-                style={{ width: 70 }}
+                className="sheet-prop-value"
                 value={String(v)}
                 onChange={(e) =>
                   onSetProperty(el.id, k, coerce(e.target.value, typeOf(v)))
@@ -237,7 +214,7 @@ export function Inspector({
               </button>
             </div>
           ))}
-          <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+          <div className="sheet-prop-add">
             <input
               placeholder="new key"
               value={newKey}

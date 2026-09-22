@@ -1,23 +1,22 @@
-// Our four tools, replacing Excalidraw's stock shape toolbar
-// (docs/phases/2-sheet.md section 1). Excalidraw 0.18 has no UIOptions flag
-// for hiding individual shape tools (`tools` only supports `{ image }` —
-// checked against research/excalidraw/packages/excalidraw/types.ts) so the
-// stock toolbar is hidden by CSS instead (`.shapes-section` in Sheet.tsx's
-// wrapper), which leaves the zoom controls and undo/redo footer — separate
-// `Section`s in LayerUI.tsx — alone.
-//
-// select/pan map straight onto Excalidraw's own tools; region/edge are ours
+// Our four tools plus our own zoom/undo/redo, replacing Excalidraw's stock
+// toolbar and footer wholesale (docs/phases/2-sheet.md section 1;
+// canvas/README.md — `ui={false}` is what took the stock ones away). select/
+// pan map straight onto Excalidraw's own tools; region/edge are ours
 // (Sheet.tsx wires them to `{type: 'custom', customType}` via
 // `tools.setTool`, per research/excalidraw: a custom tool gets no built-in
 // pointer behaviour at all, so nothing here fights our own drag handling in
-// DrawLayer.tsx).
+// DrawLayer.tsx). Zoom/undo/redo talk to the canvas seam's handle directly —
+// this component is the one place outside `canvas/` allowed to import its
+// TYPE (not the `@excalidraw` package, never that).
 import { useEffect } from 'react';
+import type { CanvasHandle } from './canvas/types.ts';
 import type { Tool } from './gestures.ts';
 
 interface Props {
   tool: Tool;
   onChange: (tool: Tool) => void;
   pendingEdge: boolean;
+  canvas: CanvasHandle | null;
 }
 
 const TOOLS: { tool: Tool; label: string; key: string }[] = [
@@ -41,7 +40,7 @@ function typing(): boolean {
   );
 }
 
-export function Toolbar({ tool, onChange, pendingEdge }: Props) {
+export function Toolbar({ tool, onChange, pendingEdge, canvas }: Props) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (typing() || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -53,27 +52,10 @@ export function Toolbar({ tool, onChange, pendingEdge }: Props) {
   }, [onChange]);
 
   return (
-    <div
-      data-testid="sheet-toolbar"
-      className="row"
-      style={{
-        position: 'absolute',
-        // Bottom-centre, not the scene's default top-left corner: at
-        // scroll 0 the seed grid's row 0 sits under (0,0) and a top-left
-        // toolbar overlaps it (docs/phases/2-sheet.md's prior step found
-        // this). Bottom-centre stays clear of both the grid and the zoom
-        // controls, which Excalidraw itself pins to its own bottom-left.
-        bottom: 16,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 5, // above Excalidraw's own layerUI (--zIndex-layerUI: 4)
-        background: 'rgba(255,255,255,0.95)',
-        border: '1px solid #ccc',
-        borderRadius: 6,
-        padding: 4,
-        gap: 4,
-      }}
-    >
+    // Bottom-centre, not the scene's default top-left corner: at scroll 0
+    // the seed grid's row 0 sits under (0,0) and a top-left toolbar
+    // overlaps it (docs/phases/2-sheet.md's prior step found this).
+    <div data-testid="sheet-toolbar" className="sheet-toolbar">
       {TOOLS.map((t) => (
         <button
           key={t.tool}
@@ -82,27 +64,67 @@ export function Toolbar({ tool, onChange, pendingEdge }: Props) {
           aria-pressed={tool === t.tool}
           onClick={() => onChange(t.tool)}
           title={`${t.label} (${t.key.toUpperCase()})`}
-          style={{
-            fontWeight: tool === t.tool ? 700 : 400,
-            background: tool === t.tool ? '#1971c2' : 'transparent',
-            color: tool === t.tool ? '#fff' : '#000',
-            border: '1px solid #ccc',
-            borderRadius: 4,
-            padding: '4px 8px',
-          }}
+          className={
+            tool === t.tool
+              ? 'sheet-toolbar-btn sheet-toolbar-btn--active'
+              : 'sheet-toolbar-btn'
+          }
         >
           {t.label}
         </button>
       ))}
       {tool === 'edge' && pendingEdge && (
-        <span
-          className="muted"
-          data-testid="edge-pending"
-          style={{ marginLeft: 6 }}
-        >
+        <span data-testid="edge-pending" className="sheet-toolbar-hint">
           pick a target… (Esc to cancel)
         </span>
       )}
+      <span className="sheet-toolbar-sep" aria-hidden="true" />
+      <button
+        type="button"
+        data-testid="zoom-out"
+        title="Zoom out"
+        className="sheet-toolbar-btn"
+        onClick={() => canvas?.zoomBy(1 / 1.2)}
+      >
+        −
+      </button>
+      <button
+        type="button"
+        data-testid="zoom-fit"
+        title="Zoom to fit"
+        className="sheet-toolbar-btn"
+        onClick={() => canvas?.zoomToFit()}
+      >
+        fit
+      </button>
+      <button
+        type="button"
+        data-testid="zoom-in"
+        title="Zoom in"
+        className="sheet-toolbar-btn"
+        onClick={() => canvas?.zoomBy(1.2)}
+      >
+        +
+      </button>
+      <span className="sheet-toolbar-sep" aria-hidden="true" />
+      <button
+        type="button"
+        data-testid="undo"
+        title="Undo (Ctrl/Cmd+Z)"
+        className="sheet-toolbar-btn"
+        onClick={() => canvas?.undo()}
+      >
+        ↶
+      </button>
+      <button
+        type="button"
+        data-testid="redo"
+        title="Redo (Ctrl/Cmd+Shift+Z)"
+        className="sheet-toolbar-btn"
+        onClick={() => canvas?.redo()}
+      >
+        ↷
+      </button>
     </div>
   );
 }

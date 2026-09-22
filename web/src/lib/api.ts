@@ -310,6 +310,11 @@ export const api = {
     request<GetImageResponse>(`/images/${imageId}`),
   originalUrl: (imageId: string) =>
     `${SERVER_ORIGIN}/images/${imageId}/original`,
+  // Phase 2 section 7 (docs/phases/2-sheet.md): the sheet canvas loads a
+  // preview, not the original — not in the real server's contract yet (the
+  // stub serves the same painted PNG for both); see this file's report back
+  // to the lead alongside the other TODOs above.
+  previewUrl: (imageId: string) => `${SERVER_ORIGIN}/images/${imageId}/preview`,
   updateImageProperties: (
     imageId: string,
     body: UpdateImagePropertiesRequest,

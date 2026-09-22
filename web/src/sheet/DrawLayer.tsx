@@ -14,7 +14,7 @@
 // pointer; release commits it through `tools.pointerDraw` (scene
 // coordinates, the same entry point the test hook and smoke script use) and
 // opens OUR OWN small text input over the new region for the label — not
-// Excalidraw's bound-text editor. Excalidraw's `ExcalidrawImperativeAPI` has
+// Excalidraw's bound-text editor. The canvas seam's imperative handle has
 // no "start editing this bound text" call; the alternatives were
 // `setActiveTool({type:'text'})` (steals the *tool*, not just this element)
 // or simulating a double-click on the container (brittle, and re-enters
@@ -219,28 +219,16 @@ export function DrawLayer({
       : null;
 
   return (
+    // Same layer as the foreign overlay (sheet.css's z-index) — both sit
+    // above Excalidraw's canvas, below its chrome.
     <div
       data-testid="draw-layer"
+      className="sheet-draw-layer"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 3, // same layer as the foreign overlay — both sit above Excalidraw's canvas, below its chrome
-        cursor: tool === 'region' ? 'crosshair' : 'crosshair',
-      }}
     >
-      <svg
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          pointerEvents: 'none',
-        }}
-      >
+      <svg aria-hidden="true" className="sheet-draw-svg">
         {previewScreen && (
           <rect
             data-testid="region-draft"
@@ -248,9 +236,7 @@ export function DrawLayer({
             y={previewScreen.y}
             width={previewScreen.width}
             height={previewScreen.height}
-            fill="rgba(25,113,194,0.15)"
-            stroke="#1971c2"
-            strokeWidth={1.5}
+            className="sheet-region-draft"
           />
         )}
         {edgeLine && (
@@ -260,9 +246,7 @@ export function DrawLayer({
             y1={edgeLine.a.y}
             x2={edgeLine.b.x}
             y2={edgeLine.b.y}
-            stroke="#1971c2"
-            strokeWidth={1.5}
-            strokeDasharray="4 3"
+            className="sheet-edge-draft"
           />
         )}
       </svg>
@@ -270,6 +254,7 @@ export function DrawLayer({
         <input
           ref={inputRef}
           data-testid="region-label-input"
+          className="sheet-label-input"
           value={labelValue}
           onChange={(e) => setLabelValue(e.target.value)}
           onKeyDown={(e) => {
@@ -277,13 +262,12 @@ export function DrawLayer({
             if (e.key === 'Escape') setLabelFor(null);
           }}
           onBlur={commitLabel}
+          // Dynamic per-instance position/size only — every static rule
+          // (position, font, z-index) lives in sheet.css's `.sheet-label-input`.
           style={{
-            position: 'absolute',
             left: labelFor.screenRect.x,
             top: labelFor.screenRect.y + labelFor.screenRect.height + 2,
             width: Math.max(80, labelFor.screenRect.width),
-            fontSize: 12,
-            zIndex: 6,
           }}
         />
       )}

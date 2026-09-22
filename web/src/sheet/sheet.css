@@ -1,0 +1,222 @@
+/* Every class the sheet page and its children use — replaces the inline
+   styles they carried before the canvas split (docs/phases/2-sheet.md
+   section 7). Three colour tokens for the drawing: region stroke, edge
+   stroke, foreign dashed stroke. `canvas/convert.ts` bakes the same region/
+   edge hex values into the elements it builds (an Excalidraw element's
+   `strokeColor` can't read a page's CSS variable) — see its own comment. */
+:root {
+  --region-stroke: #1971c2;
+  --edge-stroke: #2f9e44;
+  --foreign-stroke: #868e96;
+}
+
+.sheet-page {
+  display: flex;
+  height: calc(100vh - 41px);
+}
+
+.sheet-canvas-area {
+  flex: 1;
+  position: relative;
+}
+
+/* -- toolbar --------------------------------------------------------- */
+
+.sheet-toolbar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5; /* above Excalidraw's own layerUI, --zIndex-layerUI: 4 */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.sheet-toolbar-btn {
+  font-weight: 400;
+  background: transparent;
+  color: #000;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.sheet-toolbar-btn--active {
+  font-weight: 700;
+  background: var(--region-stroke);
+  color: #fff;
+}
+
+.sheet-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  background: #ddd;
+  margin: 0 2px;
+}
+
+.sheet-toolbar-hint {
+  color: #868e96;
+  margin-left: 6px;
+}
+
+/* -- drawing (DrawLayer.tsx) ------------------------------------------ */
+
+.sheet-draw-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3; /* same layer as the foreign overlay */
+  cursor: crosshair;
+}
+
+.sheet-draw-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.sheet-region-draft {
+  fill: rgba(25, 113, 194, 0.15);
+  stroke: var(--region-stroke);
+  stroke-width: 1.5;
+}
+
+.sheet-edge-draft {
+  stroke: var(--edge-stroke);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.sheet-label-input {
+  position: absolute;
+  font-size: 12px;
+  z-index: 6;
+}
+
+/* -- foreign overlay + presence (overlay/Overlay.tsx) ------------------ */
+
+.sheet-overlay-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3; /* above Excalidraw's interactive canvas (2), below its chrome (4) */
+}
+
+.sheet-overlay-hit {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.sheet-overlay-static {
+  pointer-events: none;
+}
+
+/* -- side panel (SidePanel.tsx) ---------------------------------------- */
+
+.sheet-side {
+  width: 280px;
+  border-left: 1px solid #ddd;
+  overflow: auto;
+}
+
+.sheet-header {
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+
+.sheet-header-meta {
+  color: #868e96;
+}
+
+.sheet-presence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+.sheet-presence-chip {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--chip-color, var(--region-stroke));
+}
+
+.sheet-dangling {
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+
+.sheet-dangling-title {
+  font-weight: 700;
+}
+
+/* -- inspector (Inspector.tsx) ------------------------------------------ */
+
+.sheet-row-between {
+  display: flex;
+  justify-content: space-between;
+}
+
+.sheet-field {
+  margin-top: 6px;
+}
+
+.sheet-field-lg {
+  margin-top: 10px;
+}
+
+.sheet-prop-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.sheet-prop-key {
+  width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sheet-prop-value {
+  width: 70px;
+}
+
+.sheet-prop-add {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.sheet-foreign-box {
+  margin-top: 10px;
+  padding: 6px;
+  background: #fafafa;
+  border: 1px dashed #bbb;
+}
+
+/* -- a11y utility -------------------------------------------------------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

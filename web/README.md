@@ -21,11 +21,14 @@ Vite + React 19 + TypeScript. See `../CONTEXT.md` for vocabulary and
   the neighbourhood's image-to-image edges in as own edges. Debug hooks:
   `window.__digsiteBoard` (`selectImages(ids)` is Explore's own entry point).
 - `/s/:id` — the document: one Excalidraw scene per sheet, live-synced over
-  Socket.IO, plus the foreign overlay below. `Toolbar.tsx` (select/region/
-  edge/pan, keys V/R/E/H) sits bottom-centre — top-left overlaps row 0 at
-  scroll 0 — replacing Excalidraw's stock shape tools by CSS (0.18 has no
-  `UIOptions` flag for one tool). A missing image loads a drawn placeholder
-  instead of fetching its original (`Sheet.tsx#loadImages`).
+  Socket.IO (`room.ts`) plus the foreign overlay below. `sheet/canvas/` is
+  the only module that imports Excalidraw; `CanvasHandle` and `SceneElement`
+  are the seam everything else (`tools.ts`, `Sheet.tsx`, `DrawLayer.tsx`)
+  talks through, enforced by `bun run lint:seams` (see
+  `.claude/rules/sheet-canvas-seam.md` and `canvas/README.md`). `Toolbar.tsx`
+  (select/region/edge/pan, zoom, undo/redo, keys V/R/E/H) sits bottom-centre,
+  replacing Excalidraw's own stock chrome entirely. A missing image loads a
+  drawn placeholder instead of fetching its preview (`images.ts`).
 
 ## The overlay seam
 

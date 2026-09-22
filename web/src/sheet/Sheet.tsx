@@ -1,138 +1,41 @@
-// The document (docs/design.md "web/" § "The sheet page"). Mounts one
-// Excalidraw with the snapshot delivered by the socket's `joined` payload,
-// loads every image file, and wires window.__digsite (tools.ts) plus the
-// foreign overlay (overlay/) — which never touches this scene, per
-// ../.claude/rules/foreign-never-in-scene.md.
-import { dataOf, fileId } from '@digsite/shared';
-import type {
-  Direction,
-  PeersPayload,
-  PointerBroadcastPayload,
-} from '@digsite/shared';
-import {
-  CaptureUpdateAction,
-  Excalidraw,
-  newElementWith,
-  reconcileElements,
-  restoreElements,
-} from '@excalidraw/excalidraw';
-import '@excalidraw/excalidraw/index.css';
-import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
-import type {
-  AppState,
-  ExcalidrawImperativeAPI,
-} from '@excalidraw/excalidraw/types';
+// The document (docs/design.md "web/" § "The sheet page"). Composition only
+// (docs/phases/2-sheet.md section 7): loads the sheet, owns the socket
+// through `room.ts`, owns the foreign poll, lays out the page. Everything
+// imperative goes through `CanvasHandle` — no `@excalidraw` import, no
+// Excalidraw type, per `../.claude/rules/sheet-canvas-seam.md`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router';
-import { type Socket, io } from 'socket.io-client';
-import { RenameInline } from '../components/RenameInline.tsx';
-import { SERVER_ORIGIN, api } from '../lib/api.ts';
+import { api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
 import { DrawLayer } from './DrawLayer.tsx';
-import { Inspector } from './Inspector.tsx';
-import { Toolbar } from './Toolbar.tsx';
-import { clampRegion } from './clamp.ts';
-import { type CascadeElement, applyCascade } from './dangling.ts';
-import type { Tool } from './gestures.ts';
+import { SidePanel } from './SidePanel.tsx';
+import { Canvas } from './canvas/Canvas.tsx';
+import type {
+  CanvasFile,
+  CanvasHandle,
+  SceneChange,
+  SceneElement,
+  Viewport,
+} from './canvas/types.ts';
+import { type ImageMeta, loadImageFiles } from './images.ts';
 import { Overlay } from './overlay/Overlay.tsx';
+import { screenToScene } from './overlay/screen.ts';
+import { peerCursors } from './presence.ts';
+import { useRoom } from './room.ts';
+import { reconcileLocalChange } from './scene-diff.ts';
+import './sheet.css';
+import { Toolbar } from './Toolbar.tsx';
 import {
-  type ForeignShape,
-  type Rect,
-  type Viewport,
-  foreignShapes,
-  screenToScene,
-} from './overlay/screen.ts';
-import { useForeign } from './overlay/useForeign.ts';
-import { canSendPointer, peerCursors } from './presence.ts';
-import { isSyncable, signature } from './sync.ts';
-import { type SyncStatus, createTools } from './tools.ts';
+  type PendingCopyEdge,
+  useCopyConnections,
+} from './use-copy-connections.ts';
+import { useForeignShapes } from './use-foreign-shapes.ts';
+import { useSheetTools } from './use-sheet-tools.ts';
 
-/** `POST /boards/:id/sheets`'s "copy connections" (docs/phases/2-sheet.md
- * section 4): passed through `navigate(..., {state})` from Board.tsx's
- * Explore panel, applied once the new sheet's own scene has loaded — see
- * the effect below. By imageId, not element id: this sheet's own image
- * elements' ids are a server/stub implementation detail this file has no
- * business assuming. */
-export interface PendingCopyEdge {
-  sourceImageId: string;
-  targetImageId: string;
-  relation: string;
-  direction: Direction;
-}
+export type { PendingCopyEdge };
 
-declare global {
-  interface Window {
-    __digsiteSheetDebug?: { getAppState: () => AppState | null };
-  }
-}
-
-function rectOf(el: {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}): Rect {
-  return { x: el.x, y: el.y, width: el.width, height: el.height };
-}
-
-/** applyCascade (dangling.ts) is pure and returns plain patched objects —
- * this wraps that in Excalidraw's version-bump convention
- * (`newElementWith`), and ONLY for elements the cascade actually touched,
- * so an untouched element's `version` never bumps and nothing spuriously
- * re-syncs. */
-function applyCascadeToScene(elements: readonly ExcalidrawElement[]): {
-  elements: ExcalidrawElement[];
-  changed: boolean;
-} {
-  const result = applyCascade(elements as unknown as CascadeElement[]);
-  if (!result.changed)
-    return { elements: elements as ExcalidrawElement[], changed: false };
-  const next = result.elements.map((patched, i) => {
-    const original = elements[i];
-    if (!original || patched === (original as unknown as CascadeElement)) {
-      return original as ExcalidrawElement;
-    }
-    // biome-ignore lint/suspicious/noExplicitAny: a cascade patch is a generic subset of one Excalidraw element variant
-    return newElementWith(original, patched as any);
-  });
-  return { elements: next, changed: true };
-}
-
-function blobToDataURL(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-/** A missing image's file (docs/phases/3-groups.md section 4): the
- * original is gone server-side (`GET /images/:id/original` 404s — see
- * ../stub/server.ts), so this is drawn locally instead of fetched, keyed
- * the same as a real file so the scene's existing image element (and its
- * `fileId`) needs no change. */
-function placeholderDataURL(name: string): string {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#e9ecef';
-    ctx.fillRect(0, 0, 256, 256);
-    ctx.strokeStyle = '#adb5bd';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(4, 4, 248, 248);
-    ctx.fillStyle = '#868e96';
-    ctx.font = '20px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('missing', 128, 112);
-    ctx.font = '13px sans-serif';
-    ctx.fillText(name.slice(0, 24), 128, 144);
-  }
-  return canvas.toDataURL('image/png');
-}
+type SheetInfo = Awaited<ReturnType<typeof api.getSheet>>;
+const ZERO_VIEWPORT: Viewport = { scrollX: 0, scrollY: 0, zoom: 1 };
 
 export function Sheet() {
   const { id } = useParams<{ id: string }>();
@@ -140,455 +43,115 @@ export function Sheet() {
   const location = useLocation();
   const { data: session } = useSession();
 
-  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
-  const socketRef = useRef<Socket | null>(null);
-  const loadedImages = useRef<Set<string>>(new Set());
-  // Populated from GET /sheets/:id's per-image `missing`/`name` (additive,
-  // see lib/api.ts's GetSheetResponseWithStatus) before `loadImages` runs,
-  // so a missing image never even attempts the network fetch.
-  const imageMetaRef = useRef<Map<string, { missing: boolean; name: string }>>(
-    new Map(),
-  );
-  const lastEmittedSig = useRef('');
-  const emitTimer = useRef<number | null>(null);
+  const canvasRef = useRef<CanvasHandle | null>(null);
+  const imageMetaRef = useRef(new Map<string, ImageMeta>());
   const rafRef = useRef<number | null>(null);
-  const statsRef = useRef<SyncStatus>({
-    emits: 0,
-    recvs: 0,
-    lastEmitAt: null,
-    lastRecvAt: null,
-    peers: [],
-  });
-  const selectedForeignRef = useRef<string | null>(null);
-  const foreignShapesRef = useRef<ForeignShape[]>([]);
-  const toolsRef = useRef<ReturnType<typeof createTools> | null>(null);
-  // Presence (docs/phases/2-sheet.md section 3): the last pointer WE sent,
-  // for the client-side throttle, and the copy-connections effect's
-  // once-only guard.
-  const lastPointerSentRef = useRef<number | null>(null);
-  const copyEdgesAppliedRef = useRef(false);
-
-  const [sheetInfo, setSheetInfo] = useState<Awaited<
-    ReturnType<typeof api.getSheet>
-  > | null>(null);
-  const [denied, setDenied] = useState<string | null>(null);
-  const [peers, setPeers] = useState<string[]>([]);
-  // Every peer's last-reported pointer, by user id — pruned on every
-  // 'peers' roster update so a departed peer's cursor doesn't linger.
-  const [peerPointers, setPeerPointers] = useState<PointerBroadcastPayload[]>(
-    [],
-  );
-  const [selectedForeignId, setSelectedForeignIdState] = useState<
-    string | null
-  >(null);
-  const [sceneElements, setSceneElements] = useState<ExcalidrawElement[]>([]);
-  const [viewport, setViewport] = useState<Viewport>({
-    scrollX: 0,
-    scrollY: 0,
-    zoom: 1,
-  });
+  const [sheetInfo, setSheetInfo] = useState<SheetInfo | null>(null);
+  const [files, setFiles] = useState(new Map<string, CanvasFile>());
+  const [sceneElements, setSceneElements] = useState<SceneElement[]>([]);
+  const [viewport, setViewport] = useState<Viewport>(ZERO_VIEWPORT);
+  const [pendingEdge, setPendingEdge] = useState(false);
   const [, bumpTick] = useState(0);
   const rerender = useCallback(() => bumpTick((n) => n + 1), []);
-  const [tool, setToolState] = useState<Tool>('select');
-  const toolRef = useRef<Tool>('select');
-  const [pendingEdge, setPendingEdge] = useState(false);
-
-  const foreignRows = useForeign(sheetId);
-
-  useEffect(() => {
-    foreignShapesRef.current = foreignShapes(foreignRows, sceneElements);
-    rerender();
-  }, [foreignRows, sceneElements, rerender]);
-
-  const applySelectedForeign = useCallback((sid: string | null) => {
-    selectedForeignRef.current = sid;
-    setSelectedForeignIdState(sid);
-  }, []);
-
-  // A stable ref callback: an inline arrow here gets a new identity every
-  // render, and Excalidraw treats that as a new API consumer on each one —
-  // observed as an infinite forceStoreRerender loop inside Excalidraw's own
-  // store (Maximum update depth exceeded).
-  const setApi = useCallback((instance: ExcalidrawImperativeAPI) => {
-    apiRef.current = instance;
-  }, []);
-
-  // setTool is the one place Excalidraw's own activeTool is set — select and
-  // pan map onto its built-in tools; region and edge become {type: 'custom'}
-  // (research/excalidraw: a custom tool gets no built-in pointer behaviour,
-  // so DrawLayer never fights Excalidraw's own drag-select/hand-pan). See
-  // Toolbar.tsx's header comment.
-  const applyTool = useCallback((next: Tool) => {
-    toolRef.current = next;
-    setToolState(next);
-    const liveApi = apiRef.current;
-    if (!liveApi) return;
-    if (next === 'select') liveApi.setActiveTool({ type: 'selection' });
-    else if (next === 'pan') liveApi.setActiveTool({ type: 'hand' });
-    else liveApi.setActiveTool({ type: 'custom', customType: next });
-  }, []);
-
-  if (!toolsRef.current) {
-    toolsRef.current = createTools({
-      getApi: () => apiRef.current,
-      getForeignShapes: () => foreignShapesRef.current,
-      getSelectedForeignId: () => selectedForeignRef.current,
-      setSelectedForeign: applySelectedForeign,
-      getSyncStatus: () => ({ ...statsRef.current }),
-      getTool: () => toolRef.current,
-      setTool: applyTool,
-      getSheetId: () => sheetId,
-      onRenamed: (name) =>
-        setSheetInfo((prev) => (prev ? { ...prev, name } : prev)),
-    });
-  }
-  const tools = toolsRef.current;
-
-  useEffect(() => {
-    window.__digsite = tools;
-  }, [tools]);
-
-  // A debug-only hook for e2e, NOT part of the fixed window.__digsite
-  // contract (docs/design.md's Tools list has no raw-appState getter) —
-  // same pattern as pages/Board.tsx's window.__digsiteBoard. Scenario 8
-  // (.claude/rules/foreign-never-in-scene.md) asserts a pointer drag across
-  // a foreign shape never reaches Excalidraw's own selection; that needs a
-  // read of appState.selectedElementIds, which no product hook exposes.
-  useEffect(() => {
-    window.__digsiteSheetDebug = {
-      getAppState: () => apiRef.current?.getAppState() ?? null,
-    };
-  }, []);
-
   const loadImages = useCallback(async (imageIds: string[]) => {
-    const toLoad = imageIds.filter((id) => !loadedImages.current.has(id));
-    if (!toLoad.length) return;
-    const files = await Promise.all(
-      toLoad.map(async (imageId) => {
-        const known = imageMetaRef.current.get(imageId);
-        // Known missing: never fetched — the original is gone server-side.
-        // Unknown or not-yet-missing: fetch, and fall back to the same
-        // placeholder if it 404s (an image deleted after this sheet's own
-        // GET /sheets/:id, before the socket's 'joined' snapshot loaded it).
-        if (!known?.missing) {
-          try {
-            const res = await fetch(api.originalUrl(imageId), {
-              credentials: 'include',
-            });
-            if (!res.ok)
-              throw new Error(`original fetch failed: ${res.status}`);
-            const blob = await res.blob();
-            const dataURL = await blobToDataURL(blob);
-            return {
-              id: fileId(imageId),
-              dataURL,
-              mimeType: blob.type || 'image/png',
-              created: Date.now(),
-            };
-          } catch {
-            // fall through to the placeholder below
-          }
-        }
-        return {
-          id: fileId(imageId),
-          dataURL: placeholderDataURL(known?.name ?? imageId),
-          mimeType: 'image/png',
-          created: Date.now(),
-        };
-      }),
-    );
-    // Mark loaded only once addFiles actually ran. Sheet.tsx calls
-    // loadImages twice — eagerly right after GET /sheets/:id, and again
-    // from the socket's 'joined' handler — and the eager call can resolve
-    // before Excalidraw has mounted (apiRef.current still null). Marking
-    // unconditionally there meant `?.addFiles` silently no-op'd and the
-    // dedupe set stopped the 'joined' call from ever retrying, leaving
-    // those images permanently missing from the scene.
-    const liveApi = apiRef.current;
-    if (!liveApi) return;
-    // biome-ignore lint/suspicious/noExplicitAny: BinaryFileData's branded DataURL isn't worth hand-narrowing
-    liveApi.addFiles(files as any);
-    for (const imageId of toLoad) loadedImages.current.add(imageId);
+    const next = await loadImageFiles(imageIds, imageMetaRef.current);
+    setFiles((prev) => {
+      const merged = new Map(prev);
+      for (const [k, v] of next) if (!merged.has(k)) merged.set(k, v);
+      return merged;
+    });
   }, []);
 
-  // -- connect: fetch sheet info, then join the room ------------------------
+  const room = useRoom({
+    sheetId,
+    getHandle: () => canvasRef.current,
+    loadImages,
+    onRemoteChange: () => {
+      setSceneElements(canvasRef.current?.elements() ?? []);
+      setViewport(canvasRef.current?.viewport() ?? ZERO_VIEWPORT);
+    },
+  });
+  const foreign = useForeignShapes(sheetId, sceneElements);
+  const { tools, tool, setTool, selectedForeignId } = useSheetTools({
+    sheetId,
+    getHandle: () => canvasRef.current,
+    getForeignShapes: () => foreign.ref.current,
+    getSyncStatus: () => room.getStatus(),
+    onRenamed: (name) =>
+      setSheetInfo((prev) => (prev ? { ...prev, name } : prev)),
+  });
+
   useEffect(() => {
     if (!sheetId) return;
     let cancelled = false;
-    let socket: Socket | null = null;
-
     void (async () => {
       const info = await api.getSheet(sheetId);
       if (cancelled) return;
       setSheetInfo(info);
-      for (const img of info.images) {
-        imageMetaRef.current.set(img.id, {
-          missing: img.missing,
-          name: img.name,
-        });
-      }
+      imageMetaRef.current = new Map(info.images.map((img) => [img.id, img]));
       void loadImages(info.images.map((i) => i.id));
-
-      socket = io(SERVER_ORIGIN, { withCredentials: true });
-      socketRef.current = socket;
-
-      socket.on('join-denied', ({ reason }: { reason: string }) => {
-        setDenied(reason);
-        socket?.disconnect();
-      });
-
-      socket.on(
-        'joined',
-        async ({
-          elements,
-          peers: joinedPeers,
-        }: { elements: unknown[]; peers: string[] }) => {
-          const restored = restoreElements(
-            // biome-ignore lint/suspicious/noExplicitAny: restoreElements' input type is the server's raw JSON
-            elements as any,
-            null,
-          ) as unknown as ExcalidrawElement[];
-          const imageIds = new Set(info.images.map((i) => i.id));
-          for (const el of restored) {
-            const data = dataOf(el);
-            if (data?.kind === 'image') imageIds.add(data.imageId);
-          }
-          await loadImages([...imageIds]);
-          apiRef.current?.updateScene({
-            elements: restored,
-            captureUpdate: CaptureUpdateAction.NEVER,
-          });
-          lastEmittedSig.current = signature(restored.filter(isSyncable));
-          setPeers(joinedPeers);
-          statsRef.current = { ...statsRef.current, peers: joinedPeers };
-          setSceneElements(restored);
-          rerender();
-        },
-      );
-
-      // `peers` carries {id,name} objects (PeersPayload, phase 2 section 3)
-      // — the stub sends them too (web/stub/server.ts); `users` (ids only)
-      // is read as a fallback so this still degrades against a peers
-      // payload with no names. Also prunes peerPointers for anyone who
-      // just left, so a departed peer's cursor never lingers.
-      socket.on('peers', (payload: PeersPayload) => {
-        const list = payload.peers?.length
-          ? payload.peers
-          : payload.users.map((u) => ({ id: u, name: u }));
-        const names = list.map((p) => p.name || p.id);
-        setPeers(names);
-        statsRef.current = { ...statsRef.current, peers: names };
-        const live = new Set(list.map((p) => p.id));
-        setPeerPointers((prev) => prev.filter((p) => live.has(p.user)));
-        rerender();
-      });
-
-      // A peer's pointer (docs/phases/2-sheet.md section 3): never
-      // persisted, replaced by user id on every event.
-      socket.on('pointer', (payload: PointerBroadcastPayload) => {
-        setPeerPointers((prev) => [
-          ...prev.filter((p) => p.user !== payload.user),
-          payload,
-        ]);
-      });
-
-      socket.on('scene', ({ elements: remote }: { elements: unknown[] }) => {
-        const liveApi = apiRef.current;
-        if (!liveApi) return;
-        const local = liveApi.getSceneElementsIncludingDeleted();
-        const reconciled = reconcileElements(
-          local,
-          // biome-ignore lint/suspicious/noExplicitAny: reconcileElements' remote arg is the server's raw JSON
-          remote as any,
-          liveApi.getAppState(),
-        );
-        liveApi.updateScene({
-          elements: reconciled,
-          captureUpdate: CaptureUpdateAction.NEVER,
-        });
-        const reconciledEls = reconciled as unknown as ExcalidrawElement[];
-        lastEmittedSig.current = signature(reconciledEls.filter(isSyncable));
-        statsRef.current = {
-          ...statsRef.current,
-          lastRecvAt: Date.now(),
-          recvs: statsRef.current.recvs + 1,
-        };
-        setSceneElements(reconciledEls);
-        rerender();
-      });
-
-      socket.emit('join', { sheetId });
     })();
-
     return () => {
       cancelled = true;
-      socket?.disconnect();
     };
-  }, [sheetId, loadImages, rerender]);
-
-  const scheduleOverlayUpdate = useCallback(
-    (elements: ExcalidrawElement[], appState: AppState) => {
-      if (rafRef.current !== null) return;
-      rafRef.current = window.requestAnimationFrame(() => {
-        rafRef.current = null;
-        setSceneElements(elements);
-        setViewport({
-          scrollX: appState.scrollX,
-          scrollY: appState.scrollY,
-          zoom: appState.zoom.value,
-        });
-      });
-    },
-    [],
-  );
-
-  const onChange = useCallback(
-    (elements: readonly ExcalidrawElement[], appState: AppState) => {
-      const liveApi = apiRef.current;
-      if (!liveApi) return;
-
-      // 1. clamp every region against its image's CURRENT rect, only
-      // rewriting one whose clamp actually changed it (clamp.ts).
-      const imgByImageId = new Map<string, ExcalidrawElement>();
-      for (const el of elements) {
-        if (el.isDeleted) continue;
-        const data = dataOf(el);
-        if (data?.kind === 'image') imgByImageId.set(data.imageId, el);
-      }
-      let anyClamped = false;
-      const afterClamp = elements.map((el) => {
-        if (el.isDeleted) return el;
-        const data = dataOf(el);
-        if (data?.kind !== 'region') return el;
-        const img = imgByImageId.get(data.imageId);
-        if (!img) return el;
-        const corrected = clampRegion(rectOf(el), rectOf(img));
-        if (!corrected) return el;
-        anyClamped = true;
-        return newElementWith(el, corrected);
-      });
-
-      // 2. the delete cascade + dangling rebind (dangling.ts section 1/5):
-      // an image delete takes its regions and edges with it; a region
-      // delete rebinds its edge to the image instead, tagged dangling.
-      const cascaded = applyCascadeToScene(afterClamp as ExcalidrawElement[]);
-      const finalElements = cascaded.elements;
-
-      if (anyClamped || cascaded.changed) {
-        liveApi.updateScene({
-          elements: finalElements,
-          captureUpdate: CaptureUpdateAction.NEVER,
+  }, [sheetId, loadImages]);
+  const onCanvasChange = useCallback(
+    (scene: SceneChange) => {
+      const handle = canvasRef.current;
+      if (!handle) return;
+      const { ops, elements: next } = reconcileLocalChange(scene.elements);
+      if (ops.length) handle.apply(ops, { history: false });
+      room.sendScene(next);
+      if (rafRef.current === null) {
+        rafRef.current = window.requestAnimationFrame(() => {
+          rafRef.current = null;
+          setSceneElements(next);
+          setViewport(scene.viewport);
         });
       }
-
-      const syncable = finalElements.filter(isSyncable);
-      const sig = signature(syncable);
-      if (sig !== lastEmittedSig.current) {
-        lastEmittedSig.current = sig;
-        if (emitTimer.current !== null) window.clearTimeout(emitTimer.current);
-        emitTimer.current = window.setTimeout(() => {
-          socketRef.current?.emit('scene', { elements: syncable });
-          statsRef.current = {
-            ...statsRef.current,
-            lastEmitAt: Date.now(),
-            emits: statsRef.current.emits + 1,
-          };
-          rerender();
-        }, 100);
-      }
-
-      scheduleOverlayUpdate(finalElements, appState);
-      rerender();
+      // `room` is a fresh object every render; `sendScene`'s identity is
+      // stable (room.ts's own useCallback) — depend on that, not the whole
+      // object, so this handler is never rebuilt yet never goes stale.
     },
-    [scheduleOverlayUpdate, rerender],
+    [room.sendScene],
   );
 
-  // Presence (docs/phases/2-sheet.md section 3): `pointer {x,y,selectedIds}`
-  // on pointer move, throttled to 20/s client-side (presence.ts#canSendPointer)
-  // on top of the server's own per-socket rate limit. Attached to the whole
-  // page wrapper — Excalidraw's canvas doesn't stop propagation on
-  // pointermove, so a move over it still bubbles here.
   const onPointerMoveForPresence = useCallback(
     (e: React.PointerEvent) => {
-      const socket = socketRef.current;
-      const liveApi = apiRef.current;
-      if (!socket) return;
-      const now = Date.now();
-      if (!canSendPointer(now, lastPointerSentRef.current)) return;
-      lastPointerSentRef.current = now;
+      const handle = canvasRef.current;
+      if (!handle) return;
       const box = e.currentTarget.getBoundingClientRect();
       const client = { x: e.clientX - box.left, y: e.clientY - box.top };
-      const scene = screenToScene(client, viewport, { left: 0, top: 0 });
-      const ids = liveApi?.getAppState().selectedElementIds ?? {};
-      const selectedIds = Object.keys(ids).filter((id) => ids[id]);
-      socket.emit('pointer', { x: scene.x, y: scene.y, selectedIds });
+      const p = screenToScene(client, viewport, { left: 0, top: 0 });
+      room.sendPointer(p.x, p.y, handle.selectedIds());
     },
-    [viewport],
+    [viewport, room.sendPointer],
   );
 
   const peerCursorList = useMemo(
-    () => peerCursors(peerPointers, sceneElements),
-    [peerPointers, sceneElements],
+    () => peerCursors(room.peerPointers, sceneElements),
+    [room.peerPointers, sceneElements],
   );
+  type LocationState = { copyEdges?: PendingCopyEdge[] } | null;
+  const copyEdges = (location.state as LocationState)?.copyEdges;
+  useCopyConnections(copyEdges, sceneElements, tools, rerender);
 
-  // "Copy connections" (docs/phases/2-sheet.md section 4): Board.tsx's
-  // Explore panel navigates here with `state.copyEdges` when the owner
-  // ticked the box on "New sheet". Applied once the new sheet's own scene
-  // has loaded (sceneElements non-empty), by imageId — every edge this
-  // creates is an ordinary OWN edge from the moment it exists, same as any
-  // other `tools.connect` call; nothing here is foreign.
-  useEffect(() => {
-    const pending = (location.state as { copyEdges?: PendingCopyEdge[] } | null)
-      ?.copyEdges;
-    if (!pending?.length) return;
-    if (copyEdgesAppliedRef.current) return;
-    if (!sceneElements.length) return;
-    copyEdgesAppliedRef.current = true;
-    const elements = tools.getElements();
-    const imageElByImageId = new Map<string, ExcalidrawElement>();
-    for (const el of elements) {
-      const data = dataOf(el);
-      if (data?.kind === 'image') imageElByImageId.set(data.imageId, el);
-    }
-    for (const edge of pending) {
-      const fromEl = imageElByImageId.get(edge.sourceImageId);
-      const toEl = imageElByImageId.get(edge.targetImageId);
-      if (!fromEl || !toEl) continue;
-      tools.connect(fromEl.id, toEl.id, edge.relation, edge.direction);
-    }
-    rerender();
-  }, [sceneElements, location.state, tools, rerender]);
-
-  if (denied) {
-    return <div className="page">join denied: {denied}</div>;
-  }
-  if (!sheetInfo) {
-    return <div className="page">loading…</div>;
-  }
-
-  const selected = tools.getSelected();
-  const s = statsRef.current;
-  const lastSyncAt = Math.max(s.lastEmitAt ?? 0, s.lastRecvAt ?? 0);
-  const lastSyncMs = lastSyncAt ? Date.now() - lastSyncAt : null;
-  const dangling = tools.getDangling();
+  if (room.denied)
+    return <div className="page">join denied: {room.denied}</div>;
+  if (!sheetInfo) return <div className="page">loading…</div>;
 
   return (
-    <div
-      className="digsite-sheet"
-      style={{ display: 'flex', height: 'calc(100vh - 41px)' }}
-    >
-      {/* Excalidraw 0.18 has no UIOptions flag for hiding individual shape
-          tools (see Toolbar.tsx's header comment) — hide the stock
-          `.shapes-section` island by CSS, scoped to this page, leaving the
-          zoom controls and undo/redo footer (separate Sections) alone. */}
-      <style>
-        {'.digsite-sheet .shapes-section { display: none !important; }'}
-      </style>
+    <div className="sheet-page">
       <div
-        style={{ flex: 1, position: 'relative' }}
+        className="sheet-canvas-area"
         onPointerMove={onPointerMoveForPresence}
       >
-        <Excalidraw excalidrawAPI={setApi} onChange={onChange} />
+        <Canvas
+          ref={canvasRef}
+          files={files}
+          tool={tool}
+          onChange={onCanvasChange}
+        />
         <DrawLayer
           tool={tool}
           tools={tools}
@@ -599,77 +162,39 @@ export function Sheet() {
           onDrawn={rerender}
         />
         <Overlay
-          rows={foreignRows}
+          rows={foreign.rows}
           elements={sceneElements}
           viewport={viewport}
           offset={{ left: 0, top: 0 }}
           selectedId={selectedForeignId}
-          onSelect={(sid) => {
-            tools.select(sid);
-            rerender();
-          }}
+          onSelect={(sid) => tools.select(sid)}
           peers={peerCursorList}
         />
-        <Toolbar tool={tool} onChange={applyTool} pendingEdge={pendingEdge} />
-        <div className="status-line" data-testid="status">
-          user={session?.user.email ?? '-'} sheet={sheetInfo.name} peers=
-          {peers.join(',') || '-'} foreign={foreignShapesRef.current.length}{' '}
-          lastSync={lastSyncMs === null ? '-' : `${lastSyncMs}ms`}
-        </div>
-      </div>
-      <div
-        style={{ width: 280, borderLeft: '1px solid #ddd', overflow: 'auto' }}
-      >
-        <div
-          style={{ padding: 8, borderBottom: '1px solid #eee', fontSize: 13 }}
-        >
-          <RenameInline
-            name={sheetInfo.name}
-            onRename={tools.rename}
-            testId="sheet-name"
-            style={{ fontWeight: 700 }}
-          />
-          <div className="muted">{sheetInfo.images.length} images</div>
-        </div>
-        {dangling.length > 0 && (
-          <div
-            data-testid="dangling-list"
-            style={{ padding: 8, borderBottom: '1px solid #eee', fontSize: 13 }}
-          >
-            <div>
-              <b>dangling ({dangling.length})</b>
-            </div>
-            {dangling.map((d) => (
-              <div key={d.id} className="muted">
-                {d.relation || '(no relation)'}
-              </div>
-            ))}
-            <button
-              type="button"
-              data-testid="remove-dangling"
-              onClick={() => {
-                tools.removeDangling();
-                rerender();
-              }}
-            >
-              Remove dangling
-            </button>
-          </div>
-        )}
-        <Inspector
-          selected={selected}
-          onSetProperty={tools.setProperty}
-          onRemoveProperty={tools.removeProperty}
-          onCopyForeign={(fid) => {
-            tools.copyForeign(fid);
-            rerender();
-          }}
-          onDeleteSelected={() => {
-            tools.deleteSelected();
-            rerender();
-          }}
+        <Toolbar
+          tool={tool}
+          onChange={setTool}
+          pendingEdge={pendingEdge}
+          canvas={canvasRef.current}
         />
       </div>
+      <SidePanel
+        header={{
+          name: sheetInfo.name,
+          onRename: tools.rename,
+          imageCount: sheetInfo.images.length,
+          peers: room.peers,
+          userEmail: session?.user.email,
+          foreignCount: foreign.shapes.length,
+          status: room.getStatus(),
+        }}
+        dangling={tools.getDangling()}
+        onRemoveDangling={() => tools.removeDangling()}
+        selected={tools.getSelected()}
+        onSetProperty={tools.setProperty}
+        onRemoveProperty={tools.removeProperty}
+        onCopyForeign={(fid) => tools.copyForeign(fid)}
+        onDeleteSelected={() => tools.deleteSelected()}
+      />
     </div>
   );
 }

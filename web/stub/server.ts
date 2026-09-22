@@ -1231,6 +1231,18 @@ const httpServer = createServer(async (req, res) => {
     res.end(paintImage(imageOriginal[1] ?? ''));
     return;
   }
+  // GET /images/:id/preview (docs/phases/2-sheet.md section 7): the sheet
+  // canvas loads this instead of /original. Not on the real server's
+  // contract yet — serves the same painted PNG the stub uses for
+  // originals, since there is only one asset per image here.
+  const imagePreview = url.pathname.match(/^\/images\/([^/]+)\/preview$/);
+  if (imagePreview) {
+    const img = images.find((i) => i.id === imagePreview[1]);
+    if (!img || img.missing) return json(404, { reason: 'missing' });
+    res.writeHead(200, { 'Content-Type': 'image/png' });
+    res.end(paintImage(imagePreview[1] ?? ''));
+    return;
+  }
   const imageOne = url.pathname.match(/^\/images\/([^/]+)$/);
   if (imageOne && req.method === 'GET') {
     const img = images.find((i) => i.id === imageOne[1]);
