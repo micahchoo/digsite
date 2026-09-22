@@ -7,6 +7,7 @@ import type {
   AcceptInvitationResponse,
   AllowlistRequest,
   AllowlistResponse,
+  BoardImage,
   CreateBoardRequest,
   CreateBoardResponse,
   CreateGroupRequest,
@@ -15,6 +16,7 @@ import type {
   CreateSheetResponse,
   GetBoardResponse,
   GetImageResponse,
+  GetSectionsResponse,
   GetSheetElementsResponse,
   GetSheetForeignResponse,
   GetSheetResponse,
@@ -37,6 +39,11 @@ import type {
 export const SERVER_ORIGIN: string =
   (import.meta.env.VITE_SERVER_ORIGIN as string | undefined) ??
   'http://localhost:8800';
+
+/** `BoardImage['status']` under its own name — board/upload.ts's poll loop
+ * and the upload rows both want to say "a status", not spell out the union
+ * every time. */
+export type ImageStatus = BoardImage['status'];
 
 export class ApiError extends Error {
   constructor(
@@ -135,6 +142,10 @@ export const api = {
   ) =>
     request<ListBoardImagesResponse>(
       `/boards/${boardId}/images?sort=${encodeURIComponent(sort)}&from=${from}&count=${count}`,
+    ),
+  getSections: (boardId: string, sort: string) =>
+    request<GetSectionsResponse>(
+      `/boards/${boardId}/sections?sort=${encodeURIComponent(sort)}`,
     ),
   getImage: (imageId: string) =>
     request<GetImageResponse>(`/images/${imageId}`),

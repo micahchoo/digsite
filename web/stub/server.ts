@@ -18,11 +18,15 @@ import {
 import { createCanvas } from '@napi-rs/canvas';
 import { type Socket, Server as SocketServer } from 'socket.io';
 
-const PORT = 8800;
+const PORT = Number(process.env.PORT) || 8800;
 const WEB_ORIGIN = 'http://localhost:5180';
 const IMAGE_COUNT = 60;
 const FAKE_USER = { id: 'u1', email: 'owner@example.test', name: 'Owner' };
 const COOKIE = 'digsite.stub_session';
+// The worker's pending -> ready delay (docs/phases/1-map.md section 1). Real
+// uploads accept at 202 and flip to ready once the ladder is painted; here
+// that's just a timer.
+const READY_DELAY_MS = 1000;
 
 const range = (a: number, b: number): number[] =>
   Array.from({ length: b - a }, (_, i) => a + i);
@@ -42,6 +46,10 @@ const MEMBERS = [
   },
 ];
 
+// Matches @digsite/shared/api's BoardImage.status now that it has landed
+// there (three states: the ladder job can also fail after its retries).
+// The stub never produces 'failed' — nothing here decodes real image bytes.
+type ImageStatus = 'pending' | 'ready' | 'failed';
 interface Img {
   id: string;
   slot: number;
@@ -49,8 +57,10 @@ interface Img {
   width: number;
   height: number;
   uploadedAt: string;
-  properties: { year: number; site: string };
+  properties: Record<string, string | number | boolean>;
   missing: boolean;
+  status: ImageStatus;
+  error: string | null;
 }
 const makeImg = (slot: number): Img => ({
   id: `img-${slot}`,
@@ -63,6 +73,8 @@ const makeImg = (slot: number): Img => ({
   ).toISOString(),
   properties: { year: 1900 + (slot % 60), site: `site-${slot % 5}` },
   missing: false,
+  status: 'ready',
+  error: null,
 });
 let images: Img[] = range(0, IMAGE_COUNT).map(makeImg);
 
@@ -88,6 +100,49 @@ function rankedImages(sort: Sort): Img[] {
     const vb = value(b);
     return va < vb ? -dir : va > vb ? dir : a.slot - b.slot;
   });
+}
+
+const SECTIONS_CAP = 500;
+
+/** GET /boards/:id/sections?sort=<sortId> — boundaries where the sorted
+ * value changes: name's first letter, uploaded_at's day, a property's raw
+ * value (docs/phases/1-map.md section 3). */
+function sectionValue(sort: Sort, img: Img): string {
+  const key = sort.key;
+  if (key === 'name') return img.name.charAt(0).toUpperCase();
+  if (key === 'uploaded_at') return img.uploadedAt.slice(0, 10);
+  const raw = (img.properties as Record<string, string | number>)[key.property];
+  return raw === undefined ? '' : String(raw);
+}
+
+function computeSections(sort: Sort): {
+  sections: { label: string; fromRank: number; toRank: number }[];
+  truncated: boolean;
+} {
+  const ranked = rankedImages(sort);
+  const sections: { label: string; fromRank: number; toRank: number }[] = [];
+  let currentLabel: string | null = null;
+  let fromRank = 0;
+  ranked.forEach((img, i) => {
+    const label = sectionValue(sort, img);
+    if (currentLabel === null) {
+      currentLabel = label;
+      fromRank = i;
+    } else if (label !== currentLabel) {
+      sections.push({ label: currentLabel, fromRank, toRank: i - 1 });
+      currentLabel = label;
+      fromRank = i;
+    }
+  });
+  if (currentLabel !== null) {
+    sections.push({
+      label: currentLabel,
+      fromRank,
+      toRank: ranked.length - 1,
+    });
+  }
+  const truncated = sections.length > SECTIONS_CAP;
+  return { sections: sections.slice(0, SECTIONS_CAP), truncated };
 }
 
 // -- sheets: two, sharing a region+edge pair on images 8 & 9 ----------------
@@ -360,25 +415,57 @@ const httpServer = createServer(async (req, res) => {
     return json(200, { images: rankedImages(sort).slice(from, from + count) });
   }
   if (boardImages && req.method === 'POST') {
-    // dev stub: count "files" parts in the multipart body, add that many synthetic images
+    // dev stub: read the original filenames out of the multipart body so
+    // web/'s poll-by-name fallback (for a tus upload, whose success payload
+    // carries no image id) has something real to match against.
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
-    const added = Math.max(
-      1,
-      (
-        Buffer.concat(chunks)
-          .toString('latin1')
-          .match(/name="files"/g) ?? []
-      ).length,
+    const body = Buffer.concat(chunks).toString('latin1');
+    const filenames = [
+      ...body.matchAll(/name="files"; filename="([^"]*)"/g),
+    ].map((m) => m[1] ?? '');
+    const added = Math.max(1, filenames.length);
+    const created: Img[] = range(images.length, images.length + added).map(
+      (slot, i) => ({
+        ...makeImg(slot),
+        name: filenames[i] || `image-${slot}`,
+        status: 'pending',
+      }),
     );
-    const created = range(images.length, images.length + added).map(makeImg);
     images = [...images, ...created];
     const board = BOARDS.find((b) => b.id === boardImages[1]);
     if (board) board.imageCount = images.length;
+    // the worker: paint the ladder, then flip pending -> ready
+    for (const img of created) {
+      setTimeout(() => {
+        img.status = 'ready';
+      }, READY_DELAY_MS);
+    }
+    // the real multipart route waits (up to 10s) for its own uploads to
+    // leave pending before responding, `?wait=0` to skip it — mirrored here
+    // so web/'s "batch already came back ready" fast path gets exercised.
+    if (url.searchParams.get('wait') !== '0') {
+      const deadline = Date.now() + READY_DELAY_MS + 500;
+      while (
+        Date.now() < deadline &&
+        created.some((i) => i.status === 'pending')
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
     return json(
-      201,
-      created.map((i) => ({ id: i.id, slot: i.slot })),
+      202,
+      created.map((i) => ({ id: i.id, slot: i.slot, status: i.status })),
     );
+  }
+
+  const boardSections = url.pathname.match(/^\/boards\/([^/]+)\/sections$/);
+  if (boardSections && req.method === 'GET') {
+    const sort = parseSortId(url.searchParams.get('sort') ?? '') ?? {
+      key: 'uploaded_at' as const,
+      dir: 'desc' as const,
+    };
+    return json(200, computeSections(sort));
   }
 
   const tileMatch = url.pathname.match(
@@ -411,6 +498,17 @@ const httpServer = createServer(async (req, res) => {
     return img
       ? json(200, { ...img, boardId: 'b1' })
       : json(404, { reason: 'not found' });
+  }
+  if (imageOne && req.method === 'PATCH') {
+    const img = images.find((i) => i.id === imageOne[1]);
+    if (!img) return json(404, { reason: 'not found' });
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+      properties: Img['properties'];
+    };
+    img.properties = body.properties;
+    return json(200, { properties: img.properties });
   }
 
   // -- sheets ----------------------------------------------------------------------
