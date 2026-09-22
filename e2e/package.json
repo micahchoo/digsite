@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "bun run src/run.ts",
+    "e2e": "bun run src/run.ts",
     "sheet-hour": "bun run src/sheet-hour.ts",
     "groups-life": "bun run src/groups-life.ts",
     "backup-restore": "bun run src/backup-restore.ts",

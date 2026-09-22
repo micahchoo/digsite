@@ -5,7 +5,7 @@
 import { fromFraction, toFraction } from '@digsite/shared';
 import { chromium } from 'playwright';
 
-const WEB = 'http://localhost:5180';
+const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
 const SCREEN_DIR = new URL('../screenshots/', import.meta.url);
 
 function assert(cond: unknown, message: string): asserts cond {

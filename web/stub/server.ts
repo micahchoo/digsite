@@ -23,7 +23,7 @@ import { type Socket, Server as SocketServer } from 'socket.io';
 import { centreToTopLeft, fitScale } from '../src/board/explore-layout.ts';
 
 const PORT = Number(process.env.PORT) || 8800;
-const WEB_ORIGIN = 'http://localhost:5180';
+const WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
 const IMAGE_COUNT = 60;
 const COOKIE_PREFIX = 'digsite.stub_session';
 // The worker's pending -> ready delay (docs/phases/1-map.md section 1). Real

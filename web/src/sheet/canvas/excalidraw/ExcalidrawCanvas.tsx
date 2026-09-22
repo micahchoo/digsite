@@ -127,8 +127,29 @@ export const ExcalidrawCanvas = forwardRef<CanvasHandle, CanvasProps>(
       for (const [id] of fresh) addedFileIds.current.add(id);
     }, [files]);
 
+    // Excalidraw commits updateScene asynchronously, so two applies in one
+    // tick both read the pre-first-apply scene and the second silently
+    // drops the first's elements (two connect() calls back to back lost an
+    // edge, 2026-09-22). Until Excalidraw's onChange reports the applied
+    // elements, the last applied list is the current one.
+    const lastApplied = useRef<ExcalidrawElement[] | null>(null);
+    const currentElements = useCallback(
+      (api: ExcalidrawImperativeAPI) =>
+        lastApplied.current ?? api.getSceneElementsIncludingDeleted(),
+      [],
+    );
+
     const onChangeInternal = useCallback(
       (elements: readonly ExcalidrawElement[], appState: AppState) => {
+        // onChange also fires for unrelated state while an updateScene is
+        // still pending; only a report that carries every applied element
+        // at its applied version means the scene has caught up.
+        const pending = lastApplied.current;
+        if (pending) {
+          const seen = new Map(elements.map((e) => [e.id, e.version]));
+          if (pending.every((p) => (seen.get(p.id) ?? -1) >= p.version))
+            lastApplied.current = null;
+        }
         const ids = appState.selectedElementIds;
         onChange({
           elements: toSceneElements(elements),
@@ -149,12 +170,12 @@ export const ExcalidrawCanvas = forwardRef<CanvasHandle, CanvasProps>(
         applyViewport(api, v);
         const ids = api.getAppState().selectedElementIds;
         onChange({
-          elements: toSceneElements(api.getSceneElementsIncludingDeleted()),
+          elements: toSceneElements(currentElements(api)),
           viewport: v,
           selectedIds: Object.keys(ids).filter((id) => ids[id]),
         });
       },
-      [onChange],
+      [onChange, currentElements],
     );
 
     useImperativeHandle(
@@ -168,20 +189,30 @@ export const ExcalidrawCanvas = forwardRef<CanvasHandle, CanvasProps>(
         apply(patch, opts) {
           const api = apiRef.current;
           if (!api) return;
-          const next = applyPatch(
-            patch,
-            api.getSceneElementsIncludingDeleted(),
-          );
+          const next = applyPatch(patch, currentElements(api));
+          lastApplied.current = next;
           applyToApi(api, next, opts?.history !== false);
+          // The contract: onChange after every committed change. Excalidraw
+          // batches back-to-back updateScene calls into one report, or
+          // reports before the second commits; measured 2026-09-22, two
+          // connects in a row reached the server as one edge in 4 of 5
+          // runs. Report what was applied, now.
+          const ids = api.getAppState().selectedElementIds;
+          onChange({
+            elements: toSceneElements(next),
+            viewport: viewportOf(api.getAppState()),
+            selectedIds: Object.keys(ids).filter((id) => ids[id]),
+          });
         },
         applyRemote(raw) {
           const api = apiRef.current;
           if (!api) return;
           const next = reconcileRemote(
             raw,
-            api.getSceneElementsIncludingDeleted(),
+            currentElements(api),
             api.getAppState(),
           );
+          lastApplied.current = next;
           applyToApi(api, next, false);
         },
         select(ids) {

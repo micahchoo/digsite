@@ -10,8 +10,8 @@
 // failed assertion.
 import { type Page, chromium } from 'playwright';
 
-const WEB = 'http://localhost:5180';
-const SERVER = 'http://localhost:8800';
+const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
+const SERVER = process.env.SERVER_ORIGIN ?? 'http://localhost:8800';
 const SCREEN_DIR = new URL('../screenshots/', import.meta.url);
 
 function assert(cond: unknown, message: string): asserts cond {

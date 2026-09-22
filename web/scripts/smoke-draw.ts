@@ -10,8 +10,8 @@
 // hook smoke.ts already relies on.
 import { chromium } from 'playwright';
 
-const WEB = 'http://localhost:5180';
-const SERVER = 'http://localhost:8800';
+const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
+const SERVER = process.env.SERVER_ORIGIN ?? 'http://localhost:8800';
 const SCREEN_DIR = new URL('../screenshots/', import.meta.url);
 
 function assert(cond: unknown, message: string): asserts cond {
@@ -47,8 +47,8 @@ async function main() {
   await page.waitForTimeout(1500); // let every image file decode and paint
 
   async function excalidrawBox() {
-    const box = await page.locator('.excalidraw').boundingBox();
-    assert(box, 'no .excalidraw container on screen');
+    const box = await page.locator('.digsite-canvas').boundingBox();
+    assert(box, 'no .digsite-canvas container on screen');
     return box;
   }
 

@@ -24,7 +24,9 @@ subagent against `docs/design.md`:
 13. Phase 4 (storage port fs/s3, deploy/, backups, health) — DONE, committed (merged from a worktree branch).
 14. Canvas seam: Excalidraw isolated in `web/src/sheet/canvas/` — DONE; then four real-server defects fixed (snapshot index order, stale overlay after a programmatic viewport change, first-change-per-frame drop, float4 fractions).
 15. Real-server suites on the demo (`../demo`, a worktree on main, server 8800 + vite 5180 running in the background): `run.ts` 8/10 (1 and 2 fail only on fixture debris), `sheet-hour.ts` 7/7, `groups-life.ts` 9/9.
-16. IN FLIGHT: `web/src/sheet/canvas/native/`, image-graph's canvas as a second adapter behind `CanvasHandle`, selected by `VITE_CANVAS=native`.
+16. Native adapter — DONE, committed: `web/src/sheet/canvas/native/` (camera, gestures, scene, spatial, render, history) behind the same `CanvasHandle`; `VITE_CANVAS=native` or `?canvas=native`; both adapters share the persisted element JSON. Passes the same smokes, e2e 6–10 and the hour run. Not yet exercised in a browser by any suite: grip resize and marquee select. Routing is straight lines. Deleting Excalidraw needs those plus a rewrite of `foreign-never-in-scene.md` for a renderer that draws foreign claims itself.
+17. Excalidraw adapter: two applies in one tick no longer lose the first (pending list until Excalidraw reports it), and `apply` emits `onChange` itself because Excalidraw batches or reorders its reports (two connects reached the server as one edge in 4 of 5 runs before). Smokes and the stub take `WEB_ORIGIN`/`SERVER_ORIGIN`/`PORT`. The e2e workspace's script is `e2e`, not `test`, so root `bun run test` no longer drives the live demo.
+18. NEXT: phase 5 hardening (`docs/roadmap.md`) — the autonomous run stops here.
 
 The demo worktree at `../demo` runs the app for the owner; move it with `git checkout --detach main` and restart the server by pid when server code changes (vite reloads web on its own).
 

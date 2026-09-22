@@ -9,7 +9,7 @@
 // smoke/smoke-board/smoke-draw/smoke-groups in the same stub process.
 import { chromium } from 'playwright';
 
-const WEB = 'http://localhost:5180';
+const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
 const SCREEN_DIR = new URL('../screenshots/', import.meta.url);
 
 function assert(cond: unknown, message: string): asserts cond {
@@ -199,8 +199,8 @@ async function main() {
   await pageB.waitForFunction(() => typeof window.__digsite !== 'undefined');
   await pageB.waitForTimeout(500);
 
-  const box = await pageB.locator('.excalidraw').boundingBox();
-  assert(box, 'no .excalidraw container on sheet B for the presence move');
+  const box = await pageB.locator('.digsite-canvas').boundingBox();
+  assert(box, 'no .digsite-canvas container on sheet B for the presence move');
   await pageB.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await pageB.mouse.move(
     box.x + box.width / 2 + 40,
