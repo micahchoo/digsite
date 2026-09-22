@@ -5,14 +5,19 @@ import {
   type LadderSize,
   PAGE,
   ladderAddress,
-  perPage,
 } from '@digsite/shared/board/ladder';
 // The ladder (CONTEXT.md "Ladder"): an image's pixels at 8/32/128px, packed
 // into 512px pages keyed by slot (never rank — .claude/rules/
 // ladder-slot-vs-rank.md). Decoded pages are kept resident in one LRU across
 // every open board, budgeted by LADDER_BUDGET_MB — that residency, not the
 // composed-tile cache, is what makes a tile fast for the first viewer
-// (.claude/rules/tile-cache-is-for-the-second-viewer.md).
+// (.claude/rules/tile-cache-is-for-the-second-viewer.md). This cache is for
+// the on-demand compose path (tiles.ts) and uploads (paintLadder) — callers
+// that revisit the same page. boards/materialise.ts's scatter path reads
+// pages directly off disk instead (its own loadPageDirect, not exported
+// from here): it visits every page of a size exactly once, so caching there
+// buys nothing and would only evict what a live viewer's pan has resident
+// while a board materialises in the background.
 import {
   type Canvas,
   type Image,
@@ -73,22 +78,6 @@ async function loadPageCanvas(
     ctx.drawImage(img, 0, 0);
   }
   return canvas;
-}
-
-/**
- * Warms every page of one ladder size for a board into the resident cache —
- * docs/phases/1-map.md "materialisation runs with the ladder resident (load
- * S=8 and S=32 pages for the board first)". Reading never writes to disk.
- */
-export async function preloadPages(
-  boardId: string,
-  s: LadderSize,
-  imageCount: number,
-): Promise<void> {
-  if (imageCount <= 0) return;
-  const per = perPage(s);
-  const maxPage = Math.floor((imageCount - 1) / per);
-  for (let p = 0; p <= maxPage; p++) await getPage(boardId, s, p);
 }
 
 /** A decoded ladder page, cached. Reading never writes to disk. */

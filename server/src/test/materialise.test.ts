@@ -1,13 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-// docs/phases/1-map.md "Tests": after a rebuild + materialise on a
-// 3,000-image board, every z=-3 tile file exists and the route serves it
-// with X-Cache: disk. Built by direct SQL (images) + direct ladder page
-// painting (paintLadder), bypassing uploadOne/the worker for speed — every
-// row and page this writes is what the real upload path writes, just
-// without going through 3,000 HTTP requests.
-import { existsSync } from 'node:fs';
+// docs/phases/1-map.md "Tests", extended by docs/measurements/phase-1-map.md
+// "Row 4"'s fix: after a rebuild + materialise on a 3,000-image board, every
+// z=-3 tile file exists on disk, the route serves it resident
+// (boards/coarse-cache.ts, populated by materialiseSort itself — no second
+// disk read), and the scatter path's output is pixel-identical to the old
+// per-tile GATHER (slotsForTile + composeTile) it replaced, at every
+// materialised zoom (z=-3, -4, -5), not just z=-3. Built by direct SQL
+// (images) + direct ladder page painting (paintLadder), bypassing
+// uploadOne/the worker for speed — every row and page this writes is what
+// the real upload path writes, just without going through 3,000 HTTP
+// requests.
+import { existsSync, readFileSync } from 'node:fs';
 import {
   CELL,
+  type Zoom,
   cellPx,
   perTileSide,
   worldExtent,
@@ -15,9 +21,14 @@ import {
 import { DEFAULT_SORT, sortId } from '@digsite/shared/board/sort';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { paintLadder } from '../boards/ladder.ts';
-import { materialiseSort } from '../boards/materialise.ts';
-import { ensureRank } from '../boards/ranks.ts';
-import { materialisedTilePath, tileFor } from '../boards/tiles.ts';
+import { materialiseSort, tileGrid } from '../boards/materialise.ts';
+import { ensureRank, slotsForTile } from '../boards/ranks.ts';
+import {
+  composeTile,
+  materialisedTilePath,
+  pendingSlotsFor,
+  tileFor,
+} from '../boards/tiles.ts';
 import { pool } from '../db/pool.ts';
 
 const N = 3000;
@@ -47,8 +58,16 @@ function paintSquare(hue: number): Buffer {
   return canvas.encodeSync('png');
 }
 
+async function decodePixels(png: Buffer): Promise<Uint8ClampedArray> {
+  const img = await loadImage(png);
+  const canvas = createCanvas(img.width, img.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  return ctx.getImageData(0, 0, img.width, img.height).data;
+}
+
 describe('materialise', () => {
-  test('z=-3 tiles exist on disk after rebuild + materialise, and the route serves them with X-Cache: disk', async () => {
+  test('z=-3 tiles exist on disk after rebuild + materialise, and the route serves them resident', async () => {
     const boardId = await makeBoard(`materialise-test-${Date.now()}`);
 
     for (let i = 0; i < N; i++) await makeImage(boardId, i);
@@ -80,6 +99,8 @@ describe('materialise', () => {
       }
     }
 
+    // materialiseSort hands its own just-encoded buffers to the resident
+    // cache — the route must never have to re-read disk for this request.
     const cacheKey = `/boards/${boardId}/tiles/${sid}/-3/0/0.png`;
     const result = await tileFor(
       boardId,
@@ -90,6 +111,55 @@ describe('materialise', () => {
       cellPx(-3),
       cacheKey,
     );
-    expect(result.cache).toBe('disk');
+    expect(result.cache).toBe('resident');
+  }, 60_000);
+
+  test('scatter output is pixel-identical to the per-tile compose, 20 random coarse tiles', async () => {
+    const boardId = await makeBoard(`materialise-pixel-test-${Date.now()}`);
+
+    for (let i = 0; i < N; i++) await makeImage(boardId, i);
+    await pool.query('UPDATE boards SET image_count = $1 WHERE id = $2', [
+      N,
+      boardId,
+    ]);
+    for (let i = 0; i < N; i++) {
+      const img = await loadImage(paintSquare((i * 89) % 360));
+      await paintLadder(boardId, i, img, img.width, img.height);
+    }
+
+    await ensureRank(boardId, DEFAULT_SORT);
+    await materialiseSort(boardId, DEFAULT_SORT);
+    const sid = sortId(DEFAULT_SORT);
+
+    const zooms: Zoom[] = [-3, -4, -5];
+    const picks: { z: Zoom; x: number; y: number }[] = [];
+    for (let i = 0; i < 20; i++) {
+      const z = zooms[i % zooms.length] as Zoom;
+      const { nx, ny } = tileGrid(N, z);
+      picks.push({
+        z,
+        x: Math.floor(Math.random() * nx),
+        y: Math.floor(Math.random() * ny),
+      });
+    }
+
+    for (const { z, x, y } of picks) {
+      const scattered = readFileSync(
+        materialisedTilePath(boardId, sid, z, x, y),
+      );
+
+      const slots = await slotsForTile(boardId, DEFAULT_SORT, z, x, y);
+      const pendingSlots = await pendingSlotsFor(boardId, slots);
+      const composed = await composeTile(
+        boardId,
+        cellPx(z),
+        slots,
+        pendingSlots,
+      );
+
+      const scatteredPixels = await decodePixels(scattered);
+      const composedPixels = await decodePixels(composed);
+      expect(scatteredPixels).toEqual(composedPixels);
+    }
   }, 60_000);
 });

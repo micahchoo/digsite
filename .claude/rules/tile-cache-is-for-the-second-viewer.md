@@ -1,5 +1,5 @@
 ---
-scope: [server/src/boards/tiles.ts, server/src/boards/ladder.ts]
+scope: [server/src/boards/tiles.ts, server/src/boards/ladder.ts, server/src/boards/materialise.ts, server/src/boards/coarse-cache.ts]
 tags: [board, tiles, cache, performance]
 priority: medium
 source: hand-written
@@ -34,13 +34,37 @@ most of its time, stays cold under any budget that does not hold them.
 - **Keep the composed-tile cache for the second viewer.** It is small
   (64 MB), keyed by URL, dropped for a board when its ranks go stale. Do
   not grow it to fix a slow first pan; measure the ladder instead.
-- **The next lever is materialising coarse levels per sort.** z ≤ −3 is
-  about 5k tiles per sort per million images, seconds on 32 cores with
-  the ladder resident; after that the coarse zooms never miss. Not built
-  yet. Build it before adding a smarter tile cache.
 - **`X-Cache` and `Server-Timing` stay on every tile response.** They are
   how the number above was measured and how the next one will be.
 
-Verify with `cd server && bun test tiles.test.ts`, then by panning the
-seeded board with the ladder budget at 16 MB and at the default and
-reading `Server-Timing` on the misses.
+## Built: materialising coarse levels is a SCATTER, not ladder residency
+
+`materialise.ts` decodes each ladder page exactly ONCE and draws its slots
+into whatever tiles they land in — one query for the sort's ranks, not one
+`slotsForTile` per tile. Measured 2026-09-22: the old per-tile GATHER took
+277 s on the million-image board; the scatter took 24.5 s. `ladder.ts`'s
+resident LRU is untouched here on purpose — a scatter visits every page
+once, so caching it would only evict a live viewer's pan.
+
+**Reuse the page-sized source canvas across the whole pass; never allocate
+one per page.** `@napi-rs/canvas`'s native buffers aren't visible to V8's
+GC heuristics, so a fresh `createCanvas` per loop iteration is never
+collected in time: one per page OOM-killed the process (30 GB, under 6 s),
+reproduced with no DB or real files in under 2 s. One reused canvas
+(`scatterSize`'s `pageCanvas`) fixed it — the 5,216 *destination* tiles
+don't need this, being a fixed count regardless of page count.
+
+## Coarse tiles are resident too, once materialised
+
+A materialised sort's z ≤ −3 files (~124 MB per sort at 1,000,000 images)
+live in `coarse-cache.ts`: `Map<sortId, Map<tileKey, Buffer>>` per board,
+LRU across `(board, sort)`, budgeted by `COARSE_BUDGET_MB` (1024 MB).
+`materialiseSort` installs its own just-encoded buffers directly — the
+first request never re-reads disk; `tiles.ts` loads a sort from disk
+lazily otherwise. `X-Cache: resident` on a hit, `disk` as the fallback (a
+sort too big for the budget). Measured: 500/500 `resident`, p50 0.50 ms,
+p95 1.13 ms — against the 5 ms target. A fourth cache, alongside ladder
+residency and the composed-tile cache: z ≤ −3 needs neither once
+materialised.
+
+Verify with `cd server && bun test tiles.test.ts materialise.test.ts`.

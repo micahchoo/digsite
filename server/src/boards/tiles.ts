@@ -13,11 +13,14 @@ import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { createCanvas } from '@napi-rs/canvas';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
+import { getResidentTile, loadResidentSortFromDisk } from './coarse-cache.ts';
 import { getPage } from './ladder.ts';
 import { slotsForTile } from './ranks.ts';
 import { getComposedTile, setComposedTile } from './tiles-cache.ts';
 
-const PENDING_COLOR = '#333';
+// Shared with materialise.ts's scatter path, so a pending slot paints the
+// same cell whichever path composed the tile.
+export const PENDING_COLOR = '#333';
 
 export function materialisedTilePath(
   boardId: string,
@@ -88,27 +91,47 @@ export async function composeTile(
 
 export type TileResult = {
   png: Buffer;
-  cache: 'hit' | 'miss' | 'disk';
+  cache: 'hit' | 'miss' | 'disk' | 'resident';
   rankMs: number;
   composeMs: number;
 };
 
-async function diskTileIfFresh(
-  boardId: string,
-  sid: string,
-  z: Zoom,
-  x: number,
-  y: number,
-): Promise<Buffer | null> {
+async function rankStateFresh(boardId: string, sid: string): Promise<boolean> {
   const { rows } = await pool.query(
     'SELECT stale, materialised_at FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
     [boardId, sid],
   );
   const state = rows[0];
-  if (!state || state.stale || !state.materialised_at) return null;
+  return !!state && !state.stale && !!state.materialised_at;
+}
+
+/** Serves a z<=-3 tile once (board, sort) is materialised and not stale —
+ * boards/coarse-cache.ts's resident map first (`X-Cache: resident`,
+ * populated by materialiseSort right after it encodes, or lazily here on a
+ * board whose files exist but this process hasn't held them yet), disk
+ * (`X-Cache: disk`) when the sort is too big for COARSE_BUDGET_MB. Returns
+ * null when there is nothing materialised and fresh to serve — the caller
+ * falls through to composing. */
+async function materialisedTile(
+  boardId: string,
+  sid: string,
+  z: Zoom,
+  x: number,
+  y: number,
+): Promise<{ png: Buffer; cache: 'disk' | 'resident' } | null> {
+  const resident = getResidentTile(boardId, sid, z, x, y);
+  if (resident) return { png: resident, cache: 'resident' };
+
+  if (!(await rankStateFresh(boardId, sid))) return null;
+
+  if (await loadResidentSortFromDisk(boardId, sid)) {
+    const loaded = getResidentTile(boardId, sid, z, x, y);
+    if (loaded) return { png: loaded, cache: 'resident' };
+  }
+
   const path = materialisedTilePath(boardId, sid, z, x, y);
   if (!existsSync(path)) return null;
-  return readFileSync(path);
+  return { png: readFileSync(path), cache: 'disk' };
 }
 
 /** Composes (or returns cached, or reads materialised) the PNG for one
@@ -126,8 +149,8 @@ export async function tileFor(
   const sid = sortId(sort);
 
   if (z <= -3) {
-    const disk = await diskTileIfFresh(boardId, sid, z, x, y);
-    if (disk) return { png: disk, cache: 'disk', rankMs: 0, composeMs: 0 };
+    const materialised = await materialisedTile(boardId, sid, z, x, y);
+    if (materialised) return { ...materialised, rankMs: 0, composeMs: 0 };
   }
 
   const cached = getComposedTile(cacheKey);

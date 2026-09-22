@@ -61,7 +61,18 @@ export const env = {
   LADDER_BUDGET_MB: Number(process.env.LADDER_BUDGET_MB ?? 4096),
   INVITATION_EXPIRES_IN: Number(process.env.INVITATION_EXPIRES_IN ?? 172800),
   // The in-process worker's poll concurrency (docs/phases/1-map.md "Upload
-  // as a worker") and materialise.ts's tile-compose parallelism — the same
-  // number for both, per the phase contract.
+  // as a worker"). No longer materialise.ts's parallelism — see
+  // MATERIALISE_BUDGET_MB below; PNG encoding there is sized off CPU count,
+  // not this.
   WORKER_CONCURRENCY: Number(process.env.WORKER_CONCURRENCY ?? 4),
+  // boards/materialise.ts's scatter path allocates every z<=-3 tile canvas
+  // for a sort up front (RGBA, before PNG encoding) — this bounds that, and
+  // materialiseSort throws rather than allocate past it. ~1.3 GB at
+  // 1,000,000 images (docs/measurements/phase-1-map.md "Row 4").
+  MATERIALISE_BUDGET_MB: Number(process.env.MATERIALISE_BUDGET_MB ?? 2048),
+  // boards/coarse-cache.ts: a materialised sort's z<=-3 tiles held resident
+  // per open board, LRU across (board, sort) — .claude/rules/
+  // tile-cache-is-for-the-second-viewer.md. ~124 MB per sort at 1,000,000
+  // images.
+  COARSE_BUDGET_MB: Number(process.env.COARSE_BUDGET_MB ?? 1024),
 };

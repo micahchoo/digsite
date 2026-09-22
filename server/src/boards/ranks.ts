@@ -7,7 +7,17 @@ import { type Zoom, tileRanks } from '@digsite/shared/board/grid';
 // ../../prototype/board/RESULTS.md).
 import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { pool } from '../db/pool.ts';
+import { invalidateResidentSort } from './coarse-cache.ts';
 import { invalidateComposedTiles } from './tiles-cache.ts';
+
+// board_ranks.board_id has no FK to boards(id) as of 0004_ranks_no_fk.sql —
+// the per-row FK-check trigger cost ~4s of a 6.7s rebuild on the
+// 1,000,000-image board (docs/measurements/phase-1-map.md "Row 1"). The
+// only writer is rebuildRank below, and its board_id always comes from a
+// SELECT against `images`/`boards`, never from a caller — enforcement is
+// this module, not the schema. Phase 3's board delete must delete this
+// board's board_ranks rows explicitly, in the same transaction as the
+// boards row; there is no FK left to do it for you.
 
 function orderExpr(sort: Sort): string {
   const dir = sort.dir === 'asc' ? 'ASC' : 'DESC';
@@ -29,6 +39,7 @@ export async function markBoardRanksStale(boardId: string): Promise<void> {
     [boardId],
   );
   invalidateComposedTiles(boardId);
+  invalidateResidentSort(boardId);
 }
 
 /** Unconditionally rebuilds (board, sort)'s rank table — `ensureRank` checks
@@ -70,6 +81,7 @@ async function rebuildRank(boardId: string, sort: Sort): Promise<void> {
     client.release();
   }
   invalidateComposedTiles(boardId);
+  invalidateResidentSort(boardId);
 }
 
 /** Rebuilds (board, sort)'s rank table if it has never been built or was

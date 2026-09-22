@@ -1,0 +1,17 @@
+-- docs/measurements/phase-1-map.md "Row 1 — rank rebuild: root cause": the
+-- Postgres FK-check trigger on board_ranks.board_id fired once per inserted
+-- row and cost ~4s of the 6.7s rebuild on the 1,000,000-image board. The
+-- only writer of board_ranks is ranks.ts#rebuildRank, which selects its
+-- board_id from `images` (already scoped to a board that exists — the FK
+-- was never catching anything at that call site). Enforcement moves to the
+-- application layer: nothing above rebuildRank ever passes a board_id it
+-- did not just read from `images`/`boards`.
+--
+-- Phase 3's board delete will delete board_ranks rows for that board
+-- explicitly, in the same transaction as the boards row (see ranks.ts's
+-- header comment) — the FK is not standing in for that, deleting it is not
+-- deferring that work.
+--
+-- IF EXISTS makes this rerun-safe even though migrate.ts already skips an
+-- applied file by name.
+ALTER TABLE board_ranks DROP CONSTRAINT IF EXISTS board_ranks_board_id_fkey;

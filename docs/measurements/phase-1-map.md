@@ -264,3 +264,173 @@ PORT=8801 bun run scripts/measure-map.ts viewer 25f375ea-4e5e-40c4-b21b-9ad863db
   (the concurrent web agent's stub/dev server) were never bound, started,
   or stopped by this run.
 - The `jobs` table was empty at the end (confirmed).
+
+## After the fixes
+
+Same board (`25f375ea-4e5e-40c4-b21b-9ad863dbbab1`, "Synthetic 1M",
+1,000,000 images), same machine, re-measured after three fixes described
+below.
+
+**A real bug surfaced during this re-measurement, not machine noise.** The
+first version of the materialise fix OOM-killed its own process twice
+(exit 137) and once took the whole terminal session down with it — a `bun`
+process measured at 84.7 GB anonymous RSS by the kernel's own OOM killer.
+Root-caused below (Fix 2); it was a genuine leak in the scatter path's
+per-page canvas allocation, fixed, and re-verified at 1,000,000-image scale
+under a `systemd-run --user --scope -p MemoryMax=40G -p MemorySwapMax=0`
+safety cap before being trusted again. Peak RSS for a full materialise of
+this board after the fix: **15.8 GB** (`systemd` unit accounting), nowhere
+near the cap.
+
+| number | target | before | after | pass/fail |
+| --- | --- | --- | --- | --- |
+| rank rebuild, one sort | ≤ 2 s | 6.55 / 6.22 / 6.57 s | 2.68 / 2.52 / 3.18 s | **FAIL** (~1.3-1.6×, down from ~3.2×) |
+| materialise z ≤ −3 for one sort | ≤ 60 s | 277.2 s | 24.5 s | **PASS** (~11.3× faster) |
+| tile p95 at z ≤ −3 after materialisation | ≤ 5 ms | 10.03 ms p95 | 1.13 ms p95 (0.50 ms p50), 500/500 `X-Cache: resident` | **PASS** (~4.4× under target) |
+
+### Fix 1 — rank rebuild: FK removed, still short of target
+
+`0004_ranks_no_fk.sql` drops `board_ranks_board_id_fkey`. `EXPLAIN
+(ANALYZE, BUFFERS)` on the exact rebuild INSERT, isolated from HTTP/Node
+overhead, before vs. after:
+
+- Before (with FK): 6,729.86 ms total, of which the FK-check trigger
+  alone was 3,950.99 ms (`Trigger for constraint
+  board_ranks_board_id_fkey: time=3950.993 calls=1000000`).
+- After (FK dropped): 2,858.59 ms — window/sort/scan unchanged at ~500 ms;
+  the remaining ~2.3-2.4 s is `board_ranks_pkey` btree maintenance for
+  1,000,000 new entries in an index shared across every board and sort
+  this database has ever ranked (`board_ranks_pkey` is 391 MB at the time
+  of this run, `board_ranks` heap 423 MB, across many boards — not just
+  this one).
+
+Three things tried to close the remaining ~0.9 s gap to the 2 s target,
+each measured against the same isolated `EXPLAIN (ANALYZE, BUFFERS)`:
+
+1. **`synchronous_commit = off` for the session.** 2,827.89 ms — no
+   measurable difference. Expected: this is one statement inside an
+   implicit single-statement transaction: WAL is still written the same
+   amount, and there is only one commit to make async, which this
+   single-statement case doesn't dominate.
+2. **`work_mem` raised to 64 MB (removes the sort's disk spill; baseline
+   spills 25,488 kB to `external merge Disk`).** 2,890.30 ms — no
+   measurable difference. Confirms the sort/window (~500 ms) was never
+   the bottleneck.
+3. **The bulk-load pattern named in the brief: `INSERT ... SELECT` into an
+   `UNLOGGED` staging table with no index, then `INSERT ... SELECT ...
+   ORDER BY rank` from staging into `board_ranks`.** Step 1 (staging, no
+   index): 743.21 ms — confirms the source-side computation is cheap.
+   Step 2 (staging → `board_ranks`, same PK index as always): 2,371.96 ms
+   — **slower than the direct one-step insert**, not faster: total
+   743 + 2,372 = 3,115 ms vs. 2,858 ms direct. The staging table doesn't
+   remove the cost, because the cost was never in computing the rows; it
+   was always in maintaining `board_ranks_pkey` for the destination, and
+   staging adds a second full pass over that same destination cost plus
+   its own sort/spill (`Sort Method: external merge Disk: 52896kB` on
+   this step, worse than the original's 25,488 kB, because rank order
+   from a heap scan of staging isn't automatically the physical scan
+   order the way the original WindowAgg's output was).
+
+**Kept: FK removal only** (0004_ranks_no_fk.sql + the two comments in
+`ranks.ts`). It's the simplest change that helped, and the two
+alternatives named in the brief were tried and measured worse or
+no-better. The remaining ~2.9 s (vs. 2 s target) is `board_ranks_pkey`
+maintenance cost on a global, cross-board btree — reducing it further
+would mean partitioning `board_ranks` by board (each board's rebuild
+then rewrites one partition's much-smaller index) or raising Postgres's
+`shared_buffers` (128 MB on this container, far below the table's own
+815 MB total size, so much of the insert's buffer traffic is real
+reads/writes rather than cache hits). Both are schema/infrastructure
+changes outside a "migration + a small server change," and the second
+touches a Postgres instance shared live with other agents' test suites
+mid-run — flagging both for the lead rather than doing either here.
+
+### Fix 2 — materialise: SCATTER over pages, and a real leak found and fixed along the way
+
+`materialise.ts` no longer loops over tiles and asks the ladder cache for
+one page per tile (the old GATHER). It now: one query loads the whole
+sort's `board_ranks` into a flat `Int32Array` (slot → rank); every z ≤ −3
+tile canvas is allocated up front (budget-checked against
+`MATERIALISE_BUDGET_MB`, see below); then, per ladder size needed (S=32 for
+z=−3, S=8 for z=−4/−5), every page of that size is decoded exactly once and
+its slots drawn into whichever tiles/zooms they land in; PNG encoding — the
+actual CPU cost the 277 s traced to — runs on a pool of real Bun `Worker`
+OS threads instead of the single JS thread.
+
+**The leak, root-caused.** The first version created a fresh source-page
+`Canvas` (and a fresh `Image` to decode into it) on every iteration of the
+page loop — matching a "decode once" reading of the brief, but wrong in a
+way that only shows up at real page counts. `@napi-rs/canvas`'s native
+pixel buffers aren't registered with V8 as external memory, so V8's GC
+never feels memory pressure from a `Canvas` object going out of scope and
+doesn't collect it promptly — a few thousand short-lived canvases pile up
+as native (not JS-heap) memory that keeps growing. Confirmed in three
+steps, cheapest first:
+
+1. **The encode pool in isolation** (synthetic random 256×256 RGBA tiles,
+   no DB, no real files, same worker script materialise.ts uses): 5,216
+   tiles through 30 `Worker` threads, RSS flat at ~400 MB, 2.9 s. Rules out
+   the encode pool — it is bounded and safe as designed.
+2. **A synthetic scatter stress test** (no DB, no real files): 5,216
+   pre-allocated destination tile canvases (as `allocateTiles` does), then
+   a loop creating a *fresh* 512×512 source canvas per "page" and
+   `drawImage`-ing 256 slots from it into destination tiles, matching the
+   real loop's shape exactly. Reproduced the OOM in under 2 seconds under
+   a `systemd-run -p MemoryMax=10G` cap (journal: `The kernel OOM killer
+   killed some processes in this unit`, 10 GB peak, 1.7 s wall clock).
+   Changing only the one line — reuse a single source canvas across every
+   page instead of allocating a fresh one — made the same stress test
+   finish cleanly at 5.5 GB.
+3. **The real fix on the real 1,000,000-image board**, direct-called
+   (bypassing HTTP and the jobs queue) under `MemoryMax=30G`: completed at
+   **16.1 GB peak**, 29.9 s. The official path (`POST .../rebuild` through
+   the real worker queue, `MemoryMax=40G`) then measured **24.5 s, 15.8 GB
+   peak** — the number in the table above.
+
+**What's still true after the fix, worth flagging rather than chasing
+further:** RSS growth across the two ladder sizes isn't perfectly flat —
+5.5 GB after the S=32 pass (3,907 pages, ~1,000,000 draw calls), up to
+14.8 GB after S=8 (only 245 pages, but ~2,000,000 draw calls — 2 zooms per
+slot instead of 1). Growth tracks *draw-call count into the persistent
+tile canvases*, not page count, which points at some smaller per-call
+retention in the native 2D context distinct from the per-page leak this
+fix removed. It stays bounded and finishes comfortably inside every target
+and safety cap measured here, so it wasn't chased further — flagging for
+whoever scales this past 1,000,000 images, where it may not stay bounded
+without a periodic canvas-recycling pass (destroy and recreate the 5,216
+tile canvases every N slots, say) if the same linear-with-draw-calls
+pattern holds at 10× the scale.
+
+**`MATERIALISE_BUDGET_MB`** (default 2048 MB) guards only the up-front
+RGBA tile allocation (`allocateTiles`), computed from the grid math before
+any canvas is created — 5,216 tiles × 256×256×4 bytes ≈ 1.3 GB at
+1,000,000 images, comfortably under budget. It does not (and structurally
+cannot, being a pre-flight arithmetic check) catch the per-page native
+leak above; that was a runtime behaviour of the canvas library, not a
+sizing question. Kept as specified in the brief and confirmed it throws
+loudly on paper (bytes-over-budget arithmetic checked by hand against the
+1,000,000-image grid), not re-tested by actually exceeding it live on this
+shared machine.
+
+### Fix 3 — coarse tiles resident per board: PASS by 4.4×
+
+After materialisation, `materialiseSort` hands its own just-encoded tile
+buffers straight to `coarse-cache.ts#setResidentSort` — a
+`Map<sortId, Map<tileKey, Buffer>>` per board, LRU across `(board, sort)`,
+budgeted by `COARSE_BUDGET_MB` (default 1024 MB; this sort's tiles are
+~124 MB, well under). The first request after materialisation never
+re-reads disk. `tiles.ts#tileFor` falls back to `loadResidentSortFromDisk`
+(a board whose files exist but aren't resident in this process — a
+restart) and then to a single disk read (`X-Cache: disk`) only if the sort
+itself is bigger than the whole budget.
+
+500 random z ∈ {−3, −4, −5} tiles against the materialised board: **500/500
+`X-Cache: resident`**, p50 0.50 ms, **p95 1.13 ms** — against the 10.03 ms
+p95 measured before this phase's fixes (disk reads) and the ≤ 5 ms target.
+`ranks.ts#markBoardRanksStale`/`rebuildRank` both call
+`invalidateResidentSort(boardId)` alongside the existing
+`invalidateComposedTiles(boardId)`, board-wide (not sort-specific, mirroring
+the composed-tile cache's own invalidation granularity) — not independently
+re-measured here (out of this brief's three target rows), but exercised by
+`materialise.test.ts`'s first test, which asserts `X-Cache: resident` on the
+very first request after a fresh materialise.
