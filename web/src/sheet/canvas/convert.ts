@@ -299,6 +299,42 @@ export function applyPatch(
   return elements;
 }
 
+/** Excalidraw's invariant: a bound text sorts after its container by
+ * fractional index, and its dev build throws `InvalidFractionalIndexError`
+ * on a snapshot that breaks it. A persisted scene can (a server merge once
+ * ordered by id). Move every offending text right after its container and
+ * drop its index, so `restoreElements`' index sync assigns a fresh one in
+ * that position. Pure; the input is the server's JSON, so fields are read
+ * defensively. */
+export function repairBoundTextOrder<
+  T extends { id: string; containerId?: string | null; index?: string | null },
+>(elements: T[]): T[] {
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  const moved = new Set<string>();
+  const out: T[] = [];
+  const isBefore = (text: T, container: T) =>
+    text.index == null ||
+    container.index == null ||
+    text.index <= container.index;
+  for (const el of elements) {
+    if (moved.has(el.id)) continue;
+    const container = el.containerId ? byId.get(el.containerId) : undefined;
+    if (container && isBefore(el, container)) {
+      // Emitted later, right after its container.
+      moved.add(el.id);
+      continue;
+    }
+    out.push(el);
+    for (const text of elements) {
+      if (text.containerId === el.id && isBefore(text, el)) {
+        moved.add(text.id);
+        out.push({ ...text, index: null });
+      }
+    }
+  }
+  return out;
+}
+
 /** The wire boundary: a raw snapshot (the 'joined' payload, freshly seeded
  * and missing Excalidraw's internal defaults, or a 'scene' delta, already
  * full) restored then reconciled against the live scene. One path for
@@ -310,7 +346,7 @@ export function reconcileRemote(
 ): ExcalidrawElement[] {
   const restored = restoreElements(
     // biome-ignore lint/suspicious/noExplicitAny: raw is the server's JSON
-    raw as any,
+    repairBoundTextOrder(raw as any[]) as any,
     null,
   ) as unknown as ExcalidrawElement[];
   return reconcileElements(

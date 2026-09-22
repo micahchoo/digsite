@@ -9,6 +9,7 @@ import { imageGroupId } from '@digsite/shared';
 import {
   applyPatch,
   fitViewport,
+  repairBoundTextOrder,
   toSceneElement,
   zoomBy,
 } from '../src/sheet/canvas/convert.ts';
@@ -450,5 +451,27 @@ describe('reconcileLocalChange (scene-diff.ts)', () => {
     const once = reconcileLocalChange(els);
     const twice = reconcileLocalChange(once.elements);
     expect(twice.ops).toEqual([]);
+  });
+});
+
+describe('repairBoundTextOrder', () => {
+  test('moves a bound text that sorts before its container to right after it, index cleared', () => {
+    const els = [
+      { id: 'label', containerId: 'arrow', index: 'b0O' },
+      { id: 'other', index: 'b0P' },
+      { id: 'arrow', containerId: null, index: 'b0S' },
+      { id: 'fine', containerId: 'arrow', index: 'b0T' },
+    ];
+    const out = repairBoundTextOrder(els);
+    expect(out.map((e) => e.id)).toEqual(['other', 'arrow', 'label', 'fine']);
+    expect(out.find((e) => e.id === 'label')?.index).toBeNull();
+    expect(out.find((e) => e.id === 'fine')?.index).toBe('b0T');
+  });
+  test('leaves a well-ordered scene untouched', () => {
+    const els = [
+      { id: 'arrow', index: 'a1' },
+      { id: 'label', containerId: 'arrow', index: 'a2' },
+    ];
+    expect(repairBoundTextOrder(els)).toEqual(els);
   });
 });

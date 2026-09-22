@@ -49,3 +49,25 @@ describe('mergeByVersion', () => {
     ]);
   });
 });
+
+describe('mergeByVersion order', () => {
+  test('sorts by fractional index, unindexed last, id as the tiebreak', () => {
+    const el = (id: string, index?: string) => ({
+      id,
+      version: 1,
+      versionNonce: 1,
+      ...(index === undefined ? {} : { index }),
+    });
+    const out = mergeByVersion(
+      [el('text', 'b0O'), el('arrow', 'b0S'), el('fresh'), el('a')],
+      [el('rect', 'ah')],
+    );
+    expect(out.map((e) => e.id)).toEqual([
+      'rect',
+      'text',
+      'arrow',
+      'a',
+      'fresh',
+    ]);
+  });
+});
