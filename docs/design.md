@@ -273,7 +273,8 @@ CREATE TABLE regions (
   sheet_id   uuid NOT NULL REFERENCES sheets(id),
   source_id  text NOT NULL,
   image_id   uuid NOT NULL REFERENCES images(id),
-  fx real NOT NULL, fy real NOT NULL, fw real NOT NULL, fh real NOT NULL,
+  fx double precision NOT NULL, fy double precision NOT NULL,
+  fw double precision NOT NULL, fh double precision NOT NULL,
   label      text NOT NULL DEFAULT '',
   properties jsonb NOT NULL DEFAULT '{}'
 );
