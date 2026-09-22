@@ -27,6 +27,7 @@
     "socket.io-client": "^4.8.3",
     "typescript": "^5.7.0",
     "@types/bun": "^1.2.0",
-    "tus-js-client": "^4.3.1"
+    "tus-js-client": "^4.3.1",
+    "playwright": "^1.48.0"
   }
 }
