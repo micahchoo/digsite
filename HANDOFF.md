@@ -1,6 +1,6 @@
 # HANDOFF — digsite product repo
 
-Updated 2026-09-22 early. Phase 0 done; phase 1 server and web halves committed; the 1M scale run and phase 2's sheet tools are in flight. Roadmap: `docs/roadmap.md`.
+Updated 2026-09-22. Phases 0 done; 1 measured with three misses being fixed; 2 server done, web step 2 in flight; 3 web done. Roadmap: `docs/roadmap.md`.
 
 ## Where things stand
 
@@ -14,10 +14,13 @@ subagent against `docs/design.md`:
 3. `e2e/` walking-skeleton run — DONE, 10/10 (`e2e/RESULTS.md`).
 4. Phase 1 server (worker, tus, materialise, sections) — DONE, committed.
 5. Phase 1 web (sections, hover, selection, detail, uploads) — DONE, committed.
-6. Phase 1 scale run (`server/scripts/synth.ts`, `measure-map.ts` → `docs/measurements/phase-1-map.md`) — IN FLIGHT on ports 8801/5181.
+6. Phase 1 scale run — DONE, committed (`docs/measurements/phase-1-map.md`): rank rebuild 6.5 s, materialise 277 s, coarse p95 10 ms miss target; causes diagnosed. FIX IN FLIGHT (drop the rank FK, scatter materialisation over pages with worker-thread PNG encoding, resident coarse tiles) on ports 8801/5181; uncommitted edits under `server/src/boards/**`, `worker/`, migration 0004.
 7. Phase 2 web (drawing, inspector, dangling, rename) — DONE, committed.
 8. Phase 3 web (join, members, allowlist, delete flows) — DONE, committed; the stub in `web/stub/server.ts` is the contract the server halves must match.
-9. Phase 2 server (presence, neighbourhood, sheet stats + rename), phase 3 server (invitations, roles, delete + footprints), phase 4 (storage, deploy) — wait for the scale run to free `server/` and the DB.
+9. Phase 2 server (presence, neighbourhood, sheet stats + rename, ring layout, projection keeps dangling edges) — DONE, committed.
+10. Phase 2 web step 2 (presence cursors, explore-from-here, copy connections, dangling foreign, `e2e/src/sheet-hour.ts`) — IN FLIGHT against the stub.
+11. Phase 3 server (invitations, roles, delete + footprints, matching `web/stub/server.ts`) and phase 4 (storage, deploy) — queued behind the phase 1 fix (same board files).
+12. Then: run `e2e` 10/10 and `sheet-hour.ts` against the real server; commit; phase 4.
 
 Committed at each phase boundary on `main`, no attribution trailers (user instruction).
 
