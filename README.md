@@ -21,6 +21,21 @@ bun run dev
 seams in `.claude/rules/`. `bun run infra:up` brings up Postgres and a local
 minio (`STORAGE=s3` in `.env`) instead of just Postgres.
 
+## Testing and CI
+
+`bun run test` runs every workspace's unit tests against `bun run db:up`'s
+Postgres. `bun run e2e:fresh` is the full walking-skeleton run: it creates
+its own `digsite_e2e_<ts>` database and temp data dir on that same
+container, migrates, seeds, starts a server and a web dev server on free
+ports, runs the scripted suites (`e2e/src/{run,groups-life,sheet-hour}.ts`),
+then tears everything down — nothing it does touches your own dev server,
+web server or database. `VITE_CANVAS=excalidraw|native` picks the sheet
+canvas adapter it exercises. `bun run smoke` runs the five
+`web/scripts/smoke*.ts` definition-of-done scripts, each against its own
+fresh stub (`web/stub/server.ts`) on free ports — no database needed.
+`.github/workflows/ci.yml` runs all three (`check`, `test`, `e2e:fresh`
+against both canvases, `smoke`) on push and pull request.
+
 ## Deploying
 
 Prerequisites: a Linux machine with Docker and Docker Compose, and a domain

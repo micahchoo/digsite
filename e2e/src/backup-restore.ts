@@ -148,9 +148,14 @@ async function main() {
     });
     await waitReady(SERVER_ORIGIN);
     log('server A ready; seeding (idempotent)');
+    // PORT must travel with SERVER_ORIGIN: server/src/env.ts's withPort()
+    // rewrites SERVER_ORIGIN's port to match PORT (default 8800) whenever
+    // PORT isn't set, so without it seed.ts silently talks to whatever is
+    // on :8800 instead of server A — found the hard way wiring
+    // scripts/e2e-fresh.ts, which had the same gap.
     run(['bun', 'run', 'src/seed.ts'], {
       cwd: SERVER_DIR,
-      env: { SERVER_ORIGIN, DATABASE_URL: dbUrl(SOURCE_DB) },
+      env: { PORT, SERVER_ORIGIN, DATABASE_URL: dbUrl(SOURCE_DB) },
     });
 
     // -- back up --------------------------------------------------------------

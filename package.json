@@ -11,7 +11,9 @@
     "test": "bun run --filter '*' test && bun test scripts",
     "check": "bun run --filter '*' check && biome check . && bun run scripts/lint-seams.ts",
     "lint:seams": "bun run scripts/lint-seams.ts",
-    "smoke:prod": "bun run --filter @digsite/e2e smoke:prod"
+    "smoke:prod": "bun run --filter @digsite/e2e smoke:prod",
+    "e2e:fresh": "bun run scripts/e2e-fresh.ts",
+    "smoke": "bun run scripts/smoke.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

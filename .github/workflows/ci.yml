@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Named `digsite-db` on purpose: scripts/e2e-fresh.ts and scripts/smoke.ts
+    # (and e2e/src/backup-restore.ts) `docker exec digsite-db psql ...` to
+    # create/drop their own ephemeral databases on the running container —
+    # same container name as docker-compose.yml's `db` service, so nothing
+    # here is CI-only. Published to 127.0.0.1:5440, matching .env.example's
+    # DATABASE_URL, so every workspace's own default connection string works
+    # unmodified.
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: digsite
+          POSTGRES_PASSWORD: digsite
+          POSTGRES_DB: digsite
+        ports:
+          - 5440:5432
+        options: >-
+          --name digsite-db
+          --health-cmd "pg_isready -U digsite -d digsite"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://digsite:digsite@127.0.0.1:5440/digsite
+      # A fixed, obviously-not-secret value: fine for a throwaway CI database
+      # that never outlives the job, and distinct from
+      # deploy/.env.production.example's own placeholder (server/src/auth.ts
+      # only needs it to be present and not that literal production example).
+      AUTH_SECRET: digsite-ci-github-actions-not-a-real-secret
+      DATA_DIR: ./data
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Check (typecheck, biome, seams)
+        run: bun run check
+
+      - name: Migrate the dev database
+        run: bun run db:migrate
+
+      - name: Unit tests
+        run: bun run test
+
+      - name: Install Playwright browsers
+        run: bunx playwright install --with-deps chromium
+
+      # docs/phases/5-hardening.md section 6: a fresh database per run, both
+      # sheet canvas adapters — scripts/e2e-fresh.ts creates and drops its
+      # own `digsite_e2e_<ts>` database on this same container and never
+      # touches `digsite` itself.
+      - name: e2e (VITE_CANVAS=excalidraw)
+        run: bun run e2e:fresh
+        env:
+          VITE_CANVAS: excalidraw
+
+      - name: e2e (VITE_CANVAS=native)
+        run: bun run e2e:fresh
+        env:
+          VITE_CANVAS: native
+
+      # The web/scripts/smoke*.ts definition-of-done scripts, each against
+      # its own fresh stub (web/stub/server.ts) — no database involved.
+      - name: web smoke scripts
+        run: bun run smoke
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: |
+            e2e/screenshots
+            web/screenshots
+          if-no-files-found: ignore
+          retention-days: 7

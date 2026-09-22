@@ -277,8 +277,8 @@ async function main() {
     `sheet-hour: actions=${ACTIONS}${dryRun ? ' (HOUR_ACTIONS set — dry run)' : ''}`,
   );
 
-  const member = await signIn('member@example.test', 'password1');
-  const listed = await signIn('listed@example.test', 'password1');
+  const member = await signIn('member@example.test', 'password1234');
+  const listed = await signIn('listed@example.test', 'password1234');
 
   const ownerGroups =
     await member.get<{ id: string; name: string }[]>('/groups');

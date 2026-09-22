@@ -66,7 +66,7 @@ async function main() {
   console.log(`groups-life: server=${SERVER} web=${WEB}`);
 
   const ts = Date.now();
-  const owner = await signIn('owner@example.test', 'password1');
+  const owner = await signIn('owner@example.test', 'password1234');
 
   let groupId = '';
   let invitationId = '';
@@ -124,7 +124,7 @@ async function main() {
     const s = new Session();
     const signUp = await s.post<{ user?: { id: string } }>(
       '/api/auth/sign-up/email',
-      { email, password: 'password1', name: 'e2e member' },
+      { email, password: 'password1234', name: 'e2e member' },
     );
     assertStatus(signUp, 200, 'sign up the invited user');
     s.userId = signUp.json.user?.id ?? '';

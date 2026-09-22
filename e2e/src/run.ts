@@ -131,28 +131,23 @@ function assertStatus(
   }
 }
 
-// Scenario 5 creates a fresh "e2e-private-<ts>" board (creator: listed) on
-// every run and nothing deletes it (design.md's e2e/ section has no
-// teardown step), so listed's own board list legitimately accumulates
-// these across repeated runs of this script — listed is on each one's
-// allowlist as its creator. assertNames requires every name in `want` to
-// be present; with `tolerateDebris`, an "e2e-private-" prefixed extra is
-// allowed, but any OTHER unexpected name is a real failure (e.g. a board
-// this user should not see at all).
+// Scenario 5 creates a fresh "e2e-private-<ts>" board (creator: listed),
+// and nothing deletes it (design.md's e2e/ section has no teardown step) —
+// against `scripts/e2e-fresh.ts`'s fresh database this run.ts is always the
+// first and only run.ts against that database, so listed's board list has
+// no debris to tolerate. assertNames requires the board list to be exactly
+// `want`, in any order; any other name (missing or extra) is a real
+// failure.
 function assertNames(
   got: { name: string }[],
   want: string[],
   label: string,
-  tolerateDebris = false,
 ): void {
   const g = got.map((r) => r.name);
   for (const w of want) {
     if (!g.includes(w)) fail(`${label}: missing "${w}" — got [${g.join(',')}]`);
   }
-  const unexpected = g.filter(
-    (n) =>
-      !want.includes(n) && !(tolerateDebris && n.startsWith('e2e-private-')),
-  );
+  const unexpected = g.filter((n) => !want.includes(n));
   if (unexpected.length > 0) {
     fail(
       `${label}: unexpected boards [${unexpected.join(',')}] — got [${g.join(',')}]`,
@@ -237,10 +232,10 @@ async function main() {
   console.log(`e2e: server=${SERVER} web=${WEB}`);
 
   // -- setup: sign in the four fixture users, resolve fixture ids -----------
-  const owner = await signIn('owner@example.test', 'password1');
-  const member = await signIn('member@example.test', 'password1');
-  const listed = await signIn('listed@example.test', 'password1');
-  const outsider = await signIn('outsider@example.test', 'password1');
+  const owner = await signIn('owner@example.test', 'password1234');
+  const member = await signIn('member@example.test', 'password1234');
+  const listed = await signIn('listed@example.test', 'password1234');
+  const outsider = await signIn('outsider@example.test', 'password1234');
   const users: Record<'owner' | 'member' | 'listed' | 'outsider', Session> = {
     owner,
     member,
@@ -327,7 +322,7 @@ async function main() {
 
     const l = await listed.get<{ name: string }[]>(`/groups/${labId}/boards`);
     assertStatus(l, 200, 'listed board list');
-    assertNames(l.json, ['Field', 'Finds'], 'listed board list', true);
+    assertNames(l.json, ['Field', 'Finds'], 'listed board list');
 
     const out = await outsider.get(`/groups/${labId}/boards`);
     assertStatus(out, 403, 'outsider board list on a group they are not in');
