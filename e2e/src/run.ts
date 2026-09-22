@@ -103,6 +103,7 @@ interface DigsiteTools {
   getElements: () => ElementLike[];
   getForeign: () => ForeignShape[];
   getSelected: () => { kind: 'foreign' | 'own' } | null;
+  zoomToFit: () => void;
 }
 
 interface DigsiteDebug {
@@ -758,6 +759,12 @@ async function main() {
       const b = pageB;
       const a = pageA;
 
+      // Repeated runs move image 8 further each time (scenario 7), so fit
+      // the view first: the drag must land on the shape, wherever it is.
+      await b.evaluate(() =>
+        (window as unknown as DigsiteWindow).__digsite?.zoomToFit(),
+      );
+      await b.waitForTimeout(300);
       const target = b.locator(
         `[data-testid="foreign-shape"][data-foreign-id="${shapeId}"]`,
       );

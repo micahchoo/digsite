@@ -96,6 +96,8 @@ export interface Tools {
   removeDangling: () => number;
   // -- rename (section 6) ---------------------------------------------------
   rename: (name: string) => Promise<void>;
+  // -- view: the toolbar's "fit", so a test can bring a shape on screen ------
+  zoomToFit: () => void;
 }
 
 export interface ToolsDeps {
@@ -505,6 +507,7 @@ export function createTools(deps: ToolsDeps): Tools {
     getDangling,
     removeDangling,
     rename,
+    zoomToFit: () => getHandle()?.zoomToFit(),
   };
 }
 
