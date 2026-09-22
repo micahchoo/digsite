@@ -81,6 +81,70 @@ not a costume.
   list — ask <creator>"), 500 with request id, offline/reconnecting on
   the sheet, and empty group/board/sheet states.
 
+## Selection — the verb that moves pictures from the board to a sheet
+
+Selection is how a group's pile becomes an argument. It is designed as
+a first-class tool, not a side effect of clicking.
+
+**The model.** A selection is a set of IMAGE IDS, owned by the viewer,
+per board. Never ranks: a rank changes with the sort, and today's board
+page stores ranks, so changing the sort silently selects different
+pictures. That is a defect and the first thing fixed. The selection
+survives sort changes, filters, zoom, panning and a reload
+(`board_selections(user_id, board_id, image_ids, updated_at)`, so it
+also follows you across devices). It is drawn as an overlay, never in
+a tile (`ladder-slot-vs-rank.md`).
+
+**Ways to select, each with a key, a button and a menu item** (image-
+graph's one action, three surfaces):
+- Click toggles one image; Shift+click extends a rank range from the
+  last clicked image under the current sort; Ctrl/Cmd+click toggles
+  without clearing.
+- Drag a band on the map (Shift+drag, or the Select tool) selects every
+  cell it covers, row-major, as image-graph's band select does.
+- A section header's context menu: "Select this section" (all of
+  1987, all of site-3).
+- Find and filter: "Select all matches".
+- From an image: "Select neighbourhood" (hops 1–3, relation filter),
+  "Select everything on sheet X", "Select images with claims".
+- From a sheet: "Show on board" returns to the board with the sheet's
+  images selected and the map scrolled to the first.
+- Invert, clear, undo and redo of the selection itself (Ctrl+Z on the
+  board acts on the selection; nothing else on the board is undoable).
+
+**The tray.** A selection lives in a tray along the bottom of the board,
+like Discord's upload strip: thumbnails in the order they were
+selected, a count against `SHEET_LIMIT` ("112 / 150"), drag to reorder
+(the order is the first layout of a new sheet), remove with ×, hover a
+thumbnail to flash its cell on the map, click to fly there. The tray
+collapses to a chip when empty and never covers the map's scroll area.
+
+**What a selection can become.** "Start a sheet" (name in place; the
+layout is the tray order in a grid, or rings when it came from a
+neighbourhood), "Add to sheet…" (a picker of this board's sheets,
+adding only images not already there, placed to the right of the
+existing content), "Copy to another board" (the brainstorm's reuse
+rule: a copy, never a shared image), and "Download" (a zip of
+originals). Over the cap: the button says what will happen ("Start a
+sheet with the first 150 of 212") rather than refusing.
+
+**Selection on a million cells.** Range and band selects over large
+spans are resolved on the server (`POST /boards/:id/selection/range
+{sort, fromRank, toRank}` → ids, capped) so the client never pages a
+million rows; select-all-matches likewise returns ids from the find
+query. The tray loads thumbnails lazily; the map outline for a large
+selection is drawn from rank ranges, not one polygon per image.
+
+**Others' selections.** Presence on the board shows another viewer's
+selection as a faint outline in their colour; "Take their selection"
+copies it into yours.
+
+**Done when** a scripted walk selects by click, range, band, section,
+match, neighbourhood and "show on board"; changes the sort and reloads
+with the same images still selected; reorders the tray; starts a sheet
+whose layout follows the tray; adds to an existing sheet without
+duplicates; and goes over the cap with the honest message.
+
 ## Process
 
 1. Audit (`docs/ux/audit.md`): walk every page as each fixture user,
