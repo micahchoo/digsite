@@ -14,3 +14,7 @@ bun run db:migrate
 bun run seed
 bun run dev
 ```
+
+`bun run check` typechecks every workspace, runs Biome, and runs
+`scripts/lint-seams.ts`, which fails the build when code crosses one of
+the seams in `.claude/rules/`.

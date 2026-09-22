@@ -14,6 +14,7 @@ import type {
 // docs/design.md "Routes / Groups".
 import { fromNodeHeaders } from 'better-auth/node';
 import { groupForInviting, groupForViewing } from '../access/index.ts';
+import { groupsOfUser, memberIdOf, membersOfGroup } from '../access/reads.ts';
 import { auth } from '../auth.ts';
 import { pool } from '../db/pool.ts';
 import {
@@ -45,12 +46,7 @@ export function registerGroupRoutes(router: Router) {
 
   router.get('/groups', async (ctx) => {
     const userId = requireAuth(ctx);
-    const { rows } = await pool.query(
-      `SELECT o.id, o.name, m.role FROM "organization" o
-       JOIN "member" m ON m."organizationId" = o.id
-       WHERE m."userId" = $1 ORDER BY o.name`,
-      [userId],
-    );
+    const rows = await groupsOfUser(userId);
     const response: ListGroupsResponse = rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -63,12 +59,7 @@ export function registerGroupRoutes(router: Router) {
     const userId = requireAuth(ctx);
     const orgId = param(ctx, 'id');
     await groupForViewing(userId, orgId);
-    const { rows } = await pool.query(
-      `SELECT m."userId", u.email, u.name, m.role FROM "member" m
-       JOIN "user" u ON u.id = m."userId"
-       WHERE m."organizationId" = $1 ORDER BY u.name`,
-      [orgId],
-    );
+    const rows = await membersOfGroup(orgId);
     const response: ListMembersResponse = rows.map((r) => ({
       userId: r.userId,
       email: r.email,
@@ -119,13 +110,10 @@ export function registerGroupRoutes(router: Router) {
     const orgId = param(ctx, 'id');
     const targetUserId = param(ctx, 'userId');
     await groupForInviting(userId, orgId);
-    const { rows } = await pool.query(
-      `SELECT id FROM "member" WHERE "userId" = $1 AND "organizationId" = $2`,
-      [targetUserId, orgId],
-    );
-    if (!rows[0]) return json(ctx.res, 404, { error: 'member not found' });
+    const memberId = await memberIdOf(targetUserId, orgId);
+    if (!memberId) return json(ctx.res, 404, { error: 'member not found' });
     await auth.api.removeMember({
-      body: { memberIdOrEmail: rows[0].id, organizationId: orgId },
+      body: { memberIdOrEmail: memberId, organizationId: orgId },
       headers: fromNodeHeaders(ctx.req.headers),
     });
     json(ctx.res, 200, { ok: true });

@@ -8,7 +8,8 @@
     "seed": "bun run --filter @digsite/server seed",
     "dev": "bun run scripts/dev.ts",
     "test": "bun run --filter '*' test",
-    "check": "bun run --filter '*' check && biome check ."
+    "check": "bun run --filter '*' check && biome check . && bun run scripts/lint-seams.ts",
+    "lint:seams": "bun run scripts/lint-seams.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

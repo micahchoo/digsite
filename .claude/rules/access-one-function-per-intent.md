@@ -25,7 +25,10 @@ bypass it, cache it, or fold it into a route's own query.
 
 - **No other file queries `member`, `team` or `teamMember`.** A new
   route that needs a new answer gets a new function here, named for the
-  intent, and a row in the matrix test.
+  intent, and a row in the matrix test. A list shown on a page (members,
+  allowlist) is read through `access/reads.ts`, after the route has
+  passed its intent. `scripts/lint-seams.ts` fails the build on any
+  other read.
 - **An object the user may not see is `403`, never `404`.** Existence
   must not leak. Decide access first, then look for the object.
 - **An owner not on a private board's allowlist is denied.** Ownership
@@ -62,4 +65,5 @@ bypass it, cache it, or fold it into a route's own query.
   be quoted in SQL.
 
 Verify with `cd server && bun test access.test.ts`: five users × seven
-intents, zero deviations, plus the per-user board lists.
+intents, zero deviations, plus the per-user board lists; and
+`bun run lint:seams` at the root.

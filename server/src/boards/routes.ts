@@ -38,6 +38,7 @@ import {
   boardsForListing,
   imageForViewing,
 } from '../access/index.ts';
+import { allowlistOf } from '../access/reads.ts';
 import { auth } from '../auth.ts';
 import { pool } from '../db/pool.ts';
 import {
@@ -199,11 +200,7 @@ export function registerBoardRoutes(router: Router) {
       },
       headers: fromNodeHeaders(ctx.req.headers),
     });
-    const { rows } = await pool.query(
-      `SELECT "userId" FROM "teamMember" WHERE "teamId" = $1 ORDER BY "createdAt"`,
-      [board.team_id],
-    );
-    const response: AllowlistResponse = rows.map((r) => ({ userId: r.userId }));
+    const response: AllowlistResponse = await allowlistOf(board.team_id);
     json(ctx.res, 200, response);
   });
 
@@ -222,11 +219,7 @@ export function registerBoardRoutes(router: Router) {
       },
       headers: fromNodeHeaders(ctx.req.headers),
     });
-    const { rows } = await pool.query(
-      `SELECT "userId" FROM "teamMember" WHERE "teamId" = $1 ORDER BY "createdAt"`,
-      [board.team_id],
-    );
-    const response: AllowlistResponse = rows.map((r) => ({ userId: r.userId }));
+    const response: AllowlistResponse = await allowlistOf(board.team_id);
     json(ctx.res, 200, response);
   });
 
