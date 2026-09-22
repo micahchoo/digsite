@@ -13,7 +13,7 @@ import {
   repairBoundTextOrder,
   toSceneElement,
   zoomBy,
-} from '../src/sheet/canvas/convert.ts';
+} from '../src/sheet/canvas/excalidraw/convert.ts';
 import type { SceneElement } from '../src/sheet/canvas/types.ts';
 import { reconcileLocalChange } from '../src/sheet/scene-diff.ts';
 

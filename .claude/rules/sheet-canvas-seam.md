@@ -24,6 +24,11 @@ The tools, the socket room, the overlay, the inspector and the page
 talk to the canvas through that handle and never see an Excalidraw
 element.
 
+Two adapters satisfy `CanvasHandle` behind `canvas/Canvas.tsx`'s switch
+(`VITE_CANVAS`/`?canvas=`) as of 2026-09-22: `canvas/excalidraw/` (this
+rule's own subject) and `canvas/native/` (no `@excalidraw` import at
+all — `canvas/README.md`), and every rule below binds both.
+
 Decided 2026-09-22 after using the app: the sheet read as "Excalidraw
 with extras" — its properties panel, menu, library, help, footer and
 hand-drawn font on screen beside our toolbar. Every one of those is a

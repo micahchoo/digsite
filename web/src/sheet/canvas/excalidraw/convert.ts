@@ -2,8 +2,8 @@ import { arrowheadsFor } from '@digsite/shared';
 // The one file that turns an Excalidraw element into ours and back, and the
 // one file that knows how to build a brand-new region or edge out of the
 // product's own facts (an image id, a rect, a label). Every other function
-// in `canvas/` either calls into here or talks to the imperative API
-// directly; nothing outside `canvas/` imports any of this.
+// in `canvas/excalidraw/` either calls into here or talks to the imperative
+// API directly; nothing outside `canvas/` imports any of this.
 import {
   CaptureUpdateAction,
   FONT_FAMILY,
@@ -29,7 +29,7 @@ import type {
   SceneElement,
   UpdateOp,
   Viewport,
-} from './types.ts';
+} from '../types.ts';
 
 // research/excalidraw/packages/common/src/constants.ts
 const MIN_ZOOM = 0.1;
