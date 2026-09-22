@@ -32,6 +32,13 @@ import { env } from '../src/env.ts';
 
 const SERVER = env.SERVER_ORIGIN;
 const MEMBER_EMAIL = 'member@example.test';
+// A sign-in, not a sign-up — section 3's minPasswordLength (auth.ts) never
+// applies here, only whatever password the pre-existing seeded account
+// actually carries. Confirmed against the live dev DB (docs/phases/
+// 5-hardening.md section 5's load run hit this exact mismatch first): this
+// account predates that change and `bun run seed` never rewrites an
+// existing user's password, so it is still 'password1', not seed.ts's
+// current default for a NEW user.
 const MEMBER_PASSWORD = 'password1';
 
 const SORTS = ['uploaded_at.desc', 'name.asc', 'p.number.year.asc'] as const;

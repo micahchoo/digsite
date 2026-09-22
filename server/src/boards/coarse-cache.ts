@@ -13,15 +13,8 @@
 // a tile someone already composed; this one is for z<=-3 once a sort has
 // been materialised, so a coarse pan never has to compose or even touch the
 // per-tile path again.
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { env } from '../env.ts';
-
-// coarseTilesDir below still resolves to a plain filesystem directory (it
-// is DATA_DIR-relative), which only means something under STORAGE=fs.
-// loadResidentSortFromDisk's directory listing has no S3 equivalent — the
-// Storage interface (storage/index.ts) is deliberately just put/get/
-// exists/delete, no "list by prefix" — so it is a no-op there rather than
-// a fifth interface method for one caller. See its own comment below.
+import { storageFromEnv } from '../storage/index.ts';
 
 type SortEntry = { tiles: Map<string, Buffer>; bytes: number };
 
@@ -41,12 +34,21 @@ function tileKey(z: number, x: number, y: number): string {
   return `${z}/${x}-${y}`;
 }
 
-export function coarseTilesDir(boardId: string, sortId: string): string {
-  return `${env.DATA_DIR}/boards/${boardId}/tiles/${sortId}`;
+function coarseTilesPrefix(boardId: string, sortId: string): string {
+  return `boards/${boardId}/tiles/${sortId}/`;
 }
 
 export function hasResidentSort(boardId: string, sortId: string): boolean {
   return cache.has(entryKey(boardId, sortId));
+}
+
+/** Bytes every resident (board, sort) set holds right now — `totalBytes` is
+ * already kept in step with every insert/evict below, so this just exposes
+ * it. For `GET /metrics` (docs/phases/5-hardening.md section 4's last
+ * bullet, metrics.ts's own header comment names this file) and
+ * scripts/load-boards.ts's residency reporting. */
+export function residentBytes(): number {
+  return totalBytes;
 }
 
 export function getResidentTile(
@@ -96,41 +98,55 @@ export function setResidentSort(
   return true;
 }
 
-/** Reads a (board, sort)'s z<=-3 tile files off disk and installs them
- * resident in one pass — for a board whose materialised files already
- * exist but this process has never held them (a restart; a different
- * process materialised them). `materialiseSort` calls `setResidentSort`
- * directly with the buffers it just encoded so the tile route's first
- * request after a fresh materialise never re-reads disk at all; this is
- * only for the "files exist, nobody resident" case.
- *
- * Under STORAGE=s3 this is a deliberate no-op (always false): a bulk
- * "everything under this prefix" read needs S3's ListObjectsV2, which the
- * Storage interface doesn't expose (see this file's header comment) — the
- * caller (tiles.ts#materialisedTile) already falls back to a single-key
- * `storage.get` per tile when this returns false, so correctness doesn't
- * depend on it; only "does a restarted process re-warm a whole sort at
- * once, or one S3 GET per tile until the next materialise" does. */
+/** Reads a (board, sort)'s z<=-3 tile files through `Storage.list` and
+ * installs them resident in one pass — for a board whose materialised
+ * files already exist but this process has never held them (a restart; a
+ * different process materialised them). `materialiseSort` calls
+ * `setResidentSort` directly with the buffers it just encoded so the tile
+ * route's first request after a fresh materialise never re-reads disk (or
+ * bucket) at all; this is only for the "files exist, nobody resident" case.
+ * Works identically on fs and s3 (docs/phases/5-hardening.md section 5) —
+ * before `Storage.list` existed this was an fs-only directory walk and a
+ * deliberate no-op under STORAGE=s3; the caller (tiles.ts#materialisedTile)
+ * still falls back to a single-key `storage.get` per tile when this returns
+ * false (a sort bigger than COARSE_BUDGET_MB), so correctness never
+ * depended on this running — only "does a restarted process re-warm a
+ * whole sort at once, or one GET per tile until the next materialise" did. */
 export async function loadResidentSortFromDisk(
   boardId: string,
   sortId: string,
 ): Promise<boolean> {
   if (hasResidentSort(boardId, sortId)) return true;
-  if (env.STORAGE === 's3') return false;
-  const dir = coarseTilesDir(boardId, sortId);
+  const storage = storageFromEnv();
+  const prefix = coarseTilesPrefix(boardId, sortId);
   const tiles = new Map<string, Buffer>();
-  for (const z of [-3, -4, -5]) {
-    const zDir = `${dir}/${z}`;
-    if (!existsSync(zDir)) continue;
-    for (const file of readdirSync(zDir)) {
-      if (!file.endsWith('.png')) continue;
-      const [x, y] = file.slice(0, -'.png'.length).split('-');
-      tiles.set(
-        tileKey(z, Number(x), Number(y)),
-        readFileSync(`${zDir}/${file}`),
-      );
-    }
+
+  // Fetch keys with bounded concurrency — a materialised sort is 5,216
+  // files at 1,000,000 images (docs/measurements/phase-1-map.md), and
+  // serial GETs would make this warm-up slower under s3 than just letting
+  // every request fall through to its own per-tile disk read.
+  const keys: string[] = [];
+  for await (const key of storage.list(prefix)) {
+    if (key.endsWith('.png')) keys.push(key);
   }
+  const CONCURRENCY = 32;
+  for (let i = 0; i < keys.length; i += CONCURRENCY) {
+    const chunk = keys.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      chunk.map(async (key) => {
+        const rel = key.slice(prefix.length); // "-3/0-0.png"
+        const slash = rel.indexOf('/');
+        if (slash === -1) return;
+        const z = Number(rel.slice(0, slash));
+        const file = rel.slice(slash + 1, -'.png'.length);
+        const [x, y] = file.split('-');
+        const bytes = await storage.get(key);
+        if (!bytes) return;
+        tiles.set(tileKey(z, Number(x), Number(y)), Buffer.from(bytes));
+      }),
+    );
+  }
+
   if (tiles.size === 0) return false;
   return setResidentSort(boardId, sortId, tiles);
 }

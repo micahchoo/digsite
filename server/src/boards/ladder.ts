@@ -33,6 +33,7 @@ const MAX_PAGES = Math.max(
 );
 
 const cache = new Map<string, Canvas>(); // key: "boardId/S/page", LRU by insertion order
+let evictions = 0; // pages dropped by cacheSet's own budget loop, cumulative for this process
 
 function cacheKey(boardId: string, s: LadderSize, page: number): string {
   return `${boardId}/${s}/${page}`;
@@ -52,7 +53,32 @@ function cacheSet(key: string, v: Canvas): void {
   while (cache.size > MAX_PAGES) {
     const oldest = cache.keys().next().value as string;
     cache.delete(oldest);
+    evictions++;
   }
+}
+
+/** Bytes the resident ladder-page LRU holds right now — `cache.size *
+ * PAGE_BYTES` exactly, since every entry is one PAGE x PAGE RGBA canvas.
+ * For `GET /metrics` (docs/phases/5-hardening.md section 4's last bullet,
+ * metrics.ts's own header comment names this file) and for
+ * scripts/load-boards.ts's RSS/residency reporting. */
+export function residentBytes(): number {
+  return cache.size * PAGE_BYTES;
+}
+
+/** Pages dropped by the LRU's own budget loop since process start (or the
+ * last `resetEvictionCountForTest`) — scripts/load-boards.ts's "ladder
+ * evictions per minute" is this, sampled a minute apart. */
+export function evictionCount(): number {
+  return evictions;
+}
+
+/** Test-only: a fresh process's worth of the counter, matching
+ * metrics.ts#resetMetricsForTest's own reasoning — a test asserting on
+ * eviction counts shouldn't depend on what earlier tests in the same run
+ * evicted. */
+export function resetEvictionCountForTest(): void {
+  evictions = 0;
 }
 
 export function ladderPageKey(

@@ -9,6 +9,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -85,6 +86,27 @@ export class S3Storage implements Storage {
       if (isNotFound(err)) return false;
       throw err;
     }
+  }
+
+  /** Pages through ListObjectsV2 (1,000 keys/page) — no equivalent of fs.ts's
+   * ENOENT case: a prefix nobody ever wrote just yields nothing. */
+  async *list(prefix: string): AsyncIterable<string> {
+    let continuationToken: string | undefined;
+    do {
+      const res = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        }),
+      );
+      for (const obj of res.Contents ?? []) {
+        if (obj.Key) yield obj.Key;
+      }
+      continuationToken = res.IsTruncated
+        ? res.NextContinuationToken
+        : undefined;
+    } while (continuationToken);
   }
 
   /** A short-lived, GET-only URL for `key` — s3.ts's own capability, not

@@ -29,6 +29,7 @@ import {
   tileFor,
 } from '../boards/tiles.ts';
 import { pool } from '../db/pool.ts';
+import { env } from '../env.ts';
 import { storageFromEnv } from '../storage/index.ts';
 
 const N = 3000;
@@ -172,5 +173,52 @@ describe('materialise', () => {
       const composedPixels = await decodePixels(composed);
       expect(scatteredPixels).toEqual(composedPixels);
     }
+  }, 60_000);
+
+  // docs/phases/5-hardening.md section 5: "Materialisation enforces its own
+  // cap ... refusing loudly before it would exceed; a test proves the
+  // refusal." MATERIALISE_BUDGET_MB is a plain mutable field on `env` (see
+  // env.ts) — no other test in this file (or, checked, any other file)
+  // calls materialiseSort concurrently, so overriding it for the duration
+  // of this test and restoring it in `finally` doesn't race anything else.
+  test('materialiseSort refuses loudly instead of exceeding MATERIALISE_BUDGET_MB', async () => {
+    const boardId = await makeBoard(`materialise-budget-test-${Date.now()}`);
+
+    for (let i = 0; i < N; i++) await makeImage(boardId, i);
+    await pool.query('UPDATE boards SET image_count = $1 WHERE id = $2', [
+      N,
+      boardId,
+    ]);
+    for (let i = 0; i < N; i++) {
+      const img = await loadImage(paintSquare((i * 53) % 360));
+      await paintLadder(boardId, i, img, img.width, img.height);
+    }
+    await ensureRank(boardId, DEFAULT_SORT);
+
+    const before = env.MATERIALISE_BUDGET_MB;
+    env.MATERIALISE_BUDGET_MB = 0; // even one 256x256 RGBA tile canvas is 256KB
+    try {
+      await expect(materialiseSort(boardId, DEFAULT_SORT)).rejects.toThrow(
+        /materialise: budget exceeded/,
+      );
+    } finally {
+      env.MATERIALISE_BUDGET_MB = before;
+    }
+
+    // The refusal must be BEFORE any tile is written for this sort — a
+    // partial, silently-incomplete materialise would be worse than none.
+    const sid = sortId(DEFAULT_SORT);
+    const storage = storageFromEnv();
+    const key = materialisedTileKey(boardId, sid, -3, 0, 0);
+    expect(await storage.exists(key)).toBe(false);
+
+    // And board_rank_state never gets a materialised_at for this refused
+    // attempt — the tile route must keep falling through to compose, not
+    // believe a materialise that never finished.
+    const { rows } = await pool.query(
+      'SELECT materialised_at FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
+      [boardId, sid],
+    );
+    expect(rows[0]?.materialised_at ?? null).toBeNull();
   }, 60_000);
 });

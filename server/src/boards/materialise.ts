@@ -18,7 +18,6 @@
 // moved onto a pool of real OS threads. The ladder residency cache
 // (ladder.ts) is not touched here on purpose: this reads pages directly off
 // disk so materialising never evicts what a live viewer's pan has resident.
-import { rmSync } from 'node:fs';
 import os from 'node:os';
 import {
   CELL,
@@ -41,7 +40,7 @@ import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { type Canvas, Image, createCanvas } from '@napi-rs/canvas';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
-import { storageFromEnv } from '../storage/index.ts';
+import { deletePrefix, storageFromEnv } from '../storage/index.ts';
 import { setResidentSort } from './coarse-cache.ts';
 import { ladderPageKey } from './ladder.ts';
 import { PENDING_COLOR, materialisedTileKey } from './tiles.ts';
@@ -80,14 +79,55 @@ function tileKey(z: Zoom, x: number, y: number): string {
   return `${z}:${x}:${y}`;
 }
 
+/** MATERIALISE_BUDGET_MB's enforcement, docs/phases/5-hardening.md section
+ * 5: before this, `allocateTiles`'s preflight arithmetic was the WHOLE
+ * budget — it covered the tile RGBA canvases and nothing else, and
+ * docs/measurements/phase-1-map.md's own "after" section says so explicitly
+ * ("does not, and structurally cannot being a pre-flight arithmetic check,
+ * catch the per-page native leak"). This is a live counter instead of a
+ * static formula, so it can cover the two things a formula alone can't
+ * honestly claim to bound: the reused decoded-page canvas (bounded and
+ * small, but real) and the PNG buffers sitting between "encoded" and
+ * "written through Storage" (NOT bounded on their own — `EncodePool.run`
+ * pushes every `storage.put` onto one unawaited array, so a slow adapter
+ * — S3, a loaded disk — falling behind a fast encode pool would otherwise
+ * let that queue of Buffers grow without limit). `reserve` throws the
+ * moment a request would cross the budget, before the allocation happens —
+ * "refusing loudly", never an OOM found out about after the fact. */
+class MaterialiseBudget {
+  private used = 0;
+  constructor(private readonly limitBytes: number) {}
+
+  reserve(bytes: number, what: string): void {
+    if (this.used + bytes > this.limitBytes) {
+      throw new Error(
+        `materialise: budget exceeded reserving ${what} (${(bytes / 1024 / 1024).toFixed(1)} MB ` +
+          `would bring usage to ${((this.used + bytes) / 1024 / 1024).toFixed(1)} MB, ` +
+          `over MATERIALISE_BUDGET_MB=${(this.limitBytes / 1024 / 1024).toFixed(0)} MB)`,
+      );
+    }
+    this.used += bytes;
+  }
+
+  release(bytes: number): void {
+    this.used -= bytes;
+  }
+
+  get usedBytes(): number {
+    return this.used;
+  }
+}
+
 /** Every z<=-3 tile canvas for one sort, allocated up front (RGBA, before
- * PNG encoding). Throws rather than allocate past MATERIALISE_BUDGET_MB —
- * docs/phases/1-map.md's "fail loudly" — instead of an OOM partway through
- * a run that already deleted the previous, working set of files. */
+ * PNG encoding), reserved against `budget` as one lump sum before any
+ * canvas is created — docs/phases/1-map.md's "fail loudly" — instead of an
+ * OOM partway through a run that already deleted the previous, working set
+ * of files. */
 function allocateTiles(
   boardId: string,
   sid: string,
   count: number,
+  budget: MaterialiseBudget,
 ): Map<string, TileEntry> {
   const grids = new Map<Zoom, { nx: number; ny: number }>();
   let totalTiles = 0;
@@ -97,14 +137,7 @@ function allocateTiles(
     totalTiles += grid.nx * grid.ny;
   }
 
-  const bytes = totalTiles * TILE * TILE * 4;
-  const budgetBytes = env.MATERIALISE_BUDGET_MB * 1024 * 1024;
-  if (bytes > budgetBytes) {
-    throw new Error(
-      `materialise: ${totalTiles} tiles at ${TILE}x${TILE} RGBA need ` +
-        `${(bytes / 1024 / 1024).toFixed(0)} MB, over MATERIALISE_BUDGET_MB=${env.MATERIALISE_BUDGET_MB} MB`,
-    );
-  }
+  budget.reserve(totalTiles * TILE * TILE * 4, `${totalTiles} tile canvases`);
 
   const tiles = new Map<string, TileEntry>();
   for (const z of MATERIALISE_ZOOMS) {
@@ -186,6 +219,7 @@ async function scatterSize(
   rankOfSlot: Int32Array,
   pendingSlots: Uint8Array,
   tiles: Map<string, TileEntry>,
+  budget: MaterialiseBudget,
 ): Promise<void> {
   const zooms = zoomsForSize(s);
   if (zooms.length === 0) return;
@@ -194,43 +228,54 @@ async function scatterSize(
 
   // One page canvas and one Image, reused for every page of this size —
   // see paintPageDirect's header comment for why a fresh one per iteration
-  // OOMs the process well before finishing.
-  const pageCanvas = createCanvas(PAGE, PAGE);
-  const pageCtx = pageCanvas.getContext('2d');
-  const img = new Image();
+  // OOMs the process well before finishing. Reserved/released around the
+  // whole size's pass rather than per page: the canvas is the same
+  // allocation reused PAGE*PAGE*4 bytes' worth every iteration, never
+  // growing, so one reservation for the pass is the honest accounting (a
+  // per-page reserve/release pair would just add churn for no more
+  // precision).
+  const pageBytes = PAGE * PAGE * 4;
+  budget.reserve(pageBytes, `decoded page (size ${s})`);
+  try {
+    const pageCanvas = createCanvas(PAGE, PAGE);
+    const pageCtx = pageCanvas.getContext('2d');
+    const img = new Image();
 
-  for (let page = 0; page <= maxPage; page++) {
-    await paintPageDirect(boardId, s, page, pageCtx, img);
-    const base = page * capacity;
-    const limit = Math.min(capacity, count - base);
+    for (let page = 0; page <= maxPage; page++) {
+      await paintPageDirect(boardId, s, page, pageCtx, img);
+      const base = page * capacity;
+      const limit = Math.min(capacity, count - base);
 
-    for (let i = 0; i < limit; i++) {
-      const slot = base + i;
-      const rank = rankOfSlot[slot];
-      if (rank === undefined || rank < 0) continue; // no rank row for this slot
+      for (let i = 0; i < limit; i++) {
+        const slot = base + i;
+        const rank = rankOfSlot[slot];
+        if (rank === undefined || rank < 0) continue; // no rank row for this slot
 
-      const { x: sx, y: sy } = ladderAddress(slot, s);
-      const { col, row } = cellOf(rank);
-      const pending = pendingSlots[slot] === 1;
+        const { x: sx, y: sy } = ladderAddress(slot, s);
+        const { col, row } = cellOf(rank);
+        const pending = pendingSlots[slot] === 1;
 
-      for (const z of zooms) {
-        const side = perTileSide(z);
-        const tx = Math.floor(col / side);
-        const ty = Math.floor(row / side);
-        const entry = tiles.get(tileKey(z, tx, ty));
-        if (!entry) continue; // past the board's own grid — shouldn't happen
-        const px = cellPx(z);
-        const dx = (col % side) * px;
-        const dy = (row % side) * px;
+        for (const z of zooms) {
+          const side = perTileSide(z);
+          const tx = Math.floor(col / side);
+          const ty = Math.floor(row / side);
+          const entry = tiles.get(tileKey(z, tx, ty));
+          if (!entry) continue; // past the board's own grid — shouldn't happen
+          const px = cellPx(z);
+          const dx = (col % side) * px;
+          const dy = (row % side) * px;
 
-        if (pending) {
-          entry.ctx.fillStyle = PENDING_COLOR;
-          entry.ctx.fillRect(dx, dy, px, px);
-        } else {
-          entry.ctx.drawImage(pageCanvas, sx, sy, s, s, dx, dy, px, px);
+          if (pending) {
+            entry.ctx.fillStyle = PENDING_COLOR;
+            entry.ctx.fillRect(dx, dy, px, px);
+          } else {
+            entry.ctx.drawImage(pageCanvas, sx, sy, s, s, dx, dy, px, px);
+          }
         }
       }
     }
+  } finally {
+    budget.release(pageBytes);
   }
 }
 
@@ -253,10 +298,11 @@ class EncodePool {
     this.workers = Array.from({ length: count }, () => new Worker(url));
   }
 
-  async run(tiles: TileEntry[]): Promise<void> {
+  async run(tiles: TileEntry[], budget: MaterialiseBudget): Promise<void> {
     const storage = storageFromEnv();
     const puts: Promise<void>[] = [];
     let next = 0;
+    let failure: unknown;
 
     const runWorker = (w: Worker) =>
       new Promise<void>((resolve, reject) => {
@@ -269,6 +315,15 @@ class EncodePool {
         };
 
         const dispatchNext = () => {
+          if (failure !== undefined) {
+            // Another worker's budget.reserve already refused — stop handing
+            // out new encode jobs rather than let this worker keep going
+            // toward a budget that's already refused someone else.
+            w.removeEventListener('message', onMessage);
+            w.removeEventListener('error', onError);
+            resolve();
+            return;
+          }
           const entry = tiles[next++];
           current = entry;
           if (!entry) {
@@ -290,7 +345,26 @@ class EncodePool {
           if (entry) {
             const png = Buffer.from(ev.data.png);
             entry.png = png;
-            puts.push(storage.put(entry.key, png, 'image/png'));
+            // The PNG buffer counts against the budget from the moment it
+            // exists until `storage.put` has actually written it — see this
+            // class's header comment: an adapter slower than the encode
+            // pool would otherwise let this queue of Buffers grow
+            // unbounded, since every `put` is fired without waiting for the
+            // previous one.
+            try {
+              budget.reserve(png.byteLength, 'pending PNG buffer');
+            } catch (err) {
+              failure = err;
+              w.removeEventListener('message', onMessage);
+              w.removeEventListener('error', onError);
+              reject(err);
+              return;
+            }
+            puts.push(
+              storage
+                .put(entry.key, png, 'image/png')
+                .finally(() => budget.release(png.byteLength)),
+            );
           }
           dispatchNext();
         };
@@ -300,8 +374,15 @@ class EncodePool {
         dispatchNext(); // prime the first job
       });
 
-    await Promise.all(this.workers.map(runWorker));
-    await Promise.all(puts);
+    try {
+      await Promise.all(this.workers.map(runWorker));
+    } finally {
+      // Whether every worker resolved or one rejected on a budget refusal,
+      // wait out whichever `put`s are already in flight — an orphaned PUT
+      // racing the next materialise pass for this board is worse than the
+      // extra wait.
+      await Promise.allSettled(puts);
+    }
   }
 
   terminate(): void {
@@ -324,21 +405,15 @@ export async function materialiseSort(
 
   // A stale rebuild clears the previous run's files before composing, so a
   // board that shrank doesn't leave orphaned extra tiles around forever.
-  // Storage (storage/index.ts) has no "delete by prefix" — deliberately,
-  // see its header comment — so this is fs-only local disk hygiene; every
-  // tile within the NEW grid is fully overwritten below regardless (the
-  // scatter draws every cell of every allocated tile), so correctness
-  // never depends on this running. Under S3 the old, out-of-grid objects
-  // are simply orphaned — never requested again, since every URL the app
-  // ever generates comes from the current grid — and are left for the
-  // deploy's own bucket lifecycle policy or `deploy/backup.sh`'s operator
-  // to reclaim if their storage cost matters.
-  if (env.STORAGE !== 's3') {
-    const dir = `${env.DATA_DIR}/boards/${boardId}/tiles/${sid}`;
-    rmSync(dir, { recursive: true, force: true });
-  }
+  // `Storage.list` (docs/phases/5-hardening.md section 5) made this
+  // adapter-agnostic — every tile within the NEW grid is fully overwritten
+  // below regardless (the scatter draws every cell of every allocated
+  // tile), so correctness never depended on this running; it is disk (or
+  // bucket) hygiene, not a precondition of the compose below.
+  await deletePrefix(storageFromEnv(), `boards/${boardId}/tiles/${sid}/`);
 
-  const tiles = allocateTiles(boardId, sid, count);
+  const budget = new MaterialiseBudget(env.MATERIALISE_BUDGET_MB * 1024 * 1024);
+  const tiles = allocateTiles(boardId, sid, count, budget);
 
   if (count > 0) {
     // One query for the whole sort, not one per tile — slot -> rank as a
@@ -359,7 +434,15 @@ export async function materialiseSort(
     for (const r of pendingRows) pendingSlots[r.slot as number] = 1;
 
     for (const s of sizesNeeded()) {
-      await scatterSize(boardId, s, count, rankOfSlot, pendingSlots, tiles);
+      await scatterSize(
+        boardId,
+        s,
+        count,
+        rankOfSlot,
+        pendingSlots,
+        tiles,
+        budget,
+      );
     }
   }
 
@@ -373,7 +456,7 @@ export async function materialiseSort(
   );
   const pool_ = new EncodePool(concurrency);
   try {
-    await pool_.run(entries);
+    await pool_.run(entries, budget);
   } finally {
     pool_.terminate();
   }

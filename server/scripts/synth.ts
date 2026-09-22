@@ -20,6 +20,12 @@
 // Usage:
 //   bun run scripts/synth.ts --new "Synthetic 1M" 1000000
 //   bun run scripts/synth.ts <boardId> 1000000   # idempotent re-run / resume / grow
+//
+// `resolveBoard`, `WorkerPool` and `growBoard` are exported for
+// scripts/load-boards.ts (docs/phases/5-hardening.md section 5's 20-board
+// load run), which grows 20 boards the same way this file grows one — same
+// page format, same idempotent-resume contract — rather than re-implement
+// this file's insert/paint loop a second time.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -31,7 +37,7 @@ import { pool } from '../src/db/pool.ts';
 import { env } from '../src/env.ts';
 
 const BATCH = 10_000;
-const WORKER_COUNT = Math.max(
+const DEFAULT_WORKER_COUNT = Math.max(
   1,
   Math.min(Number(process.env.SYNTH_WORKERS ?? 16), 32),
 );
@@ -45,7 +51,7 @@ function usage(): never {
   process.exit(1);
 }
 
-async function resolveBoard(
+export async function resolveBoard(
   boardArg: string,
   newName: string | null,
 ): Promise<{ boardId: string; imageCount: number }> {
@@ -203,7 +209,7 @@ function buildPageJobs(startSlot: number, endSlot: number): PageJob[] {
   return jobs;
 }
 
-class WorkerPool {
+export class WorkerPool {
   private workers: Worker[] = [];
 
   constructor(count: number) {
@@ -249,7 +255,7 @@ class WorkerPool {
   }
 }
 
-async function paintRange(
+export async function paintRange(
   pool_: WorkerPool,
   boardId: string,
   start: number,
@@ -263,6 +269,38 @@ async function paintRange(
     const jobs = buildPageJobs(s0, s1);
     await pool_.run(boardId, jobs);
     writeMarker(boardId, s1);
+  }
+}
+
+/** Grows `boardId` to `count` synthetic images — the whole idempotent
+ * resume/insert/paint loop `main()` below drives from the CLI, extracted so
+ * scripts/load-boards.ts can grow 20 boards the same way without spawning
+ * 20 child processes. Caller owns the WorkerPool's lifetime (load-boards.ts
+ * reuses one pool across every board; this file's own CLI makes one and
+ * terminates it after). Does NOT call `pool.end()` — that's the caller's
+ * database connection to close, not this function's. */
+export async function growBoard(
+  wp: WorkerPool,
+  boardId: string,
+  memberId: string,
+  existingCount: number,
+  count: number,
+  onProgress?: (cursor: number, target: number) => void,
+): Promise<void> {
+  const paintedUpTo = readMarker(boardId);
+  if (paintedUpTo < existingCount) {
+    await paintRange(wp, boardId, paintedUpTo, existingCount);
+  }
+
+  if (existingCount >= count) return;
+
+  let cursor = existingCount;
+  while (cursor < count) {
+    const batchLen = Math.min(BATCH, count - cursor);
+    const startSlot = await insertBatch(boardId, memberId, batchLen);
+    await paintRange(wp, boardId, startSlot, startSlot + batchLen);
+    cursor = startSlot + batchLen;
+    onProgress?.(cursor, count);
   }
 }
 
@@ -298,35 +336,23 @@ async function main() {
   );
   const memberId = member.rows[0].id as string;
 
-  const wp = new WorkerPool(WORKER_COUNT);
-  console.log(`worker pool: ${WORKER_COUNT} workers`);
+  const wp = new WorkerPool(DEFAULT_WORKER_COUNT);
+  console.log(`worker pool: ${DEFAULT_WORKER_COUNT} workers`);
 
   try {
-    const paintedUpTo = readMarker(boardId);
-    if (paintedUpTo < existingCount) {
-      console.log(
-        `resuming: painting inserted-but-unpainted slots [${paintedUpTo}, ${existingCount})`,
-      );
-      await paintRange(wp, boardId, paintedUpTo, existingCount);
-    }
-
-    if (existingCount >= count) {
-      console.log(
-        `board already has ${existingCount} images (>= requested ${count}); nothing to insert`,
-      );
-    } else {
-      let cursor = existingCount;
-      while (cursor < count) {
-        const batchLen = Math.min(BATCH, count - cursor);
-        const startSlot = await insertBatch(boardId, memberId, batchLen);
-        await paintRange(wp, boardId, startSlot, startSlot + batchLen);
-        cursor = startSlot + batchLen;
+    await growBoard(
+      wp,
+      boardId,
+      memberId,
+      existingCount,
+      count,
+      (cursor, target) => {
         const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
         console.log(
-          `progress: ${cursor}/${count} images (${elapsed}s elapsed)`,
+          `progress: ${cursor}/${target} images (${elapsed}s elapsed)`,
         );
-      }
-    }
+      },
+    );
   } finally {
     wp.terminate();
   }
@@ -338,7 +364,13 @@ async function main() {
   await pool.end();
 }
 
-main().catch((err) => {
-  console.error('synth failed:', err);
-  process.exit(1);
-});
+// import.meta.main: this file is a valid module to import from (load-boards.ts
+// does) as well as a CLI entry point — the loop below must only run when
+// invoked directly, or importing growBoard/WorkerPool/resolveBoard would
+// also kick off `main()`'s own argv parsing.
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('synth failed:', err);
+    process.exit(1);
+  });
+}

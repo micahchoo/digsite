@@ -100,6 +100,43 @@ function contract(name: string, make: () => Storage): void {
       expect(final?.[0]).toBe(increments);
     });
 
+    // docs/phases/5-hardening.md section 5: `list(prefix)` is the fifth
+    // Storage method — the coarse cache's disk (or bucket) warm-up, the
+    // materialise stale-sort clear and the board-delete sweep all need
+    // "every key under this prefix" on BOTH adapters, which used to be an
+    // `env.STORAGE !== 's3'` gate around fs-only directory code at each of
+    // those three call sites.
+    test('list yields every key under a prefix and nothing outside it', async () => {
+      const storage = make();
+      const root = `contract/${name}/${Date.now()}-list`;
+      const inside = [`${root}/a`, `${root}/b`, `${root}/nested/c`];
+      const outside = `contract/${name}/${Date.now()}-list-sibling/d`;
+      for (const key of inside) {
+        await storage.put(key, new TextEncoder().encode(key), 'text/plain');
+      }
+      await storage.put(
+        outside,
+        new TextEncoder().encode(outside),
+        'text/plain',
+      );
+
+      const found: string[] = [];
+      for await (const key of storage.list(`${root}/`)) found.push(key);
+      expect(found.sort()).toEqual([...inside].sort());
+      expect(found).not.toContain(outside);
+    });
+
+    test('list on a prefix nobody ever wrote yields nothing, not a throw', async () => {
+      const storage = make();
+      const found: string[] = [];
+      for await (const key of storage.list(
+        `contract/${name}/never-written-${Date.now()}/`,
+      )) {
+        found.push(key);
+      }
+      expect(found).toEqual([]);
+    });
+
     // The negative case: the SAME read-modify-write, WITHOUT the lock,
     // demonstrably loses updates — proves the test above is measuring the
     // lock and not something else (retries, adapter-level atomicity, S3's

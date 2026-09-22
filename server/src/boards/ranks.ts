@@ -18,6 +18,15 @@ import { invalidateComposedTiles } from './tiles-cache.ts';
 // this module, not the schema. Phase 3's board delete must delete this
 // board's board_ranks rows explicitly, in the same transaction as the
 // boards row; there is no FK left to do it for you.
+//
+// board_ranks is partitioned by board_id (HASH, 16 partitions) as of
+// 0007_board_ranks_partitioned.sql (docs/phases/5-hardening.md section 5,
+// measured against list-per-board on the 1,000,000-image board in
+// docs/measurements/phase-5.md — hash kept; see that migration's own
+// comment for why). Every query below is unchanged: Postgres routes a
+// board_id-scoped INSERT/DELETE/SELECT to (or from) the right partition on
+// its own, so this file's SQL is byte-for-byte what it was before the
+// migration — the partitioning is entirely a schema/planner concern.
 
 function orderExpr(sort: Sort): string {
   const dir = sort.dir === 'asc' ? 'ASC' : 'DESC';
