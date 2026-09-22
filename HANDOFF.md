@@ -1,6 +1,6 @@
 # HANDOFF — digsite product repo
 
-Updated 2026-09-22. Phases 0 done; 1 measured with three misses being fixed; 2 server done, web step 2 in flight; 3 web done. Roadmap: `docs/roadmap.md`.
+Updated 2026-09-22 evening. Phases 0–4 done and committed; the native canvas adapter (phase 2 §8) is in flight; phase 5 (hardening) is where the autonomous run stops. Roadmap: `docs/roadmap.md`.
 
 ## Where things stand
 
@@ -20,8 +20,13 @@ subagent against `docs/design.md`:
 9. Phase 2 server (presence, neighbourhood, sheet stats + rename, ring layout, projection keeps dangling edges) — DONE, committed.
 10. Phase 2 web step 2 — DONE, committed; `e2e/src/sheet-hour.ts` dry-run against the stub only.
 11. Seam linter (`scripts/seams/lint.ts`, checks in each rule's frontmatter, `bun run lint:seams`, part of `bun run check`) — DONE, committed.
-12. Phase 3 server (invitations, roles, deletes, footprints, `images?ids=`, `/relations`, `e2e/src/groups-life.ts`) — IN FLIGHT on 8807.
-13. Then: run `e2e/src/run.ts` (10 scenarios), `sheet-hour.ts` and `groups-life.ts` against the real server on 8800/5180; commit; phase 4 (`docs/phases/4-deploy.md`).
+12. Phase 3 server — DONE, committed; `groups-life.ts` 9/9 for real.
+13. Phase 4 (storage port fs/s3, deploy/, backups, health) — DONE, committed (merged from a worktree branch).
+14. Canvas seam: Excalidraw isolated in `web/src/sheet/canvas/` — DONE; then four real-server defects fixed (snapshot index order, stale overlay after a programmatic viewport change, first-change-per-frame drop, float4 fractions).
+15. Real-server suites on the demo (`../demo`, a worktree on main, server 8800 + vite 5180 running in the background): `run.ts` 8/10 (1 and 2 fail only on fixture debris), `sheet-hour.ts` 7/7, `groups-life.ts` 9/9.
+16. IN FLIGHT: `web/src/sheet/canvas/native/`, image-graph's canvas as a second adapter behind `CanvasHandle`, selected by `VITE_CANVAS=native`.
+
+The demo worktree at `../demo` runs the app for the owner; move it with `git checkout --detach main` and restart the server by pid when server code changes (vite reloads web on its own).
 
 Crash note: the session died twice (02:05, 08:08) from the kernel OOM-killing a `bun` worker at ~84 GB during the scatter materialisation; a third at 93 GB was killed by hand. The fix agent must cap memory (`MATERIALISE_BUDGET_MB`) and run heavy steps under `systemd-run --user --scope -p MemoryMax=40G`.
 
