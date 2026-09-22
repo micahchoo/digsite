@@ -47,20 +47,26 @@ export function Group() {
   const [rowError, setRowError] = useState<Record<string, string>>({});
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
+  // Each list loads on its own: the boards must show even when an optional
+  // list (recent sheets, invitations) fails, or the page reads as broken
+  // while creation actually succeeded.
   const refresh = useCallback(async () => {
-    try {
-      const [b, m, s] = await Promise.all([
-        api.listBoards(groupId),
-        api.listMembers(groupId),
-        api.listRecentSheets(groupId),
-      ]);
-      setBoards(b);
-      setMembers(m);
-      setRecentSheets(s);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.reason : String(err));
-    }
+    const [b, m, s] = await Promise.allSettled([
+      api.listBoards(groupId),
+      api.listMembers(groupId),
+      api.listRecentSheets(groupId),
+    ]);
+    if (b.status === 'fulfilled') setBoards(b.value);
+    if (m.status === 'fulfilled') setMembers(m.value);
+    setRecentSheets(s.status === 'fulfilled' ? s.value : []);
+    const failed = [b, m].find((r) => r.status === 'rejected');
+    setError(
+      failed?.status === 'rejected'
+        ? failed.reason instanceof ApiError
+          ? failed.reason.reason
+          : String(failed.reason)
+        : null,
+    );
     try {
       setPending(await api.listPendingInvitations(groupId));
       setPendingError(null);
