@@ -140,6 +140,24 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     [onChange],
   );
 
+  // A programmatic viewport change is a committed change too: Excalidraw does
+  // not reliably fire onChange for an appState-only updateScene, and the
+  // overlay above this canvas redraws only on onChange, so the seam emits it
+  // itself. Measured 2026-09-22: a foreign shape's DOM rect stayed stale for
+  // over 300 ms after zoomToFit, and a drag aimed at it hit empty canvas.
+  const applyViewportAndEmit = useCallback(
+    (api: ExcalidrawImperativeAPI, v: Viewport) => {
+      applyViewport(api, v);
+      const ids = api.getAppState().selectedElementIds;
+      onChange({
+        elements: toSceneElements(api.getSceneElementsIncludingDeleted()),
+        viewport: v,
+        selectedIds: Object.keys(ids).filter((id) => ids[id]),
+      });
+    },
+    [onChange],
+  );
+
   useImperativeHandle(
     ref,
     (): CanvasHandle => ({
@@ -197,7 +215,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         const api = apiRef.current;
         if (!api) return;
         const current = viewportOf(api.getAppState());
-        applyViewport(api, {
+        applyViewportAndEmit(api, {
           scrollX: v.scrollX ?? current.scrollX,
           scrollY: v.scrollY ?? current.scrollY,
           zoom: v.zoom ?? current.zoom,
@@ -213,14 +231,17 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
           .filter((e) => !e.isDeleted && (!wanted || wanted.has(e.id)))
           .map(rectOf);
         const current = viewportOf(api.getAppState());
-        applyViewport(api, fitViewport(rects, box.width, box.height, current));
+        applyViewportAndEmit(
+          api,
+          fitViewport(rects, box.width, box.height, current),
+        );
       },
       zoomBy(factor) {
         const api = apiRef.current;
         const box = containerRef.current?.getBoundingClientRect();
         if (!api || !box) return;
         const current = viewportOf(api.getAppState());
-        applyViewport(
+        applyViewportAndEmit(
           api,
           zoomByFactor(current, factor, box.width / 2, box.height / 2),
         );
