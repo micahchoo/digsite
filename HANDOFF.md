@@ -18,9 +18,12 @@ subagent against `docs/design.md`:
 7. Phase 2 web (drawing, inspector, dangling, rename) — DONE, committed.
 8. Phase 3 web (join, members, allowlist, delete flows) — DONE, committed; the stub in `web/stub/server.ts` is the contract the server halves must match.
 9. Phase 2 server (presence, neighbourhood, sheet stats + rename, ring layout, projection keeps dangling edges) — DONE, committed.
-10. Phase 2 web step 2 (presence cursors, explore-from-here, copy connections, dangling foreign, `e2e/src/sheet-hour.ts`) — IN FLIGHT against the stub.
-11. Phase 3 server (invitations, roles, delete + footprints, matching `web/stub/server.ts`) and phase 4 (storage, deploy) — queued behind the phase 1 fix (same board files).
-12. Then: run `e2e` 10/10 and `sheet-hour.ts` against the real server; commit; phase 4.
+10. Phase 2 web step 2 — DONE, committed; `e2e/src/sheet-hour.ts` dry-run against the stub only.
+11. Seam linter (`scripts/seams/lint.ts`, checks in each rule's frontmatter, `bun run lint:seams`, part of `bun run check`) — DONE, committed.
+12. Phase 3 server (invitations, roles, deletes, footprints, `images?ids=`, `/relations`, `e2e/src/groups-life.ts`) — IN FLIGHT on 8807.
+13. Then: run `e2e/src/run.ts` (10 scenarios), `sheet-hour.ts` and `groups-life.ts` against the real server on 8800/5180; commit; phase 4 (`docs/phases/4-deploy.md`).
+
+Crash note: the session died twice (02:05, 08:08) from the kernel OOM-killing a `bun` worker at ~84 GB during the scatter materialisation; a third at 93 GB was killed by hand. The fix agent must cap memory (`MATERIALISE_BUDGET_MB`) and run heavy steps under `systemd-run --user --scope -p MemoryMax=40G`.
 
 Committed at each phase boundary on `main`, no attribution trailers (user instruction).
 

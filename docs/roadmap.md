@@ -6,9 +6,9 @@ Completion means a group can use it daily. Each phase has a contract in
 | # | phase | done when | status |
 | --- | --- | --- | --- |
 | 0 | Walking skeleton | ten e2e scenarios green; the two prototype regressions cannot recur | DONE 2026-09-21, 10/10 (`e2e/RESULTS.md`) |
-| 1 | Make the map real | a million synthetic images on one board pan and re-sort at the prototype's numbers through the product code path | in progress (`phases/1-map.md`) |
-| 2 | Make the sheet complete | two people edit one sheet for an hour and the snapshot, rows and foreign views agree | not started |
-| 3 | Groups people can live in | invite by link, roles in the UI, allowlists, leave/remove, rename/delete with claims accounted for | not started |
+| 1 | Make the map real | a million synthetic images on one board pan and re-sort at the prototype's numbers through the product code path | built and measured; three misses (rank rebuild, materialise memory, coarse p95) being fixed (`phases/1-map.md`, `measurements/phase-1-map.md`) |
+| 2 | Make the sheet complete | two people edit one sheet for an hour and the snapshot, rows and foreign views agree | built; hour run dry-run only, real run pending the server tree (`phases/2-sheet.md`) |
+| 3 | Groups people can live in | invite by link, roles in the UI, allowlists, leave/remove, rename/delete with claims accounted for | web done; server half in flight (`phases/3-groups.md`) |
 | 4 | Storage and deployment | a fresh machine goes from zero to a running instance from the README | not started |
 | 5 | Hardening | rate limits, route audit against the access module, load at tens of millions across boards, observability | not started |
 | 6 | Parked ideas, on evidence | private staging space, copy-on-promote choices, region/caption coupling | parked |
