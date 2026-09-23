@@ -66,6 +66,8 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { BoardAdministration } from '../board/BoardAdministration.tsx';
+import { BoardSheets, useBoardSheets } from '../board/BoardSheets.tsx';
 import {
   ContextMenu,
   type MenuItem,
@@ -78,7 +80,6 @@ import { FindPanel } from '../board/FindPanel.tsx';
 import { FolderImport } from '../board/FolderImport.tsx';
 import { PathPanel } from '../board/PathPanel.tsx';
 import { Terms } from '../board/Terms.tsx';
-import { ThreadBrowser } from '../board/ThreadBrowser.tsx';
 import { Tray } from '../board/Tray.tsx';
 import { UploadActivity } from '../board/UploadActivity.tsx';
 import { WebView } from '../board/WebView.tsx';
@@ -90,7 +91,6 @@ import {
   visibleRanks,
 } from '../board/detail.ts';
 import { useFind } from '../board/find.ts';
-import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
 import { RankedView, identity, useRanked } from '../board/ranked-view.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
 import { cellCorner, cellPolygon } from '../board/selection.ts';
@@ -183,15 +183,6 @@ interface OpenContextMenu {
   x: number;
   y: number;
   sections: MenuSection[];
-}
-
-/** Today a sheet's save reads as a time; before today, as a date. */
-function savedLabel(iso: string): string {
-  const at = new Date(iso);
-  const today = new Date().toDateString() === at.toDateString();
-  return today
-    ? `Saved ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
-    : `Saved ${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 }
 
 function storageKey(boardId: string): string {
@@ -482,49 +473,9 @@ export function Board() {
     [],
   );
 
-  // -- sheets (docs/phases/2-sheet.md section 6) ------------------------------
-  const [sheets, setSheets] = useState<
-    Awaited<ReturnType<typeof api.listSheets>>
-  >([]);
-  const refreshSheets = useCallback(async () => {
-    setSheets(await api.listSheets(boardId));
-  }, [boardId]);
-  useEffect(() => {
-    void refreshSheets();
-  }, [refreshSheets]);
-
-  // -- sheet delete, with a footprint confirmation (docs/phases/3-groups.md
-  // section 4: "how many other sheets' foreign views it affects") ----------
-  const [sheetDeleteConfirm, setSheetDeleteConfirm] = useState<{
-    sheetId: string;
-    footprint: SheetFootprint;
-  } | null>(null);
-  const [sheetDeleteBusy, setSheetDeleteBusy] = useState(false);
-  const [sheetDeleteError, setSheetDeleteError] = useState<string | null>(null);
-
-  async function openSheetDeleteConfirm(sheetId: string) {
-    setSheetDeleteError(null);
-    try {
-      const footprint = await api.getSheetFootprint(sheetId);
-      setSheetDeleteConfirm({ sheetId, footprint });
-    } catch (err) {
-      setSheetDeleteError(err instanceof ApiError ? err.reason : String(err));
-    }
-  }
-  async function confirmDeleteSheet() {
-    if (!sheetDeleteConfirm) return;
-    setSheetDeleteBusy(true);
-    try {
-      await api.deleteSheet(sheetDeleteConfirm.sheetId);
-      setSheetDeleteConfirm(null);
-      await refreshSheets();
-      notifySheetsChanged();
-    } catch (err) {
-      setSheetDeleteError(err instanceof ApiError ? err.reason : String(err));
-    } finally {
-      setSheetDeleteBusy(false);
-    }
-  }
+  // -- sheets (board/BoardSheets.tsx): the right column lists them, the
+  // tray adds to them.
+  const sheets = useBoardSheets(boardId);
 
   // -- load the board, then the viewer's stored or default sort ------------
   // docs/ux/audit.md #1: a board the viewer can't or shouldn't see (bad id,
@@ -566,85 +517,10 @@ export function Board() {
     return () => window.clearTimeout(t);
   }, [board, boardError]);
 
-  // -- allowlist (docs/phases/3-groups.md section 3): only meaningful on a
-  // private board, so only fetched once the board says it isn't open -------
-  const [allowlist, setAllowlist] = useState<GetBoardAllowlistResponse | null>(
-    null,
-  );
-  const [groupMembers, setGroupMembers] = useState<
-    Awaited<ReturnType<typeof api.listMembers>>
-  >([]);
-  const [allowlistPick, setAllowlistPick] = useState('');
-  const [allowlistError, setAllowlistError] = useState<string | null>(null);
-
-  const refreshAllowlist = useCallback(async () => {
-    if (!board || board.open) return;
-    try {
-      const [al, gm] = await Promise.all([
-        api.getBoardAllowlist(boardId),
-        api.listMembers(board.groupId),
-      ]);
-      setAllowlist(al);
-      setGroupMembers(gm);
-      setAllowlistError(null);
-    } catch (err) {
-      setAllowlistError(err instanceof ApiError ? err.reason : String(err));
-    }
-  }, [board, boardId]);
-  useEffect(() => {
-    void refreshAllowlist();
-  }, [refreshAllowlist]);
-
-  async function addToAllowlist(userId: string) {
-    setAllowlistError(null);
-    try {
-      await api.addToAllowlist(boardId, { userId });
-      await refreshAllowlist();
-    } catch (err) {
-      setAllowlistError(err instanceof ApiError ? err.reason : String(err));
-    }
-  }
-  async function removeFromAllowlist(userId: string) {
-    setAllowlistError(null);
-    try {
-      await api.removeFromAllowlist(boardId, userId);
-      await refreshAllowlist();
-    } catch (err) {
-      setAllowlistError(err instanceof ApiError ? err.reason : String(err));
-    }
-  }
-
-  // -- board rename and delete (docs/phases/3-groups.md section 4) ---------
-  const [boardDeleteConfirm, setBoardDeleteConfirm] =
-    useState<BoardFootprint | null>(null);
-  const [boardDeleteBusy, setBoardDeleteBusy] = useState(false);
-  const [boardDeleteError, setBoardDeleteError] = useState<string | null>(null);
-
+  // -- board rename: a refusal shows beside the name (RenameInline) ------
   async function renameBoard(name: string) {
-    try {
-      const res = await api.renameBoard(boardId, { name });
-      setBoard((prev) => (prev ? { ...prev, name: res.name } : prev));
-    } catch (err) {
-      setBoardDeleteError(err instanceof ApiError ? err.reason : String(err));
-    }
-  }
-  async function openBoardDeleteConfirm() {
-    setBoardDeleteError(null);
-    try {
-      setBoardDeleteConfirm(await api.getBoardFootprint(boardId));
-    } catch (err) {
-      setBoardDeleteError(err instanceof ApiError ? err.reason : String(err));
-    }
-  }
-  async function confirmDeleteBoard() {
-    setBoardDeleteBusy(true);
-    try {
-      await api.deleteBoard(boardId);
-      navigate(board ? `/g/${board.groupId}` : '/groups');
-    } catch (err) {
-      setBoardDeleteError(err instanceof ApiError ? err.reason : String(err));
-      setBoardDeleteBusy(false);
-    }
+    const res = await api.renameBoard(boardId, { name });
+    setBoard((prev) => (prev ? { ...prev, name: res.name } : prev));
   }
 
   // Refs, not the values themselves: `window.__digsiteBoard` is assigned
@@ -1864,13 +1740,6 @@ export function Board() {
     const ids = selectedImages.map((i) => i.id);
     if (!ids.length) return;
     await api.addSheetImages(boardId, sheetId, { imageIds: ids });
-    await refreshSheets();
-    notifySheetsChanged();
-  }
-
-  async function renameSheet(sheetId: string, name: string) {
-    await api.updateSheet(sheetId, { name });
-    await refreshSheets();
     notifySheetsChanged();
   }
 
@@ -1969,171 +1838,13 @@ export function Board() {
           }}
         />
 
-        <section className="board-panel-section">
-          <header className="board-panel-heading">
-            <h2>
-              Sheets <span className="board-panel-count">{sheets.length}</span>
-            </h2>
-            <ThreadBrowser
-              groupId={board.groupId}
-              boardId={boardId}
-              onChanged={refreshSheets}
-            />
-          </header>
-          {sheets.length === 0 ? (
-            <p className="board-empty-note">
-              Select images on the map, then start a sheet to arrange them
-              together.
-            </p>
-          ) : (
-            <ul data-testid="sheet-list" className="board-sheet-list">
-              {sheets.map((sheet) => (
-                <li
-                  key={sheet.id}
-                  data-testid="sheet-list-item"
-                  className="board-sheet-row"
-                >
-                  <div className="board-sheet-copy">
-                    <RenameInline
-                      name={sheet.name}
-                      onRename={(name) => renameSheet(sheet.id, name)}
-                      testId={`sheet-rename-${sheet.id}`}
-                    />
-                    <span className="board-sheet-meta">
-                      {plural(sheet.imageCount, 'image')} ·{' '}
-                      {sheet.savedAt ? savedLabel(sheet.savedAt) : 'Not saved'}
-                    </span>
-                  </div>
-                  <div className="board-sheet-actions">
-                    <button
-                      type="button"
-                      className="board-quiet-button"
-                      data-testid={`sheet-select-${sheet.id}`}
-                      title="Select this sheet's images on the map"
-                      onClick={() => void selectSheetImages(sheet.id)}
-                    >
-                      Select
-                    </button>
-                    <Link className="board-sheet-open" to={`/s/${sheet.id}`}>
-                      Open
-                    </Link>
-                    <button
-                      type="button"
-                      className="board-icon-button board-icon-button--danger"
-                      data-testid={`sheet-delete-${sheet.id}`}
-                      aria-label={`Delete sheet ${sheet.name}`}
-                      title="Delete sheet"
-                      onClick={() => void openSheetDeleteConfirm(sheet.id)}
-                    >
-                      <Icon name="trash" size={16} />
-                    </button>
-                  </div>
-                  {sheetDeleteConfirm?.sheetId === sheet.id && (
-                    <Confirm
-                      testId={`sheet-delete-confirm-${sheet.id}`}
-                      message={sheetDeleteMessage(
-                        sheet.name,
-                        sheetDeleteConfirm.footprint,
-                      )}
-                      busy={sheetDeleteBusy}
-                      error={sheetDeleteError}
-                      onConfirm={() => void confirmDeleteSheet()}
-                      onCancel={() => setSheetDeleteConfirm(null)}
-                    />
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="board-panel-section">
-          <header className="board-panel-heading">
-            <h2>Board</h2>
-          </header>
-          <div className="board-about">
-            <span className="board-open-status" data-open={board.open}>
-              <span aria-hidden="true" />
-              {board.open ? 'Open to the whole group' : 'Private board'}
-            </span>
-            <button
-              type="button"
-              className="board-danger-link"
-              data-testid="board-delete"
-              onClick={() => void openBoardDeleteConfirm()}
-            >
-              Delete board
-            </button>
-          </div>
-          {boardDeleteConfirm && (
-            <Confirm
-              testId="board-delete-confirm"
-              message={boardDeleteMessage(board.name, boardDeleteConfirm)}
-              busy={boardDeleteBusy}
-              error={boardDeleteError}
-              onConfirm={() => void confirmDeleteBoard()}
-              onCancel={() => setBoardDeleteConfirm(null)}
-            />
-          )}
-
-          {!board.open && (
-            <div className="board-allowlist" data-testid="allowlist-card">
-              <h3>Allowlist</h3>
-              {allowlistError && <div className="error">{allowlistError}</div>}
-              <ul data-testid="allowlist-table">
-                {(allowlist?.members ?? []).map((m) => (
-                  <li key={m.userId} className="board-allowlist-row">
-                    <span className="board-allowlist-name">{m.name}</span>
-                    <span className="board-allowlist-role">{m.role}</span>
-                    <button
-                      type="button"
-                      className="board-quiet-button"
-                      data-testid={`allowlist-remove-${m.userId}`}
-                      aria-label={`Remove ${m.name} from the allowlist`}
-                      onClick={() => void removeFromAllowlist(m.userId)}
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <div className="board-allowlist-add">
-                <select
-                  data-testid="allowlist-add-select"
-                  aria-label="Member to add"
-                  value={allowlistPick}
-                  onChange={(e) => setAllowlistPick(e.target.value)}
-                >
-                  <option value="">Choose a member…</option>
-                  {groupMembers
-                    .filter(
-                      (m) =>
-                        !(allowlist?.members ?? []).some(
-                          (x) => x.userId === m.userId,
-                        ),
-                    )
-                    .map((m) => (
-                      <option key={m.userId} value={m.userId}>
-                        {m.email}
-                      </option>
-                    ))}
-                </select>
-                <button
-                  type="button"
-                  data-testid="allowlist-add"
-                  disabled={!allowlistPick}
-                  onClick={() => {
-                    const userId = allowlistPick;
-                    setAllowlistPick('');
-                    if (userId) void addToAllowlist(userId);
-                  }}
-                >
-                  Add
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
+        <BoardSheets
+          boardId={boardId}
+          groupId={board.groupId}
+          sheets={sheets}
+          onSelect={(sheetId) => void selectSheetImages(sheetId)}
+        />
+        <BoardAdministration board={board} />
       </div>
     ),
   );

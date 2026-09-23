@@ -229,6 +229,12 @@ td {
   box-shadow: none;
   min-height: 0;
 }
+.rename-inline-error {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--danger);
+}
 .rename-inline:hover,
 .rename-inline:focus-visible {
   background: none;

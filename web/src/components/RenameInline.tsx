@@ -11,7 +11,11 @@
 // (native button behaviour) — Escape-to-cancel was already wired on the
 // input below. #12's "keyboard reachable" is this: nothing to add beyond
 // making the affordance visible.
+//
+// A rename the server refuses says so beside the name, which stays as it
+// was; before, the refusal went nowhere and the name silently came back.
 import { useEffect, useRef, useState } from 'react';
+import { ApiError } from '../lib/api.ts';
 
 interface Props {
   name: string;
@@ -23,19 +27,32 @@ interface Props {
 export function RenameInline({ name, onRename, testId, style }: Props) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(name);
+  const [failed, setFailed] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
   }, [editing]);
 
-  function commit() {
+  async function commit() {
     setEditing(false);
-    if (value.trim() && value !== name) void onRename(value);
+    if (!value.trim() || value === name) return;
+    setFailed(null);
+    try {
+      await onRename(value);
+    } catch (err) {
+      setFailed(
+        err instanceof ApiError
+          ? err.reason
+          : err instanceof Error
+            ? err.message
+            : 'unknown error',
+      );
+    }
   }
 
   if (!editing) {
-    return (
+    const button = (
       <button
         type="button"
         className="rename-inline"
@@ -51,6 +68,16 @@ export function RenameInline({ name, onRename, testId, style }: Props) {
         {name}
       </button>
     );
+    return failed ? (
+      <>
+        {button}
+        <span className="rename-inline-error" role="alert">
+          Could not rename: {failed}
+        </span>
+      </>
+    ) : (
+      button
+    );
   }
 
   return (
@@ -59,9 +86,9 @@ export function RenameInline({ name, onRename, testId, style }: Props) {
       data-testid={testId ? `${testId}-input` : 'rename-inline-input'}
       value={value}
       onChange={(e) => setValue(e.target.value)}
-      onBlur={commit}
+      onBlur={() => void commit()}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') commit();
+        if (e.key === 'Enter') void commit();
         if (e.key === 'Escape') setEditing(false);
       }}
       style={style}
