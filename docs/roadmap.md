@@ -125,3 +125,30 @@ a fix; the rest are unproven.
 | C9 | **Anyone could sign a claim with another name.** Stamps were the client's word. | — | FIXED `759b740`: the server signs stamps; unsigned ones become the sender's |
 | C10 | **Every upload refused on a large volume.** Bun's `statfs` returns block counts as signed 32-bit; 24 TB read as -2,661 GB free. Found by the other session. | — | FIXED `fed0b5d`: read as bigints |
 | C11 | **The paint path seemed to grow, slowly.** 0.09 MB a painted image, linear to 1,500 images in `repro-paint-ladder-import.ts`. | the same run with `LADDER_BUDGET_MB=0` | SETTLED, not a leak: with the page cache off it levels off near 250 MB to 3,000 images; the slope was resident pages filling their budget (`canvas-c7.md`) |
+
+## Server — deepened and filled out (2026-09-23)
+
+After the architecture review: six modules deepened, then the rest of
+the server list. Each has a commit, a test that fails without it, and
+measurements where speed or memory was the question.
+
+| # | what | commit | status |
+| --- | --- | --- | --- |
+| A1 | Board change: one module publishes repainted pages, then marks the orders stale; a seam lint forbids either anywhere else | `beeb226` | DONE |
+| A2 | Image intake: multipart, tus and folder import share examine/store; browser HEIC/RAW; the type is read from the bytes | `b5f431d` | DONE |
+| A3 | Build: every rank answer takes one required `Build`; the eighteen `given?` parameters are gone | `535fed6` | DONE |
+| A4 | Job scheduling: kinds declare how they coalesce; `settle` or `soon`; lint forbids raw `INSERT INTO jobs` | `7a52ea3` | DONE |
+| A5 | Embedding store: one reader; float32 under ARRANGE_BUDGET_MB, else int8; unit vectors always | `a98cf9a`, `7f76aab` | DONE: 1M arranged at 0.98 GB (was 2.5) |
+| A6 | Meaning routes share one preamble | `b9ceb13` | DONE |
+| F1 | Storage quotas per group: reserve before write, 413 with the numbers, a folder import stops and resumes | `3944c00`, `65d692e` | DONE |
+| F2 | Camera sources kept; `GET /images/:id/source`; the original's true content type | `18f040e` | DONE |
+| F3 | Folder re-sync: an unchanged file is passed over unread | `56fb176` | DONE: 434 files, 33.5 s, then 0.6 s |
+| F4 | Incremental arrangement; the meaning sort's sections, named by the board's labels | `2c497e2` | DONE: 141 ms a new picture at 1M |
+| F5 | Board-wide duplicate sweep along the arrangement | `40c2974` | DONE: 56 of 56 pairs; 21.3 s at 1M |
+| F6 | Restore drill on S3, with the server started on the copy; the S3 backup path fixed | `d9adc9d` | DONE |
+| F7 | Canvas 1.0.9 measured, not taken: 1.6x memory a resident page | `70f0ce1`, `df2cde9` | DECIDED; C11 settled, not a leak |
+| F8 | Participants, find in a window, copy and download, presence on a board | `3c1532c`, `8c36ee6`, `70aa27b`, `23e6407` | DONE; web by digsite-7c |
+| F9 | Label suggestions for a drawn region; the web of one relation | `2379f6f`, `f330940` | DONE on the server |
+
+Open and waiting on the owner: a read-only view for people outside the
+group, and whether CI runs with embeddings.
