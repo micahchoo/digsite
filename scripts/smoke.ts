@@ -48,6 +48,8 @@ const SCRIPTS = [
   // CONTEXT.md "Making sense": vocabulary, one-gesture connect, evidence,
   // agreement, reach, the keyboard loop and the board's Terms index.
   'scripts/smoke-sense.ts',
+  // Horizon 6: every "making sense" surface in dark mode and at phone width.
+  'scripts/smoke-surfaces.ts',
 ];
 
 function log(msg: string): void {

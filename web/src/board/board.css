@@ -19,6 +19,10 @@
   min-width: 0;
   background: var(--surface-canvas);
   isolation: isolate;
+  /* clip, not hidden: a hidden overflow can still be scrolled, and
+     focusing a field in a floating panel scrolled the whole map sideways
+     on a phone (found 2026-09-23 by smoke-surfaces). */
+  overflow: clip;
 }
 .board-canvas-wrap > canvas {
   background-color: transparent;
@@ -316,6 +320,8 @@
   z-index: 5;
   top: var(--board-chrome-top);
   left: var(--board-edge);
+  /* The width below is the whole panel, padding included. */
+  box-sizing: border-box;
   width: min(740px, calc(100% - 2 * var(--board-edge)));
   padding: var(--space-3);
   border-radius: var(--radius-l);
@@ -327,9 +333,11 @@
 }
 .board-find input,
 .board-find select {
+  /* A field at width: 100% must include its own padding and border. */
+  box-sizing: border-box;
   min-width: 100px;
 }
-.board-find input:first-child {
+.board-find [data-testid="board-find-query"] {
   flex: 1 1 220px;
   width: auto;
 }
@@ -1593,11 +1601,25 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
   }
-  .board-find input:first-child {
+  /* The Words / Meaning switch and the query each take a whole row; the
+     filters share the rows below. */
+  .board-find > .row > .segmented,
+  .board-find [data-testid="board-find-query"] {
     grid-column: 1 / -1;
     min-width: 0;
   }
-  .board-find input,
+  .board-find > .row > .segmented > label {
+    flex: 1;
+  }
+  /* A grid item will not shrink below its content unless told: the strip
+     of twelve pictures made Find 700 px wide on a 390 px phone. */
+  .board-find > .row > * {
+    min-width: 0;
+  }
+  .board-find-strip {
+    grid-column: 1 / -1;
+  }
+  .board-find input:not([type="radio"]),
   .board-find select {
     width: 100%;
     min-width: 0;
