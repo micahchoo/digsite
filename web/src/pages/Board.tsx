@@ -97,6 +97,12 @@ import { useSelection } from '../board/useSelection.ts';
 import { Compare, type CompareEnd } from '../components/Compare.tsx';
 import { WHOLE } from '../components/compare-view.ts';
 import { modalOpen } from '../lib/modal.ts';
+import {
+  noteOrderVersion,
+  orderVersionOf,
+  subscribeOrderVersion,
+  waitForOrderVersion,
+} from '../lib/order-version.ts';
 import '../board/board.css';
 import { Confirm } from '../components/Confirm.tsx';
 import {
@@ -306,6 +312,10 @@ export function Board() {
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
   const [folderImport, setFolderImport] = useState(false);
+  /** Bumped when the order build moves on (order-version.ts): everything
+   * this page holds in ranks is refetched, and tiles take the new `v`. */
+  const [orderMoved, setOrderMoved] = useState(0);
+  const heldTokenRef = useRef<string | undefined>(undefined);
   const [comparing, setComparing] = useState<[CompareEnd, CompareEnd] | null>(
     null,
   );
@@ -701,11 +711,15 @@ export function Board() {
   const rangeSelect = useCallback(
     async (a: number, b: number, mode?: 'band') => {
       try {
+        const v = orderVersionOf(boardIdRef.current, currentSortIdRef.current);
         const { imageIds } = await api.postSelectionRange(boardIdRef.current, {
           sort: currentSortIdRef.current,
           fromRank: a,
           toRank: b,
           ...(mode ? { mode } : {}),
+          // The ranks were read under this build; if the order moved on,
+          // the server selects nothing rather than other pictures.
+          ...(v ? { v } : {}),
         });
         selection.add(imageIds);
         const span =
@@ -718,8 +732,12 @@ export function Board() {
             ? `Selection capped at ${plural(imageIds.length, 'image')}`
             : '',
         );
-      } catch {
-        // range endpoint unreachable this tick; nothing selected
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409)
+          setSelectionNote(
+            'The map changed while you selected, so nothing was selected. Select again on the new map.',
+          );
+        // otherwise the range endpoint was unreachable; nothing selected
       }
     },
     [selection],
@@ -972,7 +990,29 @@ export function Board() {
     };
   }, [resolveImageAtRank, rangeSelect, selection]);
 
+  // -- the order build the map shows ----------------------------------------
+  // The first token of a visit is not a move; any later new one is: the
+  // ranks this page holds (find, sections, selection, explore, marks, the
+  // rank-to-image cache) were read under an older build.
+  useEffect(() => {
+    heldTokenRef.current = orderVersionOf(boardId, currentSortId);
+    return subscribeOrderVersion(() => {
+      const token = orderVersionOf(
+        boardIdRef.current,
+        currentSortIdRef.current,
+      );
+      if (!token) return;
+      const held = heldTokenRef.current;
+      heldTokenRef.current = token;
+      if (!held || held === token) return;
+      for (const cache of imageCacheRef.current.values()) cache.clear();
+      setTileVersion((n) => n + 1);
+      setOrderMoved((n) => n + 1);
+    });
+  }, [boardId, currentSortId]);
+
   // -- sections: refetch on sort change -----------------------------------
+  // biome-ignore lint/correctness/useExhaustiveDependencies: orderMoved is a trigger: a new order build makes the ranks held here stale
   useEffect(() => {
     let cancelled = false;
     setSections([]);
@@ -992,7 +1032,7 @@ export function Board() {
     return () => {
       cancelled = true;
     };
-  }, [board, boardId, currentSortId]);
+  }, [board, boardId, currentSortId, orderMoved]);
 
   // Search and typed property filters use the current rank table. Debounce
   // keystrokes and discard any response for criteria that are now stale.
@@ -1065,6 +1105,7 @@ export function Board() {
     findLike,
     meaningLimit,
     vocab.vocabulary.aliases,
+    orderMoved,
   ]);
   // A new question starts from the first page of answers.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the question is the trigger
@@ -1073,6 +1114,7 @@ export function Board() {
   }, [findQuery, findLike, findMode]);
 
   // Where the neighbourhood's images sit on the map under this sort.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: orderMoved is a trigger: a new order build makes the ranks held here stale
   useEffect(() => {
     if (!exploreGraph) {
       setExploreRanks(new Map());
@@ -1098,7 +1140,7 @@ export function Board() {
     return () => {
       cancelled = true;
     };
-  }, [boardId, currentSortId, exploreGraph]);
+  }, [boardId, currentSortId, exploreGraph, orderMoved]);
 
   // Which images carry any claim. Refetched when the vocabulary changes,
   // which is when some sheet's claims did.
@@ -1116,7 +1158,7 @@ export function Board() {
     return () => {
       cancelled = true;
     };
-  }, [boardId, currentSortId, vocab.vocabulary]);
+  }, [boardId, currentSortId, vocab.vocabulary, orderMoved]);
 
   // -- hover tooltip goes stale across a sort change (the rank means a
   // different image) --------------------------------------------------------
@@ -1130,20 +1172,28 @@ export function Board() {
       index: { x: number; y: number; z: number },
       signal?: AbortSignal,
     ) => {
+      // The build the map shows; the first tiles of a visit wait a moment
+      // for it, so they can be asked for as cacheable (order-version.ts).
+      const v = await waitForOrderVersion(boardId, currentSortId, 1500);
       const url = api.tileUrl(
         boardId,
         currentSortId,
         index.z,
         index.x,
         index.y,
+        v,
       );
       statusRef.current.tilesRequested++;
       forceRender((n) => n + 1);
       const res = await fetch(url, {
         credentials: 'include',
         signal,
-        cache: 'reload',
+        // With `v` the browser's cache is right by construction; without
+        // it, a tile must be read fresh.
+        cache: v ? 'default' : 'reload',
       });
+      const token = res.headers.get('X-Order-Version');
+      if (token) noteOrderVersion(boardId, currentSortId, token);
       if (!res.ok) throw new Error(`tile fetch failed: ${res.status}`);
       const xCache = res.headers.get('X-Cache');
       statusRef.current.cacheTotal++;
@@ -1174,6 +1224,7 @@ export function Board() {
   // -- resolve the selection's ids to images (with rank under the CURRENT
   // sort) whenever the ids or the sort change — the tray, the map outline,
   // fly-to and window.__digsiteBoard.getSelection() all read this. --------
+  // biome-ignore lint/correctness/useExhaustiveDependencies: orderMoved is a trigger: a new order build makes the ranks held here stale
   useEffect(() => {
     let cancelled = false;
     if (!selection.imageIds.length) {
@@ -1192,7 +1243,7 @@ export function Board() {
     return () => {
       cancelled = true;
     };
-  }, [selection.imageIds, boardId, currentSortId]);
+  }, [selection.imageIds, boardId, currentSortId, orderMoved]);
 
   // -- detail: past the tiles, each visible cell draws its own preview ------
   const [detailVersion, setDetailVersion] = useState(0);

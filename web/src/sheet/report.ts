@@ -67,7 +67,7 @@ const safeUrl = (url: string) =>
 const when = (iso: string) => {
   const t = Date.parse(iso);
   return Number.isFinite(t)
-    ? new Date(t).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
+    ? `${new Date(t).toISOString().replace('T', ' ').slice(0, 16)} UTC`
     : '';
 };
 

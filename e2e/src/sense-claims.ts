@@ -140,11 +140,17 @@ function sheetPage(page: Page, imageBySlot: Map<number, string>) {
     await page.keyboard.press(key);
     await page.waitForTimeout(150);
   }
-  /** Clicks an image to select it, then drags its connect handle onto another. */
+  /** Selects an image, then drags its connect handle onto another. */
   async function connect(fromSlot: number, toSlot: number) {
     await tool('select');
-    const a = await centre(fromSlot);
-    await page.mouse.click(a.x, a.y);
+    // Selected by id, not by a click: after the other suites, another
+    // sheet's region can sit on the picture's centre, and the overlay
+    // rightly takes that click (foreign-never-in-scene.md).
+    const from = await imageEl(fromSlot);
+    await page.evaluate(
+      (id) => (window as unknown as SheetWindow).__digsite.select(id),
+      from.id,
+    );
     const handle = page.getByTestId('connect-handle');
     await handle.waitFor({ timeout: 5000 });
     await seen(page, 'connect-handle');
@@ -1260,6 +1266,80 @@ async function main(): Promise<void> {
     } else {
       console.log('SKIP: 8. folder import (IMPORT_ROOTS is not set)');
     }
+
+    // -- 15. A repeat visit asks the server for no tile ------------------------
+    // Tiles carry the order build as ?v=, so a final tile is kept for a year;
+    // a new build (here a property edit) moves the token and the map asks
+    // again. Counted in the browser's own network log: from the server, not
+    // the cache.
+    // A new context: its cache is empty, so the first visit is a real one.
+    const fresh = await (await asUser(browser, member)).newPage();
+    const cdp = await fresh.context().newCDPSession(fresh);
+    await cdp.send('Network.enable');
+    let tilesFromServer = 0;
+
+    cdp.on('Network.responseReceived', (e) => {
+      const r = e.response as {
+        url: string;
+        fromDiskCache?: boolean;
+        fromMemoryCache?: boolean;
+      };
+      if (r.url.includes('/tiles/') && !r.fromDiskCache && !r.fromMemoryCache)
+        tilesFromServer++;
+    });
+    // Long enough for the map to load and ask, then until the count holds
+    // still for 1.5 s: a zero that holds for a moment proves nothing.
+    const tilesSettle = async () => {
+      await fresh.waitForTimeout(4000);
+      let last = -1;
+      for (let i = 0; i < 20 && last !== tilesFromServer; i++) {
+        last = tilesFromServer;
+        await fresh.waitForTimeout(1500);
+      }
+    };
+    await fresh.goto(`${WEB}/b/${field.id}`);
+    await tilesSettle();
+    const firstVisit = tilesFromServer;
+
+    tilesFromServer = 0;
+    await fresh.reload();
+    await fresh.waitForFunction(
+      () => (window as unknown as SheetWindow).__digsiteBoard !== undefined,
+    );
+    await tilesSettle();
+    assert(
+      firstVisit > 0 && tilesFromServer === 0,
+      `a repeat visit asked the server for ${tilesFromServer} tiles (first visit ${firstVisit})`,
+    );
+    // A property edit makes a new build; the next answer in ranks names it,
+    // and the map asks for its tiles again under the new token.
+    const edited = await member.patch(`/images/${M.id(3)}`, {
+      properties: { checked: 'yes' },
+    });
+    assert(
+      edited.status === 200,
+      `the property edit answered ${edited.status}`,
+    );
+    await fresh.getByTestId('board-find-toggle').click();
+    await fresh.getByTestId('board-find-query').fill('image-3');
+    await fresh.waitForFunction(
+      () =>
+        /^\d+ match/.test(
+          document.querySelector('[data-testid="board-find-count"]')
+            ?.textContent ?? '',
+        ),
+      undefined,
+      { timeout: 10_000 },
+    );
+    await tilesSettle();
+    assert(
+      tilesFromServer > 0,
+      'after a new order build the map should ask for its tiles again',
+    );
+    await fresh.close();
+    pass(
+      '15. a repeat visit asks the server for no tile; a new order build brings them back once',
+    );
 
     assert(errors.length === 0, `page errors: ${errors.join(' | ')}`);
     console.log('sense-claims: all claims passed');

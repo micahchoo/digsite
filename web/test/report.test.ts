@@ -27,7 +27,9 @@ describe('buildReport', () => {
             { name: 'b.png', label: 'roof', crop: null },
           ],
           properties: { source: 'archive 12' },
-          replies: [{ name: 'Ben', at: '2026-09-22T10:00:00.000Z', text: 'Agreed.' }],
+          replies: [
+            { name: 'Ben', at: '2026-09-22T10:00:00.000Z', text: 'Agreed.' },
+          ],
           link: 'https://digsite.example/s/1?claim=e1',
         },
       ],

@@ -284,6 +284,9 @@ export type SelectionRangeRequest = {
   toRank: number;
   /** Interpret the endpoints as opposite corners of a grid rectangle. */
   mode?: 'band';
+  /** The order build the ranks were read under (X-Order-Version). When
+   * the order has moved on, the server answers 409 and selects nothing. */
+  v?: string;
 };
 export type SelectionRangeResponse = { imageIds: string[] };
 

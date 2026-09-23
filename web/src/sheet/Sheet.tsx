@@ -231,6 +231,7 @@ export function Sheet() {
   // per sheet, on its first scene, so a later edit never moves the view.
   const fittedRef = useRef<string | null>(null);
   const hasScene = sceneElements.length > 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per sheet, when its first scene lands; the claim link is read at that moment, and rerender is stable
   useEffect(() => {
     if (!hasScene || fittedRef.current === sheetId) return;
     fittedRef.current = sheetId;

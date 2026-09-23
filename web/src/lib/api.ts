@@ -63,6 +63,7 @@ import type {
   UploadImagesResponse,
 } from '@digsite/shared/api';
 import { GRID_LAYOUT_VERSION } from '@digsite/shared/board/grid';
+import { boardAndSortOf, noteOrderVersion } from './order-version.ts';
 
 export const SERVER_ORIGIN: string =
   (import.meta.env.VITE_SERVER_ORIGIN as string | undefined) ??
@@ -209,6 +210,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers: { ...headers, ...(init.headers as Record<string, string>) },
   });
+  // Every answer in ranks names the build it came from, a refusal too
+  // (a 409 from a range selection carries the new one).
+  const token = res.headers.get('X-Order-Version');
+  if (token) {
+    const about = boardAndSortOf(path, init.body);
+    if (about) noteOrderVersion(about.boardId, about.sort, token);
+  }
 
   if (!res.ok) {
     let reason = res.statusText;
@@ -468,8 +476,17 @@ export const api = {
     request<UpdateImagePropertiesResponse>(`/images/${imageId}`, patch(body)),
   deleteImage: (imageId: string) =>
     request<void>(`/images/${imageId}`, { method: 'DELETE' }),
-  tileUrl: (boardId: string, sortId: string, z: number, x: number, y: number) =>
-    `${SERVER_ORIGIN}/boards/${boardId}/tiles/${sortId}/${z}/${x}/${y}.png?grid=${GRID_LAYOUT_VERSION}`,
+  /** With `v`, the order build the tile must be drawn from: a matching
+   * final tile may then be cached for a year (order-version.ts). */
+  tileUrl: (
+    boardId: string,
+    sortId: string,
+    z: number,
+    x: number,
+    y: number,
+    v?: string,
+  ) =>
+    `${SERVER_ORIGIN}/boards/${boardId}/tiles/${sortId}/${z}/${x}/${y}.png?grid=${GRID_LAYOUT_VERSION}${v ? `&v=${encodeURIComponent(v)}` : ''}`,
   // Slice 2 (docs/ux/design.md §7 "Slice 2 — Board + selection"): the
   // selection is a durable object, ids not ranks, per (board, viewer).
   getBoardSelection: (boardId: string) =>
