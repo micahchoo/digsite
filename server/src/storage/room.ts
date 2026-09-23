@@ -21,11 +21,19 @@ export class StorageFull extends Error {
 const MAX_AGE_MS = 1_000;
 let reading: { at: number; free: number } | null = null;
 
+/** Free bytes from statfs's block counts. They must arrive as bigints:
+ * Bun returns the plain-number form as a SIGNED 32-bit value, so a 24 TB
+ * volume's 3.6 billion free blocks read as -649,758,170, "-2,661 GB free",
+ * and every upload was refused (found 2026-09-23 on /mnt/Ghar). */
+export function freeFrom(stats: { bavail: bigint; bsize: bigint }): number {
+  return Number(stats.bavail * stats.bsize);
+}
+
 async function freeBytes(): Promise<number> {
   const now = Date.now();
   if (!reading || now - reading.at > MAX_AGE_MS) {
-    const stats = await statfs(env.DATA_DIR);
-    reading = { at: now, free: stats.bavail * stats.bsize };
+    const stats = await statfs(env.DATA_DIR, { bigint: true });
+    reading = { at: now, free: freeFrom(stats) };
   }
   return reading.free;
 }

@@ -5,7 +5,7 @@ import sharp from 'sharp';
 import { uploadOne } from '../boards/upload.ts';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
-import { StorageFull, resetRoomForTest } from '../storage/room.ts';
+import { StorageFull, freeFrom, resetRoomForTest } from '../storage/room.ts';
 
 const before = env.UPLOAD_MIN_FREE_GB;
 afterEach(() => {
@@ -47,6 +47,21 @@ describe('room on the data volume', () => {
     env.UPLOAD_MIN_FREE_GB = 0;
     resetRoomForTest();
     const uploaded = await uploadOne(boardId, 'tester', 'a.png', await png());
+    expect(uploaded.status).toBe('pending');
+  });
+
+  test('a volume with more than 2^31 free blocks reads as free, not negative', () => {
+    // The 24 TB volume this was found on: 3,645,209,126 blocks of 4 KiB.
+    expect(freeFrom({ bavail: 3_645_209_126n, bsize: 4096n })).toBe(
+      3_645_209_126 * 4096,
+    );
+  });
+
+  test('the real data volume reads as positive', async () => {
+    env.UPLOAD_MIN_FREE_GB = 1;
+    resetRoomForTest();
+    const boardId = await board();
+    const uploaded = await uploadOne(boardId, 'tester', 'b.png', await png());
     expect(uploaded.status).toBe('pending');
   });
 });
