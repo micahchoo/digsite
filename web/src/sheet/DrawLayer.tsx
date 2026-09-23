@@ -26,10 +26,12 @@
 // the next press, which completes it (-> 'edge-target') through
 // `tools.connect`. Escape cancels the pending source.
 import { useEffect, useRef, useState } from 'react';
+import type { WheelInput } from './canvas/types.ts';
 import {
   type Point,
   type Target,
   type Tool,
+  movedEnough,
   pointerIntent,
   rectFromDrag,
 } from './gestures.ts';
@@ -54,14 +56,37 @@ interface Props {
   offset: ContainerOffset;
   onPendingEdgeChange: (pending: boolean) => void;
   onDrawn: () => void;
+  onPan: (dx: number, dy: number) => void;
+  onWheel: (input: WheelInput, point: Point) => void;
 }
 
 type Drag = { start: Point; imageId: string } | null;
 type EdgePending = { elId: string; anchor: Point } | null;
+type FallbackPointer = {
+  start: Point;
+  last: Point;
+  hitId: string | null;
+  forcePan: boolean;
+  panning: boolean;
+};
 
-function clientPoint(e: React.PointerEvent): Point {
+function clientPoint(e: {
+  currentTarget: Element;
+  clientX: number;
+  clientY: number;
+}): Point {
   const target = e.currentTarget.getBoundingClientRect();
   return { x: e.clientX - target.left, y: e.clientY - target.top };
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  return Boolean(
+    element &&
+      (element.tagName === 'INPUT' ||
+        element.tagName === 'TEXTAREA' ||
+        element.isContentEditable),
+  );
 }
 
 export function DrawLayer({
@@ -72,6 +97,8 @@ export function DrawLayer({
   offset,
   onPendingEdgeChange,
   onDrawn,
+  onPan,
+  onWheel,
 }: Props) {
   const [drag, setDrag] = useState<Drag>(null);
   const [dragNow, setDragNow] = useState<Point | null>(null);
@@ -83,6 +110,8 @@ export function DrawLayer({
   } | null>(null);
   const [labelValue, setLabelValue] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const fallbackRef = useRef<FallbackPointer | null>(null);
+  const spaceHeldRef = useRef(false);
 
   useEffect(
     () => onPendingEdgeChange(!!edgePending),
@@ -102,13 +131,28 @@ export function DrawLayer({
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (e.code === 'Space' && !isTypingTarget(e.target))
+        spaceHeldRef.current = true;
       if (e.key !== 'Escape') return;
       setEdgePending(null);
       setDrag(null);
       setDragNow(null);
     }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === 'Space') spaceHeldRef.current = false;
+    }
+    function onBlur() {
+      spaceHeldRef.current = false;
+      fallbackRef.current = null;
+    }
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
   }, []);
 
   if (tool !== 'region' && tool !== 'edge') return null;
@@ -118,6 +162,7 @@ export function DrawLayer({
   }
 
   function handlePointerDown(e: React.PointerEvent) {
+    if (isTypingTarget(e.target)) return;
     const p = toScene(e);
     const hit = hitAt(p, elements);
     const target: Target = hit ? hit.kind : 'empty';
@@ -125,9 +170,22 @@ export function DrawLayer({
       tool,
       target,
       pendingSource: !!edgePending,
+      forcePan: e.button === 1 || spaceHeldRef.current,
     });
 
-    if (intent === 'native') return; // pointerIntent already decided this press isn't ours
+    if (intent === 'native' || intent === 'pan') {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      const screen = clientPoint(e);
+      fallbackRef.current = {
+        start: screen,
+        last: screen,
+        hitId: hit?.id ?? null,
+        forcePan: intent === 'pan',
+        panning: false,
+      };
+      return;
+    }
 
     if (intent === 'draw-region') {
       if (!hit) return; // narrows for TS; pointerIntent guarantees target === 'image' here
@@ -158,12 +216,30 @@ export function DrawLayer({
   }
 
   function handlePointerMove(e: React.PointerEvent) {
-    if (drag) setDragNow(toScene(e));
+    const fallback = fallbackRef.current;
+    if (fallback) {
+      const screen = clientPoint(e);
+      if (!fallback.panning && movedEnough(fallback.start, screen))
+        fallback.panning = true;
+      if (fallback.panning) {
+        onPan(screen.x - fallback.last.x, screen.y - fallback.last.y);
+        fallback.last = screen;
+      }
+    } else if (drag) setDragNow(toScene(e));
     else if (edgePending) setPointerNow(toScene(e));
   }
 
   function handlePointerUp(e: React.PointerEvent) {
+    const fallback = fallbackRef.current;
+    if (fallback) {
+      fallbackRef.current = null;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      if (!fallback.panning && !fallback.forcePan)
+        tools.select(fallback.hitId ?? '');
+      return;
+    }
     if (!drag) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
     const end = toScene(e);
     setDrag(null);
     setDragNow(null);
@@ -186,6 +262,21 @@ export function DrawLayer({
     );
     setLabelValue('');
     setLabelFor({ id, screenRect });
+  }
+
+  function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
+    e.preventDefault();
+    onWheel(
+      {
+        deltaX: e.deltaX,
+        deltaY: e.deltaY,
+        deltaMode: e.deltaMode,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        shiftKey: e.shiftKey,
+      },
+      clientPoint(e),
+    );
   }
 
   function commitLabel() {
@@ -225,6 +316,7 @@ export function DrawLayer({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onWheel={handleWheel}
     >
       <svg aria-hidden="true" className="sheet-draw-svg">
         {previewScreen && (

@@ -146,6 +146,34 @@ export function groupMembers(
   return members;
 }
 
+/**
+ * Dragging a selected image or region carries every selected image group.
+ * Starting on an unselected object starts a one-group drag, matching the
+ * usual canvas rule that the object under the pointer becomes the operation.
+ */
+export function selectedGroupMembers(
+  elements: readonly SceneElement[],
+  hitId: string,
+  selectedIds: readonly string[],
+): Set<string> {
+  const selected = new Set(selectedIds);
+  const targets = selected.has(hitId) ? selectedIds : [hitId];
+  const byId = new Map(elements.map((el) => [el.id, el] as const));
+  const groups = new Set<string>();
+  for (const id of targets) {
+    const el = byId.get(id);
+    if (!el || el.isDeleted) continue;
+    const data = dataOf(el);
+    if (data?.kind === 'image' || data?.kind === 'region')
+      groups.add(data.imageId);
+  }
+  const members = new Set<string>();
+  for (const imageId of groups) {
+    for (const id of groupMembers(elements, imageId)) members.add(id);
+  }
+  return members;
+}
+
 /** Shift every member of `ids` by a scene-space delta. Pure. */
 export function shiftElements(
   elements: readonly SceneElement[],

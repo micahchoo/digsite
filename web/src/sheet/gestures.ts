@@ -18,6 +18,7 @@ export type Tool = 'select' | 'region' | 'edge' | 'pan';
 export type Target = 'image' | 'region' | 'edge' | 'empty';
 
 export type Intent =
+  | 'pan' // Space or middle drag: move the camera through any tool
   | 'native' // let the canvas interaction path handle it
   | 'draw-region' // region tool, pressed on an image: drag draws a region
   | 'edge-source' // edge tool, no pending source yet: this press sets it
@@ -26,6 +27,8 @@ export type Intent =
 export interface PointerInput {
   tool: Tool;
   target: Target;
+  /** Space or the middle button takes precedence over authoring tools. */
+  forcePan?: boolean;
   /** True once the edge tool has a source picked and is waiting for a target. */
   pendingSource: boolean;
 }
@@ -34,7 +37,9 @@ export function pointerIntent({
   tool,
   target,
   pendingSource,
+  forcePan = false,
 }: PointerInput): Intent {
+  if (forcePan) return 'pan';
   if (tool === 'select' || tool === 'pan') return 'native';
 
   if (tool === 'region') {
@@ -51,6 +56,13 @@ export function pointerIntent({
 export interface Point {
   x: number;
   y: number;
+}
+
+/** Screen slack before an unclaimed press becomes a pan. */
+export const POINTER_DRAG_THRESHOLD = 6;
+
+export function movedEnough(from: Point, to: Point): boolean {
+  return Math.hypot(to.x - from.x, to.y - from.y) >= POINTER_DRAG_THRESHOLD;
 }
 
 export interface Rect {

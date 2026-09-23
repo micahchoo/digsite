@@ -207,6 +207,22 @@ export function Sheet() {
     },
     [viewport, room.sendPointer],
   );
+  const panCanvas = useCallback((dx: number, dy: number) => {
+    const handle = canvasRef.current;
+    if (!handle) return;
+    const current = handle.viewport();
+    handle.setViewport({
+      scrollX: current.scrollX + dx / current.zoom,
+      scrollY: current.scrollY + dy / current.zoom,
+    });
+  }, []);
+  const wheelCanvas = useCallback(
+    (
+      input: Parameters<CanvasHandle['wheel']>[0],
+      point: { x: number; y: number },
+    ) => canvasRef.current?.wheel(input, point),
+    [],
+  );
 
   const peerCursorList = useMemo(
     () => peerCursors(room.peerPointers, sceneElements),
@@ -279,6 +295,8 @@ export function Sheet() {
           offset={{ left: 0, top: 0 }}
           onPendingEdgeChange={setPendingEdge}
           onDrawn={rerender}
+          onPan={panCanvas}
+          onWheel={wheelCanvas}
         />
         <Overlay
           rows={foreign.rows}

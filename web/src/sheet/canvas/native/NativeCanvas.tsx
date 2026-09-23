@@ -22,6 +22,7 @@ import type {
   SceneChange,
   SceneElement,
   Viewport,
+  WheelInput,
 } from '../types.ts';
 import {
   fitBox,
@@ -38,6 +39,8 @@ import {
   dragBecomes,
   movedEnough,
   pressIntent,
+  selectionAfterClick,
+  selectionAfterMarquee,
 } from './gestures.ts';
 import { History, applyStep } from './history.ts';
 import { ImageCache } from './images.ts';
@@ -47,12 +50,12 @@ import {
   type HandleId,
   type Hit,
   buildIndex,
-  groupMembers,
   hitAt,
   hitGrip,
   marqueeSelect,
   resizeRegion,
   retargetEdges,
+  selectedGroupMembers,
 } from './scene.ts';
 import type { SpatialIndex } from './spatial.ts';
 
@@ -74,12 +77,19 @@ type Drag =
       handle: HandleId;
       originRect: Rect;
     }
-  | { kind: 'marquee'; startWorld: Point; nowWorld: Point };
+  | {
+      kind: 'marquee';
+      startWorld: Point;
+      nowWorld: Point;
+      additive: boolean;
+      selectedAtStart: string[];
+    };
 
 interface Pending {
   screenStart: Point;
   worldStart: Point;
   forcePan: boolean;
+  additive: boolean;
   grip: HandleId | null;
   hit: Hit | null;
   target: Target;
@@ -278,7 +288,8 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           screenStart: screenPt,
           worldStart: worldPt,
           forcePan,
-          grip: intent === 'handle' ? grip : null,
+          additive: e.shiftKey,
+          grip: intent === 'handle' && !e.shiftKey ? grip : null,
           hit,
           target,
         };
@@ -288,6 +299,15 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
 
     const beginDrag = useCallback(
       (pending: Pending, mode: Mode): Drag => {
+        if (pending.additive && !pending.forcePan) {
+          return {
+            kind: 'marquee',
+            startWorld: pending.worldStart,
+            nowWorld: pending.worldStart,
+            additive: true,
+            selectedAtStart: [...selectedIdsRef.current],
+          };
+        }
         if (pending.grip && selectedIdsRef.current.size === 1) {
           const [regionId] = selectedIdsRef.current;
           const rect = selectedRegionRect();
@@ -309,9 +329,10 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         if (decided === 'pan')
           return { kind: 'pan', lastScreen: pending.screenStart };
         if (decided === 'move' && pending.hit) {
-          const ids = groupMembers(
+          const ids = selectedGroupMembers(
             elementsRef.current,
-            pending.hit.imageId ?? pending.hit.id,
+            pending.hit.id,
+            [...selectedIdsRef.current],
           );
           return {
             kind: 'move',
@@ -320,11 +341,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
             startWorld: pending.worldStart,
           };
         }
-        return {
-          kind: 'marquee',
-          startWorld: pending.worldStart,
-          nowWorld: pending.worldStart,
-        };
+        return { kind: 'pan', lastScreen: pending.screenStart };
       },
       [selectedRegionRect],
     );
@@ -406,34 +423,34 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         }
         if (drag?.kind === 'marquee') {
           const band = rectBetween(drag.startWorld, drag.nowWorld);
-          setSelection(marqueeSelect(elementsRef.current, band));
+          setSelection(
+            selectionAfterMarquee(
+              drag.selectedAtStart,
+              marqueeSelect(elementsRef.current, band),
+              drag.additive,
+            ),
+          );
           return;
         }
         if (drag?.kind === 'pan') return; // nothing to commit
 
         // A plain click (never crossed the drag threshold): select or clear.
         if (pending) {
-          setSelection(pending.hit ? [pending.hit.id] : []);
+          setSelection(
+            selectionAfterClick(
+              [...selectedIdsRef.current],
+              pending.hit?.id ?? null,
+              pending.additive,
+            ),
+          );
         }
       },
       [emitChange, scheduleRender, setSelection],
     );
 
-    const onWheel = useCallback(
-      (e: React.WheelEvent<HTMLCanvasElement>) => {
-        e.preventDefault();
-        const pt = canvasPoint(e.clientX, e.clientY);
-        const gesture = wheelGesture(
-          {
-            deltaX: e.deltaX,
-            deltaY: e.deltaY,
-            deltaMode: e.deltaMode,
-            ctrlKey: e.ctrlKey,
-            metaKey: e.metaKey,
-            shiftKey: e.shiftKey,
-          },
-          sizeRef.current.height,
-        );
+    const applyWheel = useCallback(
+      (input: WheelInput, pt: Point) => {
+        const gesture = wheelGesture(input, sizeRef.current.height);
         if (gesture.kind === 'zoom') {
           viewportRef.current = zoomAt(viewportRef.current, gesture.factor, pt);
         } else {
@@ -450,7 +467,25 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         scheduleRender();
         emitChange();
       },
-      [canvasPoint, scheduleRender, emitChange],
+      [scheduleRender, emitChange],
+    );
+
+    const onWheel = useCallback(
+      (e: React.WheelEvent<HTMLCanvasElement>) => {
+        e.preventDefault();
+        applyWheel(
+          {
+            deltaX: e.deltaX,
+            deltaY: e.deltaY,
+            deltaMode: e.deltaMode,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+            shiftKey: e.shiftKey,
+          },
+          canvasPoint(e.clientX, e.clientY),
+        );
+      },
+      [applyWheel, canvasPoint],
     );
 
     // -- keyboard: space-pan, Delete, Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z -----------
@@ -548,6 +583,9 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           };
           scheduleRender();
           emitChange();
+        },
+        wheel(input, point) {
+          applyWheel(input, point);
         },
         zoomToFit(ids) {
           const wanted = ids && new Set(ids);

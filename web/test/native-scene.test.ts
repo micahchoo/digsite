@@ -12,6 +12,7 @@ import {
   regionHandles,
   resizeRegion,
   retargetEdges,
+  selectedGroupMembers,
 } from '../src/sheet/canvas/native/scene.ts';
 import type { SceneElement } from '../src/sheet/canvas/types.ts';
 
@@ -173,6 +174,41 @@ describe('groupMembers', () => {
     );
     const members = groupMembers([img, label, reg, otherImg, e], 'i1');
     expect(members).toEqual(new Set(['img-1', 'r-1', 'label-1']));
+  });
+
+  test('dragging a selected image carries each selected image group together', () => {
+    const img1 = image('img-1', 'i1', { x: 0, y: 0, width: 100, height: 100 });
+    const reg1 = region('r-1', 'i1', { x: 10, y: 10, width: 20, height: 20 });
+    const img2 = image('img-2', 'i2', {
+      x: 200,
+      y: 200,
+      width: 100,
+      height: 100,
+    });
+    const reg2 = region('r-2', 'i2', {
+      x: 210,
+      y: 210,
+      width: 20,
+      height: 20,
+    });
+    const img3 = image('img-3', 'i3', {
+      x: 400,
+      y: 400,
+      width: 100,
+      height: 100,
+    });
+    expect(
+      selectedGroupMembers([img1, reg1, img2, reg2, img3], 'img-1', [
+        'img-1',
+        'img-2',
+      ]),
+    ).toEqual(new Set(['img-1', 'r-1', 'img-2', 'r-2']));
+    expect(
+      selectedGroupMembers([img1, reg1, img2, reg2, img3], 'img-3', [
+        'img-1',
+        'img-2',
+      ]),
+    ).toEqual(new Set(['img-3']));
   });
 });
 

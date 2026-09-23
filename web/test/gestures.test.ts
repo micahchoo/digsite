@@ -14,6 +14,25 @@ describe('pointerIntent', () => {
     }
   });
 
+  test('space and middle drag pan through Region and Edge modes', () => {
+    expect(
+      pointerIntent({
+        tool: 'region',
+        target: 'image',
+        pendingSource: false,
+        forcePan: true,
+      }),
+    ).toBe('pan');
+    expect(
+      pointerIntent({
+        tool: 'edge',
+        target: 'region',
+        pendingSource: true,
+        forcePan: true,
+      }),
+    ).toBe('pan');
+  });
+
   test('region only starts a draw when the press lands on an image', () => {
     expect(
       pointerIntent({ tool: 'region', target: 'image', pendingSource: false }),

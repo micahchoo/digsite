@@ -1,10 +1,6 @@
 // Ported from research/image-graph/src/gestures.ts: "what a pointer is
-// asking for" as one pure decision, no DOM, no camera, no scene. Narrowed
-// to the two tools the native canvas itself ever sees pointer events for —
-// 'select' and 'pan' — because DrawLayer.tsx (../../DrawLayer.tsx) is a
-// full-bleed sibling that captures every pointer
-// event itself while the active tool is 'region' or 'edge', so this canvas
-// never receives one in that state.
+// asking for" as one pure decision, no DOM, no camera, no scene. DrawLayer
+// routes its authoring-tool fallback gestures through the same decisions.
 export type Mode = 'select' | 'pan';
 export type Target = 'image' | 'region' | 'edge' | 'empty';
 
@@ -18,6 +14,28 @@ export function movedEnough(
   threshold = DRAG_THRESHOLD,
 ): boolean {
   return Math.hypot(to.x - from.x, to.y - from.y) >= threshold;
+}
+
+/** A normal click replaces selection; Shift-click toggles one element. */
+export function selectionAfterClick(
+  selected: readonly string[],
+  hitId: string | null,
+  additive: boolean,
+): string[] {
+  if (!additive) return hitId ? [hitId] : [];
+  if (!hitId) return [...selected];
+  return selected.includes(hitId)
+    ? selected.filter((id) => id !== hitId)
+    : [...selected, hitId];
+}
+
+/** A Shift-marquee adds its hits to the current selection without duplicates. */
+export function selectionAfterMarquee(
+  selected: readonly string[],
+  hits: readonly string[],
+  additive: boolean,
+): string[] {
+  return additive ? [...new Set([...selected, ...hits])] : [...hits];
 }
 
 export interface PressInput {
@@ -50,10 +68,10 @@ export interface DragInput {
  * What a press becomes once it has moved far enough — total over every
  * combination, `pan` the answer to everything unclaimed (image-graph's own
  * rule: an unrecognised drag on a map must move the map, never do
- * nothing).
+ * nothing). Shift-marquee is decided before this function is called.
  */
-export function dragBecomes(input: DragInput): 'pan' | 'move' | 'marquee' {
+export function dragBecomes(input: DragInput): 'pan' | 'move' {
   if (input.forcePan || input.mode === 'pan') return 'pan';
   if (input.over === 'image' || input.over === 'region') return 'move';
-  return 'marquee';
+  return 'pan';
 }

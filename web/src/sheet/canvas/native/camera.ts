@@ -7,7 +7,7 @@
 // (docs/phases/2-sheet.md section 8) so `overlay/screen.ts`'s
 // `sceneToScreen`/`screenToScene` share this convention. Every
 // function here is pure and returns a new `Viewport`.
-import type { Viewport } from '../types.ts';
+import type { Viewport, WheelInput } from '../types.ts';
 import type { Point, Rect } from './geometry.ts';
 
 // Product zoom limits; kept stable so saved viewport behavior stays familiar.
@@ -126,14 +126,6 @@ export function zoomBy(
  * `wheelGesture`: the wheel scrolls, ctrl or the command key zooms;
  * `deltaMode` is normalised because Firefox reports lines and a page-mode
  * wheel reports screens; a one-axis wheel pans sideways under shift. */
-export interface WheelInput {
-  deltaX: number;
-  deltaY: number;
-  deltaMode?: number;
-  ctrlKey?: boolean;
-  metaKey?: boolean;
-  shiftKey?: boolean;
-}
 export type WheelGesture =
   | { kind: 'zoom'; factor: number; into: boolean }
   | { kind: 'scroll'; dx: number; dy: number };

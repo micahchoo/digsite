@@ -66,6 +66,15 @@ export interface SceneChange {
   selectedIds: string[];
 }
 
+export interface WheelInput {
+  deltaX: number;
+  deltaY: number;
+  deltaMode?: number;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+}
+
 // -- ScenePatch: every way a caller may change the scene, in one call -----
 // Two "build a new element" ops (the product hands over domain facts —
 // image, rect, label/relation — and never a renderer-specific skeleton) and two
@@ -128,6 +137,9 @@ export interface CanvasHandle {
   selectedIds(): string[];
   viewport(): Viewport;
   setViewport(v: Partial<Viewport>): void;
+  /** Applies the same wheel pan/zoom gesture regardless of which sibling
+   * layer received the browser event. `point` is canvas-relative. */
+  wheel(input: WheelInput, point: { x: number; y: number }): void;
   zoomToFit(ids?: string[]): void;
   /** Zoom by `factor` (>1 in, <1 out) around the container's own centre —
    * the toolbar's zoom in/out buttons. Not in the brief's original sketch

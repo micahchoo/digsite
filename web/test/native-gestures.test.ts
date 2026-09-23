@@ -12,6 +12,8 @@ import {
   dragBecomes,
   movedEnough,
   pressIntent,
+  selectionAfterClick,
+  selectionAfterMarquee,
 } from '../src/sheet/canvas/native/gestures.ts';
 
 const press = (over: Partial<PressInput> = {}): PressInput => ({
@@ -58,6 +60,26 @@ describe('pressIntent', () => {
   });
 });
 
+describe('selection modifiers', () => {
+  test('Shift-click toggles without replacing the rest of the selection', () => {
+    expect(selectionAfterClick(['a', 'b'], 'b', true)).toEqual(['a']);
+    expect(selectionAfterClick(['a'], 'c', true)).toEqual(['a', 'c']);
+    expect(selectionAfterClick(['a', 'b'], 'c', false)).toEqual(['c']);
+  });
+
+  test('Shift-marquee adds unique hits while a plain marquee replaces', () => {
+    expect(selectionAfterMarquee(['a', 'b'], ['b', 'c'], true)).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(selectionAfterMarquee(['a', 'b'], ['b', 'c'], false)).toEqual([
+      'b',
+      'c',
+    ]);
+  });
+});
+
 describe('dragBecomes', () => {
   test('pans in the Pan tool regardless of what is under the press', () => {
     for (const over of ['image', 'region', 'edge', 'empty'] as const) {
@@ -76,18 +98,16 @@ describe('dragBecomes', () => {
     expect(dragBecomes(drag({ over: 'region', mode: 'select' }))).toBe('move');
   });
 
-  test('draws the marquee over a connection or empty canvas, in Select', () => {
-    expect(dragBecomes(drag({ over: 'edge', mode: 'select' }))).toBe('marquee');
-    expect(dragBecomes(drag({ over: 'empty', mode: 'select' }))).toBe(
-      'marquee',
-    );
+  test('an unclaimed drag on a connection or empty canvas pans', () => {
+    expect(dragBecomes(drag({ over: 'edge', mode: 'select' }))).toBe('pan');
+    expect(dragBecomes(drag({ over: 'empty', mode: 'select' }))).toBe('pan');
   });
 
   test('always answers with something, for every combination', () => {
     for (const mode of MODES) {
       for (const over of ['image', 'region', 'edge', 'empty'] as const) {
         for (const forcePan of [true, false]) {
-          expect(['pan', 'move', 'marquee']).toContain(
+          expect(['pan', 'move']).toContain(
             dragBecomes({ mode, over, forcePan }),
           );
         }

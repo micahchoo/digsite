@@ -204,6 +204,296 @@ async function main() {
       )),
     'placing/selecting foreign region labels changed the scene',
   );
+
+  // Native authoring regression: Shift-click accumulates a selection and a
+  // drag on either selected image carries both groups. The scene transform
+  // comes from the same viewport the sheet canvas reports to its overlay.
+  await page.getByTestId('tool-select').click();
+  const imageCenters = await page.evaluate(() => {
+    const elements = window.__digsite.getElements().filter((element) => {
+      const data = element.customData as { kind?: string } | undefined;
+      return data?.kind === 'image' && !element.isDeleted;
+    });
+    const appState = window.__digsiteSheetDebug?.getAppState();
+    const area = document
+      .querySelector('.sheet-canvas-area')
+      ?.getBoundingClientRect();
+    if (!appState || !area) return [];
+    return elements
+      .map((element) => ({
+        id: element.id,
+        x:
+          area.left +
+          (element.x + element.width / 2 + appState.scrollX) *
+            appState.zoom.value,
+        y:
+          area.top +
+          (element.y + element.height / 2 + appState.scrollY) *
+            appState.zoom.value,
+        sceneX: element.x,
+      }))
+      .filter(
+        (center) =>
+          document.elementFromPoint(center.x, center.y)?.tagName === 'CANVAS',
+      )
+      .slice(0, 3);
+  });
+  assert(imageCenters.length === 3, 'three image centers were not available');
+  const firstImage = imageCenters[0];
+  const secondImage = imageCenters[1];
+  const thirdImage = imageCenters[2];
+  if (!firstImage || !secondImage || !thirdImage)
+    throw new Error('missing image centers');
+  await page.keyboard.down('Shift');
+  await page.mouse.click(firstImage.x, firstImage.y);
+  await page.mouse.click(secondImage.x, secondImage.y);
+  await page.keyboard.up('Shift');
+  await page.waitForFunction(
+    (ids) =>
+      ids.every(
+        (id) =>
+          window.__digsiteSheetDebug?.getAppState()?.selectedElementIds[id],
+      ),
+    [firstImage.id, secondImage.id],
+    { timeout: 4000 },
+  );
+  await page.mouse.move(firstImage.x, firstImage.y);
+  await page.mouse.down();
+  await page.mouse.move(firstImage.x + 24, firstImage.y + 18, { steps: 3 });
+  await page.mouse.up();
+  await page.waitForFunction(
+    ({ firstId, secondId, firstX, secondX }) => {
+      const elements = window.__digsite.getElements();
+      const first = elements.find((element) => element.id === firstId);
+      const second = elements.find((element) => element.id === secondId);
+      return first?.x !== firstX && second?.x !== secondX;
+    },
+    {
+      firstId: firstImage.id,
+      secondId: secondImage.id,
+      firstX: firstImage.sceneX,
+      secondX: secondImage.sceneX,
+    },
+  );
+  console.log(
+    'PASS: Shift-click selection moves selected image groups together',
+  );
+
+  await page.keyboard.down('Shift');
+  await page.mouse.move(thirdImage.x, thirdImage.y);
+  await page.mouse.down();
+  await page.mouse.move(thirdImage.x + 24, thirdImage.y + 18, { steps: 3 });
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await page.waitForFunction(
+    (id) => window.__digsiteSheetDebug?.getAppState()?.selectedElementIds[id],
+    thirdImage.id,
+  );
+  assert(
+    await page.evaluate(
+      (ids) =>
+        ids.every(
+          (id) =>
+            window.__digsiteSheetDebug?.getAppState()?.selectedElementIds[id],
+        ),
+      [firstImage.id, secondImage.id, thirdImage.id],
+    ),
+    'Shift-marquee did not retain the existing selection and add its hit',
+  );
+  console.log('PASS: Shift-marquee adds to the selection');
+
+  // The drawing layer is above the canvas. Empty drags still pan, and Space
+  // temporarily pans over an image without creating a region.
+  await page.getByTestId('tool-region').click();
+  const beforeEmptyPan = await page.evaluate(() =>
+    window.__digsiteSheetDebug?.getAppState(),
+  );
+  const canvasArea = await page.locator('.sheet-canvas-area').boundingBox();
+  assert(beforeEmptyPan && canvasArea, 'sheet viewport was not available');
+  const regionCountBeforePan = await page.evaluate(
+    () =>
+      window.__digsite
+        .getElements()
+        .filter(
+          (element) =>
+            (element.customData as { kind?: string } | undefined)?.kind ===
+              'region' && !element.isDeleted,
+        ).length,
+  );
+  await page.mouse.move(canvasArea.x + 12, canvasArea.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(canvasArea.x + 52, canvasArea.y + 42, { steps: 3 });
+  await page.mouse.up();
+  await page.waitForFunction(
+    (scrollX) => window.__digsiteSheetDebug?.getAppState()?.scrollX !== scrollX,
+    beforeEmptyPan.scrollX,
+  );
+  const emptyPanState = await page.evaluate(() =>
+    window.__digsiteSheetDebug?.getAppState(),
+  );
+  assert(emptyPanState, 'sheet viewport disappeared after empty-space pan');
+
+  const assertPointerAnchoredWheelZoom = async (
+    toolTestId: 'tool-region' | 'tool-edge',
+  ) => {
+    await page.getByTestId(toolTestId).click();
+    const box = await page.locator('.sheet-canvas-area').boundingBox();
+    assert(box, 'canvas area was not available for wheel zoom');
+    const point = { x: box.width / 2, y: box.height / 2 };
+    const before = await page.evaluate((point) => {
+      const appState = window.__digsiteSheetDebug?.getAppState();
+      if (!appState) return null;
+      return {
+        zoom: appState.zoom.value,
+        worldX: point.x / appState.zoom.value - appState.scrollX,
+        worldY: point.y / appState.zoom.value - appState.scrollY,
+      };
+    }, point);
+    assert(before, 'viewport was unavailable before wheel zoom');
+    await page.mouse.move(box.x + point.x, box.y + point.y);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -120);
+    await page.keyboard.up('Control');
+    await page.waitForFunction(
+      (zoom) => window.__digsiteSheetDebug?.getAppState()?.zoom.value !== zoom,
+      before.zoom,
+    );
+    const after = await page.evaluate((point) => {
+      const appState = window.__digsiteSheetDebug?.getAppState();
+      if (!appState) return null;
+      return {
+        zoom: appState.zoom.value,
+        worldX: point.x / appState.zoom.value - appState.scrollX,
+        worldY: point.y / appState.zoom.value - appState.scrollY,
+      };
+    }, point);
+    assert(after, 'viewport was unavailable after wheel zoom');
+    assert(
+      Math.abs(after.worldX - before.worldX) < 0.25 &&
+        Math.abs(after.worldY - before.worldY) < 0.25,
+      `${toolTestId} wheel zoom drifted away from the pointer: before=${JSON.stringify(before)} after=${JSON.stringify(after)} point=${JSON.stringify(point)}`,
+    );
+    return box;
+  };
+  const regionWheelBox = await assertPointerAnchoredWheelZoom('tool-region');
+  const beforeWheelPan = await page.evaluate(() =>
+    window.__digsiteSheetDebug?.getAppState(),
+  );
+  assert(beforeWheelPan, 'viewport was unavailable before wheel pan');
+  await page.mouse.move(regionWheelBox.x + 32, regionWheelBox.y + 32);
+  await page.mouse.wheel(0, 80);
+  await page.waitForFunction(
+    (scrollY) => window.__digsiteSheetDebug?.getAppState()?.scrollY !== scrollY,
+    beforeWheelPan.scrollY,
+  );
+  await assertPointerAnchoredWheelZoom('tool-edge');
+
+  const imageAfterEmptyPan = await page.evaluate((id) => {
+    const element = window.__digsite
+      .getElements()
+      .find((item) => item.id === id);
+    const appState = window.__digsiteSheetDebug?.getAppState();
+    const area = document
+      .querySelector('.sheet-canvas-area')
+      ?.getBoundingClientRect();
+    if (!element || !appState || !area) return null;
+    return {
+      x:
+        area.left +
+        (element.x + element.width / 2 + appState.scrollX) *
+          appState.zoom.value,
+      y:
+        area.top +
+        (element.y + element.height / 2 + appState.scrollY) *
+          appState.zoom.value,
+      sceneX: element.x,
+      scrollX: appState.scrollX,
+    };
+  }, firstImage.id);
+  assert(imageAfterEmptyPan, 'image position was not available after panning');
+  await page.keyboard.down('Space');
+  await page.mouse.move(imageAfterEmptyPan.x, imageAfterEmptyPan.y);
+  await page.mouse.down();
+  await page.mouse.move(imageAfterEmptyPan.x + 30, imageAfterEmptyPan.y + 12, {
+    steps: 3,
+  });
+  await page.mouse.up();
+  await page.keyboard.up('Space');
+  await page.waitForFunction(
+    ({ id, sceneX, scrollX, regionCount }) => {
+      const element = window.__digsite
+        .getElements()
+        .find((item) => item.id === id);
+      const regions = window.__digsite
+        .getElements()
+        .filter(
+          (item) =>
+            (item.customData as { kind?: string } | undefined)?.kind ===
+              'region' && !item.isDeleted,
+        );
+      return (
+        element?.x === sceneX &&
+        window.__digsiteSheetDebug?.getAppState()?.scrollX !== scrollX &&
+        regions.length === regionCount
+      );
+    },
+    {
+      id: firstImage.id,
+      sceneX: imageAfterEmptyPan.sceneX,
+      scrollX: imageAfterEmptyPan.scrollX,
+      regionCount: regionCountBeforePan,
+    },
+  );
+  console.log(
+    'PASS: drawing tools pan through empty space and Space pans over images',
+  );
+
+  // A modifier must not turn an explicitly forced Space pan into a marquee.
+  await page.getByTestId('tool-select').click();
+  const forcedPanStart = await page.evaluate((id) => {
+    const element = window.__digsite
+      .getElements()
+      .find((item) => item.id === id);
+    const appState = window.__digsiteSheetDebug?.getAppState();
+    const area = document
+      .querySelector('.sheet-canvas-area')
+      ?.getBoundingClientRect();
+    if (!element || !appState || !area) return null;
+    return {
+      x:
+        area.left +
+        (element.x + element.width / 2 + appState.scrollX) *
+          appState.zoom.value,
+      y:
+        area.top +
+        (element.y + element.height / 2 + appState.scrollY) *
+          appState.zoom.value,
+      scrollX: appState.scrollX,
+      selected: Object.keys(appState.selectedElementIds).sort(),
+    };
+  }, firstImage.id);
+  assert(forcedPanStart, 'image position was not available for forced pan');
+  await page.keyboard.down('Shift');
+  await page.keyboard.down('Space');
+  await page.mouse.move(forcedPanStart.x, forcedPanStart.y);
+  await page.mouse.down();
+  await page.mouse.move(forcedPanStart.x + 30, forcedPanStart.y + 12, {
+    steps: 3,
+  });
+  await page.mouse.up();
+  await page.keyboard.up('Space');
+  await page.keyboard.up('Shift');
+  await page.waitForFunction(({ scrollX, selected }) => {
+    const state = window.__digsiteSheetDebug?.getAppState();
+    return (
+      !!state &&
+      state.scrollX !== scrollX &&
+      JSON.stringify(Object.keys(state.selectedElementIds).sort()) ===
+        JSON.stringify(selected)
+    );
+  }, forcedPanStart);
+  console.log('PASS: Space pan takes priority over Shift-marquee');
+
   await page.screenshot({
     path: '/tmp/sheet-surroundings-desktop.png',
     fullPage: true,
