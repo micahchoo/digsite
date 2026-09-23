@@ -1000,7 +1000,8 @@
   display: grid;
   grid-template-areas:
     "name type remove"
-    "value value value";
+    "value value value"
+    "error error error";
   grid-template-columns: minmax(0, 1fr) auto 28px;
   align-items: center;
   gap: 2px var(--space-1);
@@ -1020,6 +1021,18 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
+}
+.board-property-row input[type="checkbox"] {
+  justify-self: start;
+  width: auto;
+}
+.board-property-row[data-invalid="true"] input {
+  border-color: var(--danger);
+}
+.board-property-error {
+  grid-area: error;
+  color: var(--danger);
+  font-size: var(--text-xs);
 }
 .board-property-row select {
   grid-area: type;

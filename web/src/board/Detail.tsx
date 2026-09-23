@@ -11,23 +11,16 @@ import { Icon } from '../components/Icon.tsx';
 import { api } from '../lib/api.ts';
 import { bytesLabel } from '../lib/bytes.ts';
 import { captured, isCaptured } from './captured.ts';
+import {
+  type PropertyType,
+  TYPE_LABELS,
+  convert,
+  draftOf,
+  parseDraft,
+  typeOfValue,
+} from './property-edit.ts';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
-
-function typeOf(v: PropertyValue): 'text' | 'number' | 'boolean' {
-  if (typeof v === 'number') return 'number';
-  if (typeof v === 'boolean') return 'boolean';
-  return 'text';
-}
-
-function coerce(
-  raw: string,
-  type: 'text' | 'number' | 'boolean',
-): PropertyValue {
-  if (type === 'number') return Number(raw) || 0;
-  if (type === 'boolean') return raw === 'true';
-  return raw;
-}
 
 interface Props {
   image: GetImageResponse;
@@ -65,42 +58,13 @@ export function Detail({
   const camera = entries.filter(([k]) => isCaptured(k));
   const shot = captured(image.properties);
   const row = (k: string, v: PropertyValue) => (
-    <div key={k} className="board-property-row">
-      <label className="board-property-name" htmlFor={`detail-property-${k}`}>
-        {k}
-      </label>
-      <input
-        id={`detail-property-${k}`}
-        data-testid={`detail-prop-${k}`}
-        aria-label={k}
-        value={String(v)}
-        onChange={(e) => onSetProperty(k, coerce(e.target.value, typeOf(v)))}
-      />
-      <select
-        value={typeOf(v)}
-        aria-label={`Type of ${k}`}
-        onChange={(e) =>
-          onSetProperty(
-            k,
-            coerce(String(v), e.target.value as 'text' | 'number' | 'boolean'),
-          )
-        }
-      >
-        <option value="text">Text</option>
-        <option value="number">Number</option>
-        <option value="boolean">Yes/no</option>
-      </select>
-      <button
-        type="button"
-        className="board-property-remove"
-        aria-label={`Remove ${k}`}
-        title={`Remove ${k}`}
-        data-testid={`detail-prop-remove-${k}`}
-        onClick={() => onRemoveProperty(k)}
-      >
-        <Icon name="close" size={14} />
-      </button>
-    </div>
+    <PropertyRow
+      key={k}
+      name={k}
+      value={v}
+      onSet={(value) => onSetProperty(k, value)}
+      onRemove={() => onRemoveProperty(k)}
+    />
   );
 
   return (
@@ -279,5 +243,131 @@ export function Detail({
           </button>
         ))}
     </section>
+  );
+}
+
+/**
+ * One property: its value in the control its type wants, and its type.
+ * Text, numbers, dates and lists are drafts saved on Enter or on leaving
+ * the field; yes/no saves on the click. A draft that is not its type says
+ * why and saves nothing.
+ */
+function PropertyRow({
+  name,
+  value,
+  onSet,
+  onRemove,
+}: {
+  name: string;
+  value: PropertyValue;
+  onSet: (value: PropertyValue) => void;
+  onRemove: () => void;
+}) {
+  const type = typeOfValue(value);
+  const [draft, setDraft] = useState(draftOf(value));
+  const [error, setError] = useState('');
+  // A save, or another person's edit, replaces the draft.
+  const shown = draftOf(value);
+  const [was, setWas] = useState(shown);
+  if (shown !== was) {
+    setWas(shown);
+    setDraft(shown);
+    setError('');
+  }
+
+  function commit() {
+    if (draft === shown) return;
+    const parsed = parseDraft(draft, type);
+    if ('error' in parsed) {
+      setError(parsed.error);
+      return;
+    }
+    setError('');
+    onSet(parsed.value);
+  }
+  function retype(to: PropertyType) {
+    const converted = convert(value, to);
+    if ('error' in converted) {
+      setError(`Cannot be a ${to}: ${converted.error.toLowerCase()}`);
+      return;
+    }
+    setError('');
+    onSet(converted.value);
+  }
+
+  const id = `detail-property-${name}`;
+  return (
+    <div className="board-property-row" data-invalid={error !== ''}>
+      <label className="board-property-name" htmlFor={id}>
+        {name}
+      </label>
+      {type === 'boolean' ? (
+        <input
+          id={id}
+          type="checkbox"
+          data-testid={`detail-prop-${name}`}
+          checked={value === true}
+          onChange={(e) => onSet(e.target.checked)}
+        />
+      ) : (
+        <input
+          id={id}
+          data-testid={`detail-prop-${name}`}
+          type={type === 'date' ? 'date' : 'text'}
+          inputMode={type === 'number' ? 'decimal' : undefined}
+          placeholder={type === 'list' ? 'one, two, three' : undefined}
+          aria-invalid={error !== ''}
+          aria-describedby={error ? `${id}-error` : undefined}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setError('');
+          }}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            // Esc first cancels an unsaved edit; on an unchanged field it
+            // goes on to close the panel, as it does anywhere else.
+            if (e.key === 'Escape' && draft !== shown) {
+              e.stopPropagation();
+              setDraft(shown);
+              setError('');
+            }
+          }}
+        />
+      )}
+      <select
+        value={type}
+        aria-label={`Type of ${name}`}
+        data-testid={`detail-prop-type-${name}`}
+        onChange={(e) => retype(e.target.value as PropertyType)}
+      >
+        {TYPE_LABELS.map(([t, label]) => (
+          <option key={t} value={t}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="board-property-remove"
+        aria-label={`Remove ${name}`}
+        title={`Remove ${name}`}
+        data-testid={`detail-prop-remove-${name}`}
+        onClick={onRemove}
+      >
+        <Icon name="close" size={14} />
+      </button>
+      {error && (
+        <span
+          id={`${id}-error`}
+          className="board-property-error"
+          role="alert"
+          data-testid={`detail-prop-error-${name}`}
+        >
+          {error}
+        </span>
+      )}
+    </div>
   );
 }

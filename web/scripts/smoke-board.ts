@@ -245,6 +245,31 @@ async function main() {
     `stub did not echo the patched year, got ${JSON.stringify(patched.properties)}`,
   );
   console.log('PASS: detail panel patched a property; stub echoed 1809');
+
+  // A draft that is not its type says why and saves nothing; Esc cancels it
+  // and leaves the panel open (board/property-edit.ts).
+  await yearInput.fill('old');
+  await yearInput.press('Enter');
+  await page.getByTestId('detail-prop-error-year').waitFor({ timeout: 3000 });
+  await yearInput.press('Escape');
+  assert(
+    (await yearInput.inputValue()) === '1809',
+    'Esc did not bring the saved year back',
+  );
+  assert(
+    await page.getByTestId('detail-panel').isVisible(),
+    'Esc on an unsaved edit closed the panel',
+  );
+  const unchanged = await page.request
+    .get(`${SERVER}/images/${detailImageId}`)
+    .then((r) => r.json() as Promise<{ properties: { year?: unknown } }>);
+  assert(
+    unchanged.properties.year === 1809,
+    `a refused draft reached the server: ${JSON.stringify(unchanged.properties)}`,
+  );
+  console.log(
+    'PASS: a year that is not a number is refused, and Esc restores it',
+  );
   await page.screenshot({
     path: new URL('board-detail.png', SCREEN_DIR).pathname,
   });
