@@ -119,6 +119,30 @@ export type FindBoardResponse = {
   count: number;
 };
 
+// Search by meaning: GET /boards/:id/search?text=&sort=&limit= and
+// GET /boards/:id/similar?image=&sort=&limit=. Best first, ranks under the
+// given sort. Scores are close together and low (0.23-0.31 measured), so a
+// client ranks by them and never cuts at a threshold. 503 while EMBEDDINGS
+// is off; `similar` is 409 until the image is embedded, 400 when it is not
+// on the board.
+export type MeaningMatch = { imageId: string; rank: number; score: number };
+export type MeaningResponse = { matches: MeaningMatch[] };
+
+// Import a folder the server can read: POST /boards/:id/imports {path}
+// answers 202 with this; GET /boards/:id/imports/:importId polls it.
+// 503 when IMPORT_ROOTS is unset, 403 outside the roots, 400 for no such
+// folder, 413 past IMPORT_MAX_FILES.
+export type StartFolderImportRequest = { path: string };
+export type FolderImport = {
+  id: string;
+  path: string;
+  total: number;
+  imported: number;
+  skipped: number;
+  skips: { file: string; reason: string }[];
+  state: 'running' | 'done';
+};
+
 export type AllowlistRequest = { userId: string };
 export type AllowlistResponse = { userId: string }[];
 
