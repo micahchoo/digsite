@@ -99,7 +99,7 @@ import {
   presignedGetUrl,
   storageFromEnv,
 } from '../storage/index.ts';
-import { release } from '../storage/quota.ts';
+import { QuotaExceeded, quotaRefusal, release } from '../storage/quota.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
@@ -763,7 +763,21 @@ export function registerBoardRoutes(router: Router) {
     const out: UploadImagesResponse = [];
     const ids: string[] = [];
     for (const file of examined) {
-      const uploaded = await store(boardId, userId, file);
+      let uploaded: Awaited<ReturnType<typeof store>>;
+      try {
+        uploaded = await store(boardId, userId, file);
+      } catch (error) {
+        // The group's storage filled up partway: the files stored before
+        // this one stay, and the answer names them, in order, so the
+        // upload queue can mark exactly those rows as landed.
+        if (!(error instanceof QuotaExceeded)) throw error;
+        return json(ctx.res, 413, {
+          ...quotaRefusal(error),
+          accepted: examined
+            .slice(0, out.length)
+            .map((f, i) => ({ name: f.name, id: out[i]?.id })),
+        });
+      }
       ids.push(uploaded.id);
       out.push(uploaded);
     }

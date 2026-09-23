@@ -152,7 +152,38 @@ describe('quota over HTTP and in a folder import', () => {
       reason: 'quota',
       usedBytes: 0,
       quotaBytes: 100,
+      accepted: [],
     });
+    // A batch that crosses the line partway keeps, and names, what landed.
+    const first = await png(40);
+    await pool.query(
+      'UPDATE group_storage SET quota_bytes = $2 WHERE org_id = $1',
+      [group.id, first.length + 1],
+    );
+    const batch = new FormData();
+    batch.append('files', new File([first], 'fits.png'));
+    batch.append('files', new File([await png(41)], 'over.png'));
+    const partway = await request(
+      'POST',
+      `/boards/${board.id}/images?wait=0`,
+      batch,
+    );
+    expect(partway.status).toBe(413);
+    const refused = (await partway.json()) as {
+      accepted: { name: string; id: string }[];
+    };
+    expect(refused.accepted.map((a) => a.name)).toEqual(['fits.png']);
+    const { rows: landed } = await pool.query(
+      'SELECT id FROM images WHERE board_id = $1',
+      [board.id],
+    );
+    expect(landed.map((r) => r.id)).toEqual([refused.accepted[0]?.id]);
+    await pool.query('DELETE FROM images WHERE board_id = $1', [board.id]);
+    await pool.query(
+      'UPDATE group_storage SET used_bytes = 0, quota_bytes = 100 WHERE org_id = $1',
+      [group.id],
+    );
+
     const detail = await (await request('GET', `/groups/${group.id}`)).json();
     expect(detail).toMatchObject({
       id: group.id,
