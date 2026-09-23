@@ -169,7 +169,12 @@ sheet that made it. The board never writes a claim.
   an image, or its bytes are already an image on the board. Each one
   carries its reason, so a folder imported twice adds nothing twice. A fault of the server
   (storage, database) stops the batch without moving the cursor.
-- **Camera file** — a phone or camera format (HEIC, RAW) that the import
+- **Image intake** — every rule a picture passes before it becomes an
+  image, whichever way it came in (browser upload, resumable upload,
+  folder import): a camera file becomes a JPEG, the bytes must be an
+  image within the budgets, the type is read from the bytes. A refusal
+  is the file's fault and says why; the server's own faults are errors.
+- **Camera file** — a phone or camera format (HEIC, RAW) that intake
   turns into a JPEG original once, where it enters. HEIC is decoded; a
   RAW gives up the full-size JPEG the camera embedded. The image's
   `format` property keeps what the file was.

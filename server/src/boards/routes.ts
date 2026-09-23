@@ -110,6 +110,7 @@ import {
   folderImport,
   startFolderImport,
 } from './folder-import.ts';
+import { type Examined, examine, store } from './intake.ts';
 import { withPage } from './ladder.ts';
 import { originalKey, previewKey } from './paths.ts';
 import { isProperties } from './properties.ts';
@@ -126,8 +127,6 @@ import {
 } from './ranks.ts';
 import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
-import { uploadOne } from './upload.ts';
-import { validateUpload } from './validate.ts';
 import {
   aliasesOf,
   deleteAlias,
@@ -728,37 +727,29 @@ export function registerBoardRoutes(router: Router) {
       }
     }
 
-    // Every file is read and validated (real type by magic bytes, size,
-    // pixel budget — boards/validate.ts) BEFORE any of them is stored or
+    // Every file is examined (intake.ts) BEFORE any of them is stored or
     // enqueued: one bad file in a batch refuses the whole request instead
     // of leaving a partial upload the client has to reconcile.
-    const fileBytes: Uint8Array[] = [];
-    for (const file of files) {
-      fileBytes.push(new Uint8Array(await file.arrayBuffer()));
-    }
-    for (const [i, bytes] of fileBytes.entries()) {
-      const result = validateUpload(bytes);
+    const examined: Examined[] = [];
+    for (const [i, file] of files.entries()) {
+      const result = await examine(boardId, {
+        name: file.name || `upload-${Date.now()}`,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        properties: propsArray[i] ?? {},
+      });
       if (!result.ok) {
         return json(ctx.res, result.status, {
           error: result.reason,
-          file: files[i]?.name ?? null,
+          file: file.name || null,
         });
       }
+      examined.push(result);
     }
 
     const out: UploadImagesResponse = [];
     const ids: string[] = [];
-    for (const [i, file] of files.entries()) {
-      const bytes = fileBytes[i] ?? new Uint8Array();
-      const properties = propsArray[i] ?? {};
-      const uploaded = await uploadOne(
-        boardId,
-        userId,
-        file.name || `upload-${Date.now()}`,
-        bytes,
-        properties,
-        file.type || 'application/octet-stream',
-      );
+    for (const file of examined) {
+      const uploaded = await store(boardId, userId, file);
       ids.push(uploaded.id);
       out.push(uploaded);
     }

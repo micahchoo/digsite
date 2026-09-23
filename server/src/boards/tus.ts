@@ -29,8 +29,7 @@ import { auth } from '../auth.ts';
 import { env } from '../env.ts';
 import { checkLimit } from '../limits.ts';
 import { StorageFull } from '../storage/room.ts';
-import { uploadOne } from './upload.ts';
-import { validateUpload } from './validate.ts';
+import { examine, store } from './intake.ts';
 
 const TUS_MOUNT = /^\/boards\/([^/]+)\/uploads(?:\/([^/]+))?\/?$/;
 
@@ -132,30 +131,21 @@ export const tusServer = new Server({
       readFileSync(join(env.DATA_DIR, 'tus', upload.id)),
     );
 
-    // Phase 5 section 2: the same header-level check the multipart route
-    // runs before calling uploadOne (boards/routes.ts, boards/validate.ts)
-    // — real type by magic bytes, size, pixel budget. The finished tus
-    // file is removed either way; a rejected upload has nothing left to
+    // The same intake as the multipart route (intake.ts). The finished tus
+    // file is removed either way; a refused upload has nothing left to
     // resume.
-    const result = validateUpload(bytes);
-    if (!result.ok) {
+    const examined = await examine(meta.boardId, {
+      name: filename,
+      bytes,
+      properties,
+    });
+    if (!examined.ok) {
       await fileStore.remove(upload.id).catch(() => {});
-      throw { status_code: result.status, body: `${result.reason}\n` };
+      throw { status_code: examined.status, body: `${examined.reason}\n` };
     }
-
-    // Use the verified bytes, not optional client metadata. S3 preserves this
-    // type when the original is later served through a signed URL.
-    const contentType = `image/${result.type}`;
-    let image: Awaited<ReturnType<typeof uploadOne>>;
+    let image: Awaited<ReturnType<typeof store>>;
     try {
-      image = await uploadOne(
-        meta.boardId,
-        meta.userId,
-        filename,
-        bytes,
-        properties,
-        contentType,
-      );
+      image = await store(meta.boardId, meta.userId, examined);
     } catch (err) {
       if (!(err instanceof StorageFull)) throw err;
       await fileStore.remove(upload.id).catch(() => {});

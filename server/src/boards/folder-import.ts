@@ -5,15 +5,15 @@
 // The boundary is the operator's: env.IMPORT_ROOTS lists the folders the
 // server may read, and none by default. A path is resolved with realpath —
 // symlinks and `..` included — and must land inside a root. Every file then
-// takes the same path as a browser upload: validateUpload, then uploadOne.
-import { createHash } from 'node:crypto';
+// takes the same intake as a browser upload (intake.ts), with duplicates
+// skipped.
 import { readdir, realpath } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import type { FolderImport } from '@digsite/shared/api';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
 import { enqueueJob } from '../worker/jobs.ts';
-import { fromCamera, isCameraFile } from './camera.ts';
+import { isCameraFile } from './camera.ts';
 
 const IMAGE = /\.(png|jpe?g|webp|gif|avif)$/i;
 
@@ -133,23 +133,18 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
   );
   const job = rows[0];
   if (!job) return; // finished, or its board was deleted
-  const { validateUpload } = await import('./validate.ts');
-  const { uploadOne } = await import('./upload.ts');
+  // Loaded here: intake reaches the worker's queue, and the worker's jobs
+  // module imports this one.
+  const intake = await import('./intake.ts');
   for (const file of job.batch as string[]) {
-    const admitted = await admit(job.board_id, job.path, file, validateUpload);
-    const skip = 'skip' in admitted ? admitted.skip : null;
-    if (!('skip' in admitted)) {
+    const admitted = await admit(intake, job.board_id, job.path, file);
+    const skip = admitted.ok ? null : admitted.reason;
+    if (admitted.ok) {
       // Not caught: a failure here is the server's (storage, database, a
       // full disk), never this file's. The job retries with the cursor
       // unmoved, and the import resumes on this file. Before, a missing
       // DATA_DIR skipped every file of a 901-file import as its own fault.
-      await uploadOne(
-        job.board_id,
-        job.user_id,
-        admitted.name,
-        admitted.bytes,
-        admitted.properties,
-      );
+      await intake.store(job.board_id, job.user_id, admitted);
     }
     await pool.query(
       `UPDATE folder_imports SET next = next + 1,
@@ -178,45 +173,29 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
   }
 }
 
-type Admitted =
-  | { name: string; bytes: Uint8Array; properties: Record<string, unknown> }
-  | { skip: string };
-
-/** One file as an upload, or why it is skipped. Only the FILE's faults
- * are skips: it vanished, cannot be read, is not an image, or its bytes
- * are already an image on this board (C6: a folder imported twice made
- * every image twice). */
+/** One file of the folder, examined, or why it is skipped. Only the
+ * FILE's faults are skips: it vanished, cannot be read, or intake refused
+ * it — including bytes already on this board (C6: a folder imported twice
+ * made every image twice). */
 async function admit(
+  intake: typeof import('./intake.ts'),
   boardId: string,
   folder: string,
   file: string,
-  validateUpload: typeof import('./validate.ts').validateUpload,
-): Promise<Admitted> {
+): Promise<import('./intake.ts').Examined | import('./intake.ts').Refused> {
   const name = file.slice(file.lastIndexOf(sep) + 1);
   const dir = file.includes(sep) ? file.slice(0, file.lastIndexOf(sep)) : '';
-  const properties: Record<string, unknown> = dir ? { folder: dir } : {};
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(await Bun.file(join(folder, file)).arrayBuffer());
   } catch (error) {
     // The folder is the owner's and may change under the import.
-    return { skip: error instanceof Error ? error.message : String(error) };
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, status: 404, reason };
   }
-  // A phone or camera file becomes a JPEG here and is an ordinary image
-  // from then on; `format` keeps what it was.
-  if (isCameraFile(name)) {
-    const converted = await fromCamera(name, bytes);
-    if (!converted.ok) return { skip: converted.reason };
-    bytes = converted.bytes;
-    properties.format = converted.format;
-  }
-  const result = validateUpload(bytes);
-  if (!result.ok) return { skip: result.reason };
-  const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const { rows } = await pool.query(
-    'SELECT name FROM images WHERE board_id = $1 AND sha256 = $2 LIMIT 1',
-    [boardId, sha256],
+  return intake.examine(
+    boardId,
+    { name, bytes, properties: dir ? { folder: dir } : {} },
+    { skipDuplicates: true },
   );
-  if (rows[0]) return { skip: `already on this board as ${rows[0].name}` };
-  return { name, bytes, properties };
 }
