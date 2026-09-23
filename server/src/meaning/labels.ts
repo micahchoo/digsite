@@ -24,7 +24,7 @@ export const PROMPT = (term: string) => `a photo of ${term}`;
 const CACHE_LIMIT = 20_000;
 const termVectors = new Map<string, Float32Array>();
 
-type Embed = (text: string) => Promise<Float32Array>;
+export type Embed = (text: string) => Promise<Float32Array>;
 
 async function termVector(term: string, embed: Embed): Promise<Float32Array> {
   const key = `${MODEL}\u0000${term}`;
@@ -42,7 +42,7 @@ async function termVector(term: string, embed: Embed): Promise<Float32Array> {
   return vector;
 }
 
-function dot(a: Float32Array, b: Float32Array): number {
+function dot(a: ArrayLike<number>, b: Float32Array): number {
   let sum = 0;
   for (let i = 0; i < a.length; i++) sum += (a[i] as number) * (b[i] as number);
   return sum;
@@ -60,10 +60,22 @@ export async function suggestLabels(
   // The route has checked the image is on this board.
   const image = await vectorOf(imageId);
   if (!image) return null;
+  return bestTerms(boardId, image, limit, embed);
+}
+
+/** The board's label terms nearest a vector, best first: one image's, or
+ * a group's centroid (arrangement.ts names sections with it). Empty when
+ * the board has no labels. */
+export async function bestTerms(
+  boardId: string,
+  vector: ArrayLike<number>,
+  limit: number,
+  embed: Embed = async (text) => (await import('./clip.ts')).embedText(text),
+): Promise<LabelSuggestion[]> {
   const { labels } = await vocabularyOf(boardId);
   const scored: LabelSuggestion[] = [];
   for (const { term } of labels.slice(0, MAX_TERMS)) {
-    scored.push({ term, score: dot(image, await termVector(term, embed)) });
+    scored.push({ term, score: dot(vector, await termVector(term, embed)) });
   }
   return scored.sort((a, b) => b.score - a.score).slice(0, limit);
 }

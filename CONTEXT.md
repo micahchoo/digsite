@@ -159,8 +159,10 @@ sheet that made it. The board never writes a claim.
   stored vector goes through one module (`meaning/embeddings.ts`).
 - **Arrangement** — one place per embedded image in its board's `meaning`
   sort (`images.meaning_pos`), so that pictures near on the map, across
-  and down, are near in meaning. Recomputed whole by the worker after
-  embeddings land; an image not yet placed sorts last.
+  and down, are near in meaning. Worked out whole for a big change; a few
+  new pictures are each placed beside their nearest. An image not yet
+  placed sorts last. Its **groups**, runs of about a sixteenth of the
+  map, are the sort's sections, named by the board's own label terms.
 - **Near-duplicate** — an image that is nearly another: close in meaning
   (similarity 0.975 or more) AND in pixels (0.5% or less of the picture
   changed at 128 px). A suggestion that a person accepts or declines.

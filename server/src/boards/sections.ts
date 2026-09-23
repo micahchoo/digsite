@@ -19,7 +19,8 @@ export type Section = { label: string; fromRank: number; toRank: number };
 function sectionKeyExpr(sort: Sort): string {
   if (sort.key === 'name') return 'upper(left(i.name, 1))';
   if (sort.key === 'uploaded_at') return `to_char(i.uploaded_at, 'YYYY-MM-DD')`;
-  if (sort.key === 'meaning') throw new Error('meaning has no sections');
+  // The arrangement's group (meaning/arrangement.ts); named after the walk.
+  if (sort.key === 'meaning') return 'i.meaning_group';
   // sort.key.property already passed parseSortId's PROPERTY_RE (alnum/_/-)
   // by the only two callers that build a Sort from a URL — same trust
   // boundary as ranks.ts#orderExpr; never build a Sort here from
@@ -40,9 +41,6 @@ export async function sectionsFor({
   sort,
   order,
 }: Build): Promise<Sections> {
-  // Every meaning position is distinct: a section per value would be one
-  // per image. None until the arrangement's top groups become sections.
-  if (sort.key === 'meaning') return { sections: [], truncated: false };
   const key = `${boardId}:${sortId(sort)}`;
   const hit = memo.get(key);
   if (hit && hit.version === order.version) return hit.result;
@@ -88,5 +86,26 @@ async function computeSections(
     return { label, fromRank: row.rank, toRank };
   });
 
+  if (sort.key === 'meaning') await nameMeaningSections(boardId, sections);
   return { sections, truncated };
+}
+
+/** A meaning section's key is its group number; it is shown by the name
+ * the arrangement gave the group (a label term), or as "Group n". */
+async function nameMeaningSections(
+  boardId: string,
+  sections: Section[],
+): Promise<void> {
+  const { rows } = await pool.query(
+    'SELECT grp, label FROM meaning_groups WHERE board_id = $1',
+    [boardId],
+  );
+  const names = new Map(
+    rows.map((r) => [String(r.grp), r.label as string | null]),
+  );
+  for (const section of sections) {
+    if (section.label === '—') continue;
+    section.label =
+      names.get(section.label) ?? `Group ${Number(section.label) + 1}`;
+  }
 }

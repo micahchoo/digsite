@@ -149,3 +149,23 @@ it. Measured before choosing:
 At a million images the default budget takes int8: peak RSS 0.98 GB
 (was 2.5 GB), 108 s to re-arrange (was 81 s), 219 s the first time,
 when every position changed.
+
+### New pictures placed one at a time
+
+A burst of new pictures no longer re-arranges the board. Each one goes
+right after its nearest placed neighbour, midway to the next position
+(`meaning_pos` is a double now), and joins that neighbour's group. A
+full arrangement runs only when more than 200 pictures, or more than 10%
+of those placed, are new.
+
+| at 1,000,000 images | time |
+| --- | ---: |
+| full arrangement | 108–219 s |
+| one new picture, first version (exact search joined to images) | 601 ms |
+| one new picture, now (search the vectors alone, 8 deep) | 141 ms |
+| 50 new pictures | 7.0 s |
+
+The `meaning` sort now has sections: the arrangement's groups, each
+about a sixteenth of the board. Each group takes the name of the board
+label term nearest its centroid, with a number when two groups share
+one, and "Group n" on a board without labels.

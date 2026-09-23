@@ -238,12 +238,21 @@ function chainLeaf(
   idx.set(out, from);
 }
 
-/** Row indices of `v` in map order: position p on the map holds row
- * order[p]. */
-export function arrange(v: Vectors): Int32Array {
+/** The map's groups: the tree's nodes of about 1/GROUPS of the board. */
+const GROUPS = 16;
+
+/** Row indices of `v` in map order (position p holds row order[p]), and
+ * the group of each position: the first tree node on the way down no
+ * bigger than 1/GROUPS of the board, numbered in map order. A group is a
+ * run of the map, so it can be a section. */
+export function arrange(v: Vectors): { order: Int32Array; group: Int32Array } {
   const idx = new Int32Array(v.count);
   for (let i = 0; i < v.count; i++) idx[i] = i;
-  if (v.count <= 1) return idx;
+  const group = new Int32Array(v.count);
+  if (v.count <= 1) return { order: idx, group };
+  const groupSize = Math.max(LEAF, Math.ceil(v.count / GROUPS));
+  let groupCount = -1;
+  let groupedUntil = 0;
   const work = workFor(v);
   // The tail is the last picture placed: the next block starts nearest it.
   let tail: Row | null = null;
@@ -253,6 +262,13 @@ export function arrange(v: Vectors): Int32Array {
   const stack: [number, number][] = [[0, v.count]];
   while (stack.length > 0) {
     const [from, to] = stack.pop() as [number, number];
+    // Ranges come off the stack in map order, so the first small enough
+    // that is not inside an earlier group starts the next group.
+    if (from >= groupedUntil && to - from <= groupSize) {
+      groupCount++;
+      group.fill(groupCount, from, to);
+      groupedUntil = to;
+    }
     if (to - from <= LEAF) {
       chainLeaf(v, idx, from, to, tail);
       tail = row(idx[to - 1] as number);
@@ -282,7 +298,7 @@ export function arrange(v: Vectors): Int32Array {
     }
     stack.push([mid, to], [from, mid]);
   }
-  return idx;
+  return { order: idx, group };
 }
 
 /** Mean similarity between each map cell and its neighbours to the right

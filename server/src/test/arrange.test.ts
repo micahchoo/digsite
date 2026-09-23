@@ -53,14 +53,14 @@ describe('arrange', () => {
   test('every picture placed exactly once, at any size', () => {
     for (const n of [0, 1, 2, 16, 17, 250]) {
       const { v } = clustered(1, n);
-      const order = arrange(v);
+      const { order } = arrange(v);
       expect([n, new Set(order).size]).toEqual([n, n]);
     }
   });
 
   test('a group becomes a block: neighbours across and down share it', () => {
     const { v, group } = clustered(6, 60);
-    const order = arrange(v);
+    const { order } = arrange(v);
     const shuffled = Int32Array.from({ length: v.count }, (_, i) => i);
     const sameGroup = (o: ArrayLike<number>) => {
       let same = 0;
