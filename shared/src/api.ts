@@ -318,10 +318,15 @@ export type SelectionRangeResponse = { imageIds: string[] };
 // Phase 2 (docs/phases/2-sheet.md section 6): `imageCount`/`savedAt` are
 // additive on the phase-1 shape — GET /boards/:id/sheets for the sheet
 // list's stats. `savedAt` is null until the sheet's first snapshot.
+/** Someone who has been in a sheet: a stamp on its claims or a reply. */
+export type Participant = { id: string; name: string };
+
 export type SheetSummary = {
   id: string;
   name: string;
   createdAt: string;
+  /** Who has been in it, most recent first, five at most. */
+  participants: Participant[];
   imageCount: number;
   savedAt: string | null;
   archived: boolean;

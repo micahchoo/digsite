@@ -46,6 +46,7 @@ import {
   requireAuth,
 } from '../http.ts';
 import { neighbourhoodFrom } from './neighbourhood.ts';
+import { participantsOf } from './participants.ts';
 import { reachOf } from './reach.ts';
 import {
   REPLY_MAX_CHARS,
@@ -128,10 +129,12 @@ export function registerSheetRoutes(router: Router) {
        ORDER BY s.created_at`,
       [boardId, includeArchived],
     );
+    const people = await participantsOf(rows.map((r) => r.id));
     const response: ListSheetsResponse = rows.map((r) => ({
       id: r.id,
       name: r.name,
       createdAt: r.created_at.toISOString(),
+      participants: people.get(r.id) ?? [],
       imageCount: Number(r.image_count),
       savedAt: r.saved_at ? r.saved_at.toISOString() : null,
       archived: r.archived,

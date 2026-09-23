@@ -45,6 +45,7 @@ import {
   readJsonBody,
   requireAuth,
 } from '../http.ts';
+import { participantsOf } from '../sheets/participants.ts';
 import { storageOf } from '../storage/quota.ts';
 import { recordActivity } from './activity.ts';
 
@@ -424,9 +425,11 @@ export function registerGroupRoutes(router: Router) {
     const orgId = param(ctx, 'id');
     const includeArchived = ctx.url.searchParams.get('archived') === '1';
     const rows = await sheetsForGroupListing(userId, orgId, includeArchived);
+    const people = await participantsOf(rows.map((r) => r.id));
     const response: ListGroupThreadsResponse = rows.map(
       (r): GroupThreadSummary => ({
         id: r.id,
+        participants: people.get(r.id) ?? [],
         boardId: r.board_id,
         boardName: r.board_name,
         name: r.name,
