@@ -95,4 +95,4 @@ does not prove every route calls an intent. Add both halves:
   scenarios 1 and 2 must pass; the debris tolerance in `run.ts` goes.
 - `.github/workflows/ci.yml`: bun, a Postgres 16 service, `bun install`,
   `bun run check`, `bun run test`, Playwright browsers, `bun run
-  e2e:fresh` against both canvases (`VITE_CANVAS=excalidraw|native`).
+  `e2e:fresh` against the native sheet canvas.

@@ -149,11 +149,11 @@ function Header({
       </div>
       {foreignRelations.length > 0 && (
         <div className="sheet-foreign-relation-filter">
-          <label htmlFor="foreign-relation-filter">
-            Other sheets’ connections
+          <label htmlFor="connection-relation-filter">
+            Connection emphasis
           </label>
           <select
-            id="foreign-relation-filter"
+            id="connection-relation-filter"
             aria-describedby="foreign-relation-help"
             value={
               connectionRelation === null
@@ -175,7 +175,7 @@ function Header({
             ))}
           </select>
           <small id="foreign-relation-help">
-            Other relations dim. This sheet’s connections are unchanged.
+            Other relations dim; no connections are removed.
           </small>
         </div>
       )}

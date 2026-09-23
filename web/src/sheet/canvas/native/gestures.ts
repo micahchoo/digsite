@@ -1,12 +1,10 @@
 // Ported from research/image-graph/src/gestures.ts: "what a pointer is
 // asking for" as one pure decision, no DOM, no camera, no scene. Narrowed
 // to the two tools the native canvas itself ever sees pointer events for —
-// 'select' and 'pan' — because DrawLayer.tsx (../../DrawLayer.tsx, shared
-// by both adapters) is a full-bleed sibling that captures every pointer
+// 'select' and 'pan' — because DrawLayer.tsx (../../DrawLayer.tsx) is a
+// full-bleed sibling that captures every pointer
 // event itself while the active tool is 'region' or 'edge', so this canvas
-// never receives one in that state (mirrors the Excalidraw adapter, whose
-// tool becomes Excalidraw's own `{type: 'custom'}` — no built-in pointer
-// behaviour at all — for exactly the same two tools).
+// never receives one in that state.
 export type Mode = 'select' | 'pan';
 export type Target = 'image' | 'region' | 'edge' | 'empty';
 

@@ -1,4 +1,4 @@
-// Every element a sheet's Excalidraw scene makes carries customData.kind —
+// Every element in a sheet scene carries customData.kind —
 // image, region or edge (CONTEXT.md "Element"). dataOf is the one place
 // that trusts that shape; nothing else in the app reads customData raw.
 

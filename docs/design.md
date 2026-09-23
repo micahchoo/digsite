@@ -46,7 +46,7 @@ app/
 Stack: bun 1.3 workspaces, TypeScript strict with `noUncheckedIndexedAccess`,
 Biome for lint and format, `pg`, Better Auth 1.7 with the organization
 plugin (`teams: { enabled: true }`), `socket.io`, `@napi-rs/canvas`,
-`@excalidraw/excalidraw` 0.18, `@deck.gl/*` 9.
+`@deck.gl/*` 9.
 
 Ports and names are chosen not to collide with the prototypes: container
 `digsite-db`, host port `127.0.0.1:5440`, volume `digsite-db`, database,
@@ -160,9 +160,8 @@ export type Versioned = { id: string; version: number; versionNonce: number };
 export function mergeByVersion<T extends Versioned>(stored: T[], incoming: T[]): T[];
 ```
 
-Excalidraw's rule: higher `version` wins, tie broken by lower
-`versionNonce`; an id only in one list is kept. This is the server's
-snapshot merge; the client uses the package's `reconcileElements`.
+Higher `version` wins, with lower `versionNonce` breaking ties; an id only
+in one list is kept. The server and client use the same scene merge rule.
 
 ### `src/sheet/project.ts`
 
@@ -457,16 +456,15 @@ Pages:
 
 ### The sheet page (`web/src/sheet/`)
 
-`Sheet.tsx` mounts one Excalidraw with the snapshot, loads every image
-file through `api.addFiles` from `/images/:id/original`, and holds the
-`ExcalidrawImperativeAPI`.
+`Sheet.tsx` mounts the native canvas with the snapshot and loads every image
+from `/images/:id/original` into the canvas file cache.
 
 `sync.ts`: in `onChange`, when the syncable set's `id:version` signature
 changed, emit `scene` debounced 100 ms. `isSyncable(el) = !el.isDeleted ||
-el.updated > now − 24 h` (Excalidraw's own tombstone window). There is no
+el.updated > now − 24 h`. There is no
 foreign filter here because nothing foreign is ever in the scene. On
-`scene` from the server: `reconcileElements(local, remote, appState)` then
-`api.updateScene({elements, captureUpdate: CaptureUpdateAction.NEVER})`.
+`scene` from the server: merge local and remote elements by version, then
+apply them without adding a local undo entry.
 
 `tools.ts`: `drawRegion(imageId, fraction, label)`, `connect(fromId, toId,
 relation, direction)`, `moveImage(imageId, dx, dy)`, `setRegionRect(id,
@@ -474,13 +472,12 @@ fraction)`, `copyForeign(foreignId)`, `select(id)`, `setProperty`,
 `removeProperty`, `getElements()`, `getForeign()`, `getSelected()`,
 `syncStatus()`. Region elements are `rectangle` in the image's group
 (`imageGroupId`), clamped inside the image on every change. Edges are
-`arrow` with `startBinding`/`endBinding` set by hand after
-`convertToExcalidrawElements` (`{elementId, fixedPoint: [0.5, 0.5], mode:
-'orbit'}`) and the reverse `boundElements` written on the two ends.
+`arrow` with `startBinding`/`endBinding` and reverse `boundElements` written
+on the two ends.
 Arrowheads from `arrowheadsFor`.
 
 `overlay/`: the foreign layer. `Overlay.tsx` renders an `<svg>`
-positioned over the Excalidraw container, `pointer-events: none` on the
+positioned over the canvas container, `pointer-events: none` on the
 svg and `pointer-events: all` on each foreign shape. It reads
 `appState.scrollX`, `scrollY` and `zoom.value` from `onChange` and the
 current image and region elements from the scene, and computes every
@@ -488,7 +485,7 @@ foreign shape's pixels on every render: `fromFraction(row, imageRectNow)`
 for a region, current end rects for an edge. `useForeign.ts` polls
 `/sheets/:id/foreign` every 3,000 ms and holds the rows. A click on a
 foreign shape sets `selectedForeign` in React state and stops
-propagation; a drag does nothing; the pointer never reaches Excalidraw.
+propagation; a drag does nothing; the pointer never reaches the canvas.
 Dashed stroke, 70 % opacity, the label as text.
 
 `Inspector.tsx`: for an own element, kind, label or relation, direction
@@ -530,7 +527,7 @@ run db:migrate` and `bun run seed`. Each scenario has a hard assertion.
 8. **Pointer on a foreign shape.** In B, a real `mouse.down` / `move` /
    `up` across the foreign region's screen position. The image under it
    has not moved; `getSelected()` reports the foreign selection;
-   Excalidraw's `appState.selectedElementIds` is empty.
+   no owned canvas element is selected.
 9. `outsider` connects a socket and joins A → `join-denied`.
 10. Reload A: the region and the edge are back from the snapshot.
 

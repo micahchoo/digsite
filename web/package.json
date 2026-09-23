@@ -15,7 +15,6 @@
     "@deck.gl/core": "^9.1.0",
     "@deck.gl/geo-layers": "^9.1.0",
     "@deck.gl/layers": "^9.1.0",
-    "@excalidraw/excalidraw": "^0.18.1",
     "@luma.gl/core": "^9.1.0",
     "better-auth": "^1.7.0",
     "react": "^19.0.0",

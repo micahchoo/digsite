@@ -122,8 +122,7 @@ export function hitAt(
 /** Every element a drag on `imageId` carries: the image itself plus every
  * element in its group (regions and their bound labels — `moveImage` in
  * ../../tools.ts is the same rule, ported here for the pointer-driven
- * drag). Edges are NOT in the group (`excalidraw/convert.ts#buildEdge`
- * never sets one); they follow through `retargetEdges` instead. */
+ * drag). Edges are not in the group; they follow through `retargetEdges`. */
 export function groupMembers(
   elements: readonly SceneElement[],
   imageId: string,
@@ -178,8 +177,8 @@ function geometryFor(
 
 /**
  * "An arrow's points are recomputed from the bound rects on every local
- * change" (docs/phases/2-sheet.md section 8). Excalidraw does this inside
- * its own binding engine whenever a bound shape moves; nothing else in this
+ * change" (docs/phases/2-sheet.md section 8). Bound edges follow their
+ * endpoints whenever a bound shape moves; nothing else in this
  * product (`../../scene-diff.ts`) reimplements it, so the native adapter
  * must — every local commit runs every live edge through this before
  * `onChange` fires. An edge whose bound element is gone or deleted is left

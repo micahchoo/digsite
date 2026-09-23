@@ -30,7 +30,7 @@ const DIFF_KEYS = [
 ] as const;
 
 /** Only the fields that actually differ — passing an unchanged object field
- * (e.g. `customData`) still counts as a change to Excalidraw's own
+ * (e.g. `customData`) still counts as a change to the
  * `newElementWith` (any object-valued update is treated as possibly
  * different, per its own comment in mutateElement.ts), so a wholesale copy
  * of `after` would bump a version nothing about semantically changed. */

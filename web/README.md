@@ -20,22 +20,22 @@ Vite + React 19 + TypeScript. See `../CONTEXT.md` for vocabulary and
   sheet" (`ringLayout`, centres as `positions`); "copy connections" carries
   the neighbourhood's image-to-image edges in as own edges. Debug hooks:
   `window.__digsiteBoard` (`selectImages(ids)` is Explore's own entry point).
-- `/s/:id` — the document: one Excalidraw scene per sheet, live-synced over
-  Socket.IO (`room.ts`) plus the foreign overlay below. `sheet/canvas/` is
-  the only module that imports Excalidraw; `CanvasHandle` and `SceneElement`
+- `/s/:id` — the document: one native scene per sheet, live-synced over
+  Socket.IO (`room.ts`) plus the foreign overlay below. `sheet/canvas/` owns
+  the drawing surface; `CanvasHandle` and `SceneElement`
   are the seam everything else (`tools.ts`, `Sheet.tsx`, `DrawLayer.tsx`)
   talks through, enforced by `bun run lint:seams` (see
   `.claude/rules/sheet-canvas-seam.md` and `canvas/README.md`). `Toolbar.tsx`
   (select/region/edge/pan, zoom, undo/redo, keys V/R/E/H) sits bottom-centre,
-  replacing Excalidraw's own stock chrome entirely. A missing image loads a
+  with product-owned controls. A missing image loads a
   drawn placeholder instead of fetching its preview (`images.ts`).
 
 ## The overlay seam
 
-A claim from another sheet is never an Excalidraw element. `sheet/overlay/`
-draws every foreign region/edge on an `<svg>` above the Excalidraw canvas,
+A claim from another sheet is never an owned scene element. `sheet/overlay/`
+draws every foreign region/edge on an `<svg>` above the canvas,
 computed fresh each render, and owns its pointer events (`all` on each
-shape, `none` elsewhere) so a click/drag never reaches Excalidraw. A
+shape, `none` elsewhere) so a click/drag never reaches the canvas. A
 foreign edge whose region end didn't come back in the latest poll draws to
 the image instead with a hollow marker (`screen.ts#foreignShapes`'
 `danglingStart`/`danglingEnd`) — overlay-only, never a scene change. See

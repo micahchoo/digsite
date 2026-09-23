@@ -2,7 +2,7 @@
 // section 7's DoD: "Images load from /images/:id/preview... falling back to
 // the placeholder on 404"). Pure-ish (fetch aside) and DOM-adjacent
 // (`placeholderDataURL` draws on a detached canvas) but not
-// Excalidraw-specific — `CanvasHandle`'s `files` prop takes whatever this
+// Canvas-specific — `CanvasHandle`'s `files` prop takes whatever this
 // produces.
 import { fileId } from '@digsite/shared';
 import { api } from '../lib/api.ts';

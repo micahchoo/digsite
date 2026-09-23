@@ -1,13 +1,6 @@
-// The seam's interface: everything a caller needs to know to use the canvas
-// without importing `@excalidraw/*` (../../../.claude/rules/sheet-canvas-seam.md).
-// `SceneElement` extends `@digsite/shared`'s own projection-side type of the
-// same name (shared/src/sheet/project.ts — what the server-side projection
-// and the stub already treat as "an element, decoupled from Excalidraw's
-// branded type") with the extra fields the product reads or writes:
-// grouping, bindings, arrow geometry/arrowheads and a bound text's display
-// string. No file outside `canvas/` may import `@excalidraw/excalidraw` or
-// name one of its types (`ExcalidrawElement`, `ExcalidrawImperativeAPI`) —
-// enforced by `bun run lint:seams`.
+// The canvas interface exposed to the rest of the sheet UI. `SceneElement`
+// extends the shared projection type with the product fields needed for
+// grouping, bindings, arrow geometry, and bound text.
 
 import type {
   Direction,
@@ -42,15 +35,10 @@ export interface BoundElementRef {
 
 export type Arrowhead = 'arrow' | 'triangle_outline' | null;
 
-/** The product's own element shape — a superset of every field `dataOf`,
- * `dangling.ts`, `clamp.ts`, `hit.ts`, `screen.ts` and the e2e/smoke scripts
- * read off `window.__digsite.getElements()`. Structurally identical to an
- * Excalidraw element on these fields, but OUR type: nothing outside
- * `canvas/` imports the `@excalidraw` package to get it. */
+/** The product's element shape — a superset of fields read by scene helpers
+ * and the e2e/smoke scripts through `window.__digsite.getElements()`. */
 export interface SceneElement extends ProjectableElement {
-  /** Narrower than the inherited `boolean | undefined` — Excalidraw itself
-   * never omits this field, and `sync.ts#SyncElement`/`dangling.ts`'s own
-   * structural type both require it present. */
+  /** Narrowed because sync and dangling-edge logic require a concrete value. */
   isDeleted: boolean;
   updated: number;
   groupIds: readonly string[];
@@ -80,7 +68,7 @@ export interface SceneChange {
 
 // -- ScenePatch: every way a caller may change the scene, in one call -----
 // Two "build a new element" ops (the product hands over domain facts —
-// image, rect, label/relation — and never an Excalidraw skeleton) and two
+// image, rect, label/relation — and never a renderer-specific skeleton) and two
 // "change what's there" ops, addressed by id. `id` on `addRegion`/`addEdge`
 // is chosen by the CALLER (`crypto.randomUUID()` in tools.ts) rather than
 // handed back by `apply`, so the interface stays a single `void` call.
@@ -134,8 +122,8 @@ export interface CanvasHandle {
    * 'scene' delta — both go through this one path, restored then
    * reconciled) against the live scene. Never enters undo. */
   applyRemote(elements: unknown[]): void;
-  /** Replaces the whole selection; a foreign id (not a real element) clears
-   * Excalidraw's own selection instead. Never enters undo. */
+  /** Replaces the whole selection; a foreign id clears the canvas selection.
+   * Never enters undo. */
   select(ids: string[]): void;
   selectedIds(): string[];
   viewport(): Viewport;
@@ -160,10 +148,12 @@ export interface CanvasFile {
 export interface CanvasProps {
   /** fileId -> loaded file, keyed by `@digsite/shared#fileId(imageId)`. A
    * new entry is added to the scene's file store on the next render; an
-   * entry is never removed once added (Excalidraw's own file store has no
-   * delete). Loaded by the caller (room.ts's `loadImages`) — the canvas
+   * entry is never removed once added. Loaded by the caller
+   * (room.ts's `loadImages`) — the canvas
    * never fetches an original itself. */
   files: Map<string, CanvasFile>;
   tool: Tool;
+  /** Visual emphasis only; never stored in or emitted with the scene. */
+  dimRelations?: string | null;
   onChange(scene: SceneChange): void;
 }

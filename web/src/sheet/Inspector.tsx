@@ -124,8 +124,8 @@ export function Inspector({
           <b>kind:</b> {data.kind}
         </span>
         {/* A click on a grouped element (a region shares groupIds with its
-            image) selects the whole group by default — Excalidraw's own
-            "click again to narrow the selection" gets a single region back,
+            image) selects the whole group by default — clicking again to
+            narrow the selection gets a single region back,
             or `tools.select(id)` does directly. Either way, deleting from
             here deletes exactly what is currently selected: the group, or
             just this element. */}

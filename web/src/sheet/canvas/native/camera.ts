@@ -2,17 +2,15 @@
 // looking, and every way it moves" — with the arithmetic rewritten for OUR
 // convention rather than image-graph's. image-graph's camera is
 // `{x, y, scale}` with `screen = world*scale + camera.{x,y}`; our `Viewport`
-// (canvas/types.ts) is `{scrollX, scrollY, zoom}` in Excalidraw's own
-// convention, `screen = (world + scroll) * zoom` — fixed by the brief
+// (canvas/types.ts) is `{scrollX, scrollY, zoom}` with
+// `screen = (world + scroll) * zoom` — fixed by the brief
 // (docs/phases/2-sheet.md section 8) so `overlay/screen.ts`'s
-// `sceneToScreen`/`screenToScene` need no change between adapters. Every
+// `sceneToScreen`/`screenToScene` share this convention. Every
 // function here is pure and returns a new `Viewport`.
 import type { Viewport } from '../types.ts';
 import type { Point, Rect } from './geometry.ts';
 
-// research/excalidraw/packages/common/src/constants.ts, same limits
-// excalidraw/convert.ts already uses — kept identical so a scene's zoom
-// feels the same regardless of which adapter is looking at it.
+// Product zoom limits; kept stable so saved viewport behavior stays familiar.
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 30;
 const FIT_PADDING = 48;
@@ -82,7 +80,7 @@ export function scrollBy(vp: Viewport, dx: number, dy: number): Viewport {
 }
 
 /** The viewport that shows all of `box`, `FIT_PADDING` screen px of margin
- * on every side — mirrors `excalidraw/convert.ts#fitViewport`'s formula
+ * on every side.
  * (both are `sceneCoordsToViewportCoords` run backwards) so `zoomToFit`
  * feels identical between adapters. An empty `rects` union (null box, or a
  * non-positive container) returns the viewport unchanged. */
@@ -114,7 +112,7 @@ export function fitBox(
 
 /** Zoom by `factor` (>1 in, <1 out) about the container's own centre — the
  * toolbar's zoom in/out buttons, same contract as
- * `excalidraw/convert.ts#zoomBy`. */
+ */
 export function zoomBy(
   current: Viewport,
   factor: number,

@@ -1,5 +1,5 @@
 // Presence (docs/phases/2-sheet.md section 3): pointer throttling and peer
-// colour/outline geometry. Pure — no socket, no DOM, no Excalidraw import —
+// colour/outline geometry. Pure — no socket, no DOM, no canvas import —
 // so it is unit-testable standalone; Sheet.tsx owns the socket and the
 // pointermove listener, Overlay.tsx draws what this file computes.
 import type { PointerBroadcastPayload } from '@digsite/shared/api';

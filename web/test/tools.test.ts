@@ -2,7 +2,7 @@
 // (../src/sheet/clamp.ts), the delete cascade + dangling rebind
 // (../src/sheet/dangling.ts), the label width/truncation contract
 // (../src/sheet/labels.ts — the 200-char label case), and the point hit
-// test (../src/sheet/hit.ts). No DOM, no Excalidraw import: every element
+// test (../src/sheet/hit.ts). No DOM or canvas import: every element
 // here is a plain object shaped like the piece under test needs.
 import { describe, expect, test } from 'bun:test';
 import { imageGroupId } from '@digsite/shared';
@@ -188,7 +188,7 @@ describe('applyCascade', () => {
     expect(byId.get('img2')?.isDeleted).toBeFalsy();
   });
 
-  test('an edge on a region Excalidraw already deleted in the SAME group-delete is still swept', () => {
+  test('an edge on a region already deleted in the same group-delete is still swept', () => {
     // Regression: clicking an image selects the whole group (image + its
     // regions, shared groupIds) — a real Delete keypress hands applyCascade
     // an elements array where the region is ALREADY isDeleted alongside its
@@ -203,7 +203,7 @@ describe('applyCascade', () => {
     const { elements, changed } = applyCascade([
       { ...img1, isDeleted: true },
       img2,
-      { ...r1, isDeleted: true }, // already deleted, same as img1, by Excalidraw's own group delete
+      { ...r1, isDeleted: true }, // already deleted in the same group-delete
       e1,
     ]);
     expect(changed).toBe(true);
@@ -211,14 +211,10 @@ describe('applyCascade', () => {
     expect(byId.get('e1')?.isDeleted).toBe(true);
   });
 
-  test('an image delete still sweeps its edge when Excalidraw has already nulled the binding', () => {
-    // Measured against the running app: a real Delete keypress goes through
-    // Excalidraw's own actionDeleteSelected -> fixBindingsAfterDeletion,
-    // which NULLS the arrow's binding to whatever it just deleted before
-    // onChange ever runs. `boundElements` on the deleted element survives
-    // that (Excalidraw only mutates the still-live side) and is what this
-    // regression exercises: the edge's own startBinding is already null,
-    // exactly like a real native delete hands it to us.
+  test('an image delete still sweeps its edge when the binding is already null', () => {
+    // A group-delete can null the arrow binding to a deleted endpoint
+    // before the scene correction pass runs. `boundElements` on the deleted
+    // element survives, which is what this regression exercises.
     const img1 = image('img1', 'a', 0);
     const img2 = image('img2', 'b', 200);
     const r1 = {
@@ -228,7 +224,7 @@ describe('applyCascade', () => {
     };
     const e1 = {
       ...edge('e1', { x: 15, y: 15 }, { x: 215, y: 15 }, 'r1', 'img2'),
-      startBinding: null, // already nulled by Excalidraw itself
+      startBinding: null, // already nulled by the group-delete
     };
 
     const { elements, changed } = applyCascade([
@@ -242,7 +238,7 @@ describe('applyCascade', () => {
     expect(byId.get('e1')?.isDeleted).toBe(true);
   });
 
-  test('a region-only delete rebinds its edge even when Excalidraw has already nulled that side', () => {
+  test('a region-only delete rebinds its edge even when the binding is already null', () => {
     const img1 = image('img1', 'a', 0);
     const img2 = image('img2', 'b', 200);
     const r1 = {

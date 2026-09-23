@@ -1,9 +1,6 @@
 import { dataOf } from '@digsite/shared';
-// The document (docs/design.md "web/" § "The sheet page"). Composition only
-// (docs/phases/2-sheet.md section 7): loads the sheet, owns the socket
-// through `room.ts`, owns the foreign poll, lays out the page. Everything
-// imperative goes through `CanvasHandle` — no `@excalidraw` import, no
-// Excalidraw type, per `../.claude/rules/sheet-canvas-seam.md`.
+// Composition only: loads the sheet, owns its room and foreign poll, and
+// lays out the page. Imperative canvas work goes through `CanvasHandle`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import {
@@ -83,7 +80,10 @@ export function Sheet() {
   }, []);
 
   const room = useRoom({
-    sheetId,
+    // The canvas is rendered only after this sheet's metadata resolves. Join
+    // at that point so the initial `joined` snapshot always has a handle to
+    // apply to (otherwise a fast socket response can be silently dropped).
+    sheetId: sheetInfo?.id === sheetId ? sheetId : '',
     getHandle: () => canvasRef.current,
     loadImages,
     onRemoteChange: () => {
@@ -222,12 +222,24 @@ export function Sheet() {
     sheetIndex >= 0 && sheetIndex < boardSheets.length - 1
       ? (boardSheets[sheetIndex + 1] ?? null)
       : null;
-  const foreignRelations = Array.from(
-    new Set(foreign.rows.edges.map((edge) => edge.relation)),
+  const connectionRelations = Array.from(
+    new Set([
+      ...foreign.rows.edges.map((edge) => edge.relation),
+      ...sceneElements.flatMap((element) => {
+        if (element.isDeleted) return [];
+        const data = dataOf(element);
+        return data?.kind === 'edge' ? [data.relation] : [];
+      }),
+    ]),
   ).sort((a, b) => a.localeCompare(b));
   const currentImageCount = sceneElements.filter(
     (element) => !element.isDeleted && dataOf(element)?.kind === 'image',
   ).length;
+  const selected = tools.getSelected();
+  const selectedOwnId =
+    selected?.kind === 'own' && selected.elements.length === 1
+      ? (selected.elements[0]?.id ?? null)
+      : null;
 
   if (sheetError) return <ErrorState info={sheetError} />;
   if (room.denied) {
@@ -256,6 +268,7 @@ export function Sheet() {
           ref={canvasRef}
           files={files}
           tool={tool}
+          dimRelations={connectionRelation}
           onChange={onCanvasChange}
         />
         <DrawLayer
@@ -273,8 +286,10 @@ export function Sheet() {
           viewport={viewport}
           offset={{ left: 0, top: 0 }}
           selectedId={selectedForeignId}
+          selectedOwnId={selectedOwnId}
           connectionRelation={connectionRelation}
           onSelect={(sid) => tools.select(sid)}
+          onSelectOwn={(elementId) => canvasRef.current?.select([elementId])}
           peers={peerCursorList}
         />
         <button
@@ -324,13 +339,13 @@ export function Sheet() {
           onNavigateSheet: (id) => navigate(`/s/${id}`),
           onCloseMobile: () => setMobileInspectorOpen(false),
           closeButtonRef: inspectorCloseRef,
-          foreignRelations,
+          foreignRelations: connectionRelations,
           connectionRelation,
           onConnectionRelationChange: setConnectionRelation,
         }}
         dangling={tools.getDangling()}
         onRemoveDangling={() => tools.removeDangling()}
-        selected={tools.getSelected()}
+        selected={selected}
         onSetProperty={tools.setProperty}
         onRemoveProperty={tools.removeProperty}
         onCopyForeign={(fid) => tools.copyForeign(fid)}

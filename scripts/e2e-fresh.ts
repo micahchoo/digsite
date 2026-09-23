@@ -3,16 +3,12 @@
 // running `digsite-db` container, migrates, seeds through the real HTTP API
 // (server/src/seed.ts's own pattern), starts server and web on free ports
 // with a temp DATA_DIR, runs the scripted e2e suites
-// (e2e/src/{board-selection,run,groups-life,sheet-hour}.ts), then tears
+// (e2e/src/{upload-queue,board-selection,run,groups-life,sheet-hour}.ts), then tears
 // everything down: stops both processes, drops the database, deletes the
 // temp dir. Exits nonzero on any suite failure or setup error.
 //
-// `bun run e2e:fresh` at the repo root. `VITE_CANVAS=excalidraw|native` in
-// the environment selects the sheet canvas adapter (web/src/sheet/canvas/
-// README.md); passed straight through to the web dev server, which reads it
-// via `import.meta.env.VITE_CANVAS` (Canvas.tsx) — Vite exposes any
-// process.env var already set under its VITE_ prefix with no .env file
-// needed (vite's `loadEnv`).
+// `bun run e2e:fresh` at the repo root. The sheet uses its native canvas.
+// Pass suite paths for a focused fresh run, e.g. src/upload-queue.ts.
 //
 // Never touches the owner's dev instances (server :8800, web :5180) or any
 // container but `digsite-db`: ports are picked free at or above 8850/5250,
@@ -39,6 +35,18 @@ const BASE_DATABASE_URL =
   process.env.DATABASE_URL ??
   'postgres://digsite:digsite@127.0.0.1:5440/digsite';
 const HOUR_ACTIONS = process.env.HOUR_ACTIONS ?? '60';
+const SUITE_PATHS = [
+  'src/upload-queue.ts',
+  'src/board-selection.ts',
+  'src/run.ts',
+  'src/groups-life.ts',
+  'src/sheet-hour.ts',
+];
+const requested = process.argv.slice(2);
+if (requested.some((path) => !SUITE_PATHS.includes(path))) {
+  throw new Error(`Unknown suite. Choose from: ${SUITE_PATHS.join(', ')}`);
+}
+const selected = requested.length ? requested : SUITE_PATHS;
 
 function log(msg: string): void {
   console.log(`[e2e-fresh] ${msg}`);
@@ -205,8 +213,6 @@ async function main() {
         env: {
           ...process.env,
           VITE_SERVER_ORIGIN: serverOrigin,
-          // process.env.VITE_CANVAS passes through untouched (undefined ->
-          // web's own default, 'excalidraw' — Canvas.tsx).
         } as Record<string, string>,
         stdout: 'inherit',
         stderr: 'inherit',
@@ -217,15 +223,10 @@ async function main() {
 
     // -- scripted suites --------------------------------------------------------
     const suiteEnv = { SERVER_ORIGIN: serverOrigin, WEB_ORIGIN: webOrigin };
-    const suites: { cmd: string[]; env?: Record<string, string> }[] = [
-      { cmd: ['bun', 'run', 'src/board-selection.ts'], env: suiteEnv },
-      { cmd: ['bun', 'run', 'src/run.ts'], env: suiteEnv },
-      { cmd: ['bun', 'run', 'src/groups-life.ts'], env: suiteEnv },
-      {
-        cmd: ['bun', 'run', 'src/sheet-hour.ts'],
-        env: { ...suiteEnv, HOUR_ACTIONS },
-      },
-    ];
+    const suites = selected.map((path) => ({
+      cmd: ['bun', 'run', path],
+      env: { ...suiteEnv, HOUR_ACTIONS },
+    }));
     for (const suite of suites) {
       const ok = runChecked(suite.cmd, { cwd: E2E_DIR, env: suite.env });
       if (!ok) {
@@ -276,9 +277,7 @@ async function main() {
     console.log('\ne2e-fresh: FAIL');
     process.exit(1);
   }
-  console.log(
-    '\ne2e-fresh: PASS (board-selection.ts, run.ts, groups-life.ts, sheet-hour.ts)',
-  );
+  console.log(`\ne2e-fresh: PASS (${selected.join(', ')})`);
   process.exit(0);
 }
 

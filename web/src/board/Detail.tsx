@@ -2,7 +2,7 @@
 // panel (Board.tsx's selection list) opens this — the original at fit size,
 // its metadata, and its properties, editable through PATCH /images/:id
 // (docs/phases/1-map.md section 3). Distinct from sheet/Inspector.tsx, which
-// edits an Excalidraw element's customData; this edits an image row
+// edits a scene element's customData; this edits an image row
 // directly, so the type/coerce helpers are duplicated rather than shared —
 // the two panels edit unrelated things that happen to look similar.
 import type { GetImageResponse, PropertyValue } from '@digsite/shared';

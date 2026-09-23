@@ -655,10 +655,9 @@ pattern as the group's danger zone.
   literal). `⋯` holds Rename, Archive, "Show on board" (returns to the
   board with this sheet's images selected, map scrolled to the first —
   the Selection spec's own item).
-- **Canvas**: full-bleed, `--surface-canvas`, the Excalidraw or native
-  adapter behind the `CanvasHandle` seam (`sheet-canvas-seam.md`) — this
-  design doesn't touch which adapter renders; it fixes what sits over
-  it. Own regions/edges solid in `--claim-own`/`--claim-edge`. Foreign
+- **Canvas**: full-bleed, `--surface-canvas`, the native implementation
+  behind the `CanvasHandle` seam (`sheet-canvas-seam.md`). Own regions/edges
+  solid in `--claim-own`/`--claim-edge`. Foreign
   claims dashed `--claim-foreign`, drawn by the overlay
   (`foreign-never-in-scene.md`), with de-collision: a foreign label that
   would overlap another foreign label, an image caption, or an own

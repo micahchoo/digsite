@@ -1,5 +1,5 @@
 // Pure: what a pointer press means per tool, and the drag-to-rect helper —
-// no DOM, no Excalidraw — see ../src/sheet/gestures.ts.
+// no DOM or canvas — see ../src/sheet/gestures.ts.
 import { describe, expect, test } from 'bun:test';
 import { pointerIntent, rectFromDrag } from '../src/sheet/gestures.ts';
 

@@ -29,12 +29,11 @@ its own `digsite_e2e_<ts>` database and temp data dir on that same
 container, migrates, seeds, starts a server and a web dev server on free
 ports, runs the scripted suites (`e2e/src/{run,groups-life,sheet-hour}.ts`),
 then tears everything down — nothing it does touches your own dev server,
-web server or database. `VITE_CANVAS=excalidraw|native` picks the sheet
-canvas adapter it exercises. `bun run smoke` runs the five
+web server or database. The sheet uses the native canvas. `bun run smoke` runs the
 `web/scripts/smoke*.ts` definition-of-done scripts, each against its own
 fresh stub (`web/stub/server.ts`) on free ports — no database needed.
-`.github/workflows/ci.yml` runs all three (`check`, `test`, `e2e:fresh`
-against both canvases, `smoke`) on push and pull request.
+`.github/workflows/ci.yml` runs all three (`check`, `test`, `e2e:fresh`,
+`smoke`) on push and pull request.
 
 ## Deploying
 

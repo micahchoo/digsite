@@ -1,12 +1,11 @@
 // What a scene point lands on: an image, a region, or nothing. Pure — takes
 // the live element list (already the shape screen.ts's ElementLike wants),
-// no DOM, no Excalidraw import. The region and edge tools both start with
+// no DOM or canvas import. The region and edge tools both start with
 // this (docs/phases/2-sheet.md section 1): a region drag must start on an
 // image, an edge pick must land on an image or an own region.
 //
 // Regions draw on top of their image, so a later element in the array wins
-// a point both could claim — Excalidraw's own z-order is array order, and
-// this mirrors it without reading anything Excalidraw-specific.
+// a point both could claim — scene array order determines which is on top.
 
 import { dataOf } from '@digsite/shared';
 import type { ElementLike, Point } from './overlay/screen.ts';

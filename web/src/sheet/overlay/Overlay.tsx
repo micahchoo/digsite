@@ -1,33 +1,51 @@
-// The foreign layer: an <svg> above the Excalidraw container. pointer-events
-// is 'none' on the svg itself and 'all' on each shape, so a click on empty
-// canvas falls through to Excalidraw underneath and a click on a foreign
-// shape never reaches it — see ../../../.claude/rules/foreign-never-in-scene.md.
-//
-// Presence (docs/phases/2-sheet.md section 3) shares this layer: a peer's
-// named cursor and a faint outline of their current selection, computed by
-// ../presence.ts and passed in as `peers` — informational only, so every
-// peer element here is `pointerEvents: 'none'`.
-import type { Foreign } from '@digsite/shared';
-import { useMemo } from 'react';
+// Foreign claims and presentation-only labels share one SVG layer above the
+// native canvas. Foreign geometry stays outside the native scene, scene
+// history, persistence, native hit testing, and collaboration.
+import { type Foreign, dataOf } from '@digsite/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { SceneElement } from '../canvas/types.ts';
+import { relationOpacity } from '../connection-emphasis.ts';
 import type { PeerCursor } from '../presence.ts';
 import {
+  type ConnectionLabelJob,
   type ContainerOffset,
-  type ElementLike,
+  type LabelObstacle,
+  type PlacedConnectionLabel,
+  type PlacedRegionLabel,
+  type Rect,
+  type RegionLabelJob,
   type Viewport,
   foreignShapes,
+  placeConnectionLabels,
+  placeRegionLabels,
   rectToScreen,
   sceneToScreen,
 } from './screen.ts';
 
 interface Props {
   rows: Foreign;
-  elements: readonly ElementLike[];
+  elements: readonly SceneElement[];
   viewport: Viewport;
   offset: ContainerOffset;
   selectedId: string | null;
+  selectedOwnId: string | null;
   connectionRelation: string | null;
   onSelect: (id: string) => void;
+  onSelectOwn: (id: string) => void;
   peers?: PeerCursor[];
+}
+
+interface EdgeLabel extends PlacedConnectionLabel {
+  line: ConnectionLabelJob['line'];
+  ignoreObstacleIds?: readonly string[];
+  relation: string;
+  foreign: boolean;
+  dimmed: boolean;
+}
+
+interface ForeignRegionLabel extends PlacedRegionLabel {
+  shapeId: string;
+  selected: boolean;
 }
 
 export function Overlay({
@@ -36,30 +54,239 @@ export function Overlay({
   viewport,
   offset,
   selectedId,
+  selectedOwnId,
   connectionRelation,
   onSelect,
+  onSelectOwn,
   peers = [],
 }: Props) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [size, setSize] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
   const shapes = useMemo(() => foreignShapes(rows, elements), [rows, elements]);
+  const measureLabel = useMemo(() => {
+    const ctx = document.createElement('canvas').getContext('2d');
+    if (ctx) ctx.font = '11px system-ui, sans-serif';
+    return (label: string) => ctx?.measureText(label).width ?? label.length * 7;
+  }, []);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const resize = () => {
+      const box = svg.getBoundingClientRect();
+      setSize({ width: box.width, height: box.height });
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(svg);
+    return () => observer.disconnect();
+  }, []);
+
+  const labels = useMemo(() => {
+    const jobs: (ConnectionLabelJob & {
+      relation: string;
+      foreign: boolean;
+      dimmed: boolean;
+    })[] = [];
+    const byId = new Map(elements.map((element) => [element.id, element]));
+    const endpointImageId = (elementId: string | undefined): string | null => {
+      if (!elementId) return null;
+      const endpoint = byId.get(elementId);
+      if (!endpoint) return null;
+      const data = dataOf(endpoint);
+      return data?.kind === 'image' || data?.kind === 'region'
+        ? data.imageId
+        : null;
+    };
+    for (const element of elements) {
+      if (element.isDeleted) continue;
+      const data = dataOf(element);
+      if (data?.kind !== 'edge' || !data.relation) continue;
+      const first = element.points[0] ?? [0, 0];
+      const last = element.points.at(-1) ?? first;
+      const relation = data.relation;
+      jobs.push({
+        id: `own-${element.id}`,
+        label: relation,
+        line: [
+          sceneToScreen(
+            { x: element.x + first[0], y: element.y + first[1] },
+            viewport,
+            offset,
+          ),
+          sceneToScreen(
+            { x: element.x + last[0], y: element.y + last[1] },
+            viewport,
+            offset,
+          ),
+        ],
+        relation,
+        foreign: false,
+        ignoreObstacleIds: [
+          endpointImageId(element.startBinding?.elementId),
+          endpointImageId(element.endBinding?.elementId),
+        ].filter((imageId): imageId is string => imageId !== null),
+        dimmed: relationOpacity(relation, connectionRelation) < 1,
+        priority:
+          (relationOpacity(relation, connectionRelation) === 1 ? 10 : 0) +
+          (selectedOwnId === element.id ? 100 : 0),
+      });
+    }
+    for (const shape of shapes) {
+      if (shape.kind !== 'edge' || !shape.label) continue;
+      jobs.push({
+        id: shape.id,
+        label: shape.label,
+        line: [
+          sceneToScreen(shape.line[0], viewport, offset),
+          sceneToScreen(shape.line[1], viewport, offset),
+        ],
+        relation: shape.row.relation,
+        foreign: true,
+        ignoreObstacleIds: [shape.row.source.imageId, shape.row.target.imageId],
+        dimmed: relationOpacity(shape.row.relation, connectionRelation) < 1,
+        priority:
+          (relationOpacity(shape.row.relation, connectionRelation) === 1
+            ? 10
+            : 0) + (selectedId === shape.id ? 100 : 0),
+      });
+    }
+    const obstacles: LabelObstacle[] = elements.flatMap((element) => {
+      if (element.isDeleted) return [];
+      const data = dataOf(element);
+      if (data?.kind !== 'image') return [];
+      return [
+        {
+          ...rectToScreen(
+            {
+              x: element.x,
+              y: element.y,
+              width: element.width,
+              height: element.height,
+            },
+            viewport,
+            offset,
+          ),
+          id: data.imageId,
+        },
+      ];
+    });
+    // Labels with no clear candidate are omitted; a selected connection still
+    // exposes its relation and properties in the inspector.
+    const placed = placeConnectionLabels(
+      jobs,
+      obstacles,
+      size.width,
+      size.height,
+      measureLabel,
+    );
+    const metadata = new Map(jobs.map((job) => [job.id, job]));
+    return placed.flatMap((placedLabel): EdgeLabel[] => {
+      const job = metadata.get(placedLabel.id);
+      return job ? [{ ...placedLabel, ...job }] : [];
+    });
+  }, [
+    connectionRelation,
+    elements,
+    measureLabel,
+    offset,
+    selectedId,
+    selectedOwnId,
+    shapes,
+    size,
+    viewport,
+  ]);
+
+  const regionLabels = useMemo(() => {
+    const jobs: RegionLabelJob[] = shapes.flatMap((shape) => {
+      if (shape.kind !== 'region' || !shape.label) return [];
+      return [
+        {
+          id: shape.id,
+          label: shape.label,
+          rect: rectToScreen(shape.rect, viewport, offset),
+          priority: shape.id === selectedId ? 100 : 0,
+        },
+      ];
+    });
+    const byId = new Map(elements.map((element) => [element.id, element]));
+    const ownLabelObstacles: Rect[] = elements.flatMap((element) => {
+      if (element.isDeleted) return [];
+      const data = dataOf(element);
+      if (data?.kind !== 'region') return [];
+      const textId = element.boundElements?.find(
+        (item) => item.type === 'text',
+      )?.id;
+      const label = (textId ? byId.get(textId)?.text : null) ?? '';
+      if (!label) return [];
+      const rect = rectToScreen(
+        {
+          x: element.x,
+          y: element.y,
+          width: element.width,
+          height: element.height,
+        },
+        viewport,
+        offset,
+      );
+      return [
+        {
+          x: rect.x + 4,
+          y: rect.y + 3,
+          width: Math.min(measureLabel(label), Math.max(0, rect.width - 8)),
+          height: 14,
+        },
+      ];
+    });
+    const edgeLabelObstacles: Rect[] = labels.map(
+      ({ x, y, width, height }) => ({
+        x,
+        y,
+        width,
+        height,
+      }),
+    );
+    const placed = placeRegionLabels(
+      jobs,
+      [...ownLabelObstacles, ...edgeLabelObstacles],
+      size.width,
+      size.height,
+      measureLabel,
+    );
+    const metadata = new Map(
+      shapes.flatMap((shape) =>
+        shape.kind === 'region' ? [[shape.id, shape] as const] : [],
+      ),
+    );
+    return placed.flatMap((label): ForeignRegionLabel[] => {
+      const shape = metadata.get(label.id);
+      return shape
+        ? [{ ...label, shapeId: shape.id, selected: shape.id === selectedId }]
+        : [];
+    });
+  }, [
+    elements,
+    labels,
+    measureLabel,
+    offset,
+    selectedId,
+    shapes,
+    size,
+    viewport,
+  ]);
 
   return (
-    // Excalidraw's own interactive canvas sits at z-index 2
-    // (--zIndex-interactiveCanvas); an unset z-index here paints below it
-    // regardless of DOM order, hiding every foreign shape. `.sheet-overlay-svg`
-    // (sheet.css) sits at 3 — above the drawing, below the chrome.
     <svg
+      ref={svgRef}
       data-testid="foreign-overlay"
-      role="img"
-      aria-label="Claims from other sheets on this board"
+      role="presentation"
       className="sheet-overlay-svg"
     >
       {shapes.map((shape) => {
         const selected = shape.id === selectedId;
-        const dimmed =
-          !selected &&
-          shape.kind === 'edge' &&
-          connectionRelation !== null &&
-          shape.row.relation !== connectionRelation;
         const stroke = selected
           ? 'var(--region-stroke)'
           : 'var(--foreign-stroke)';
@@ -90,25 +317,14 @@ export function Overlay({
                 className="sheet-overlay-hit"
                 onPointerDown={handlePointerDown}
               />
-              {shape.label && (
-                <text
-                  x={r.x + 4}
-                  y={r.y + 14}
-                  fontSize={11}
-                  fill={stroke}
-                  className="sheet-overlay-static"
-                >
-                  {shape.label}
-                </text>
-              )}
             </g>
           );
         }
 
         const a = sceneToScreen(shape.line[0], viewport, offset);
         const b = sceneToScreen(shape.line[1], viewport, offset);
-        const mx = (a.x + b.x) / 2;
-        const my = (a.y + b.y) / 2;
+        const dimmed =
+          relationOpacity(shape.row.relation, connectionRelation) < 1;
         return (
           <g key={shape.id}>
             <line
@@ -127,10 +343,6 @@ export function Overlay({
               className="sheet-overlay-hit"
               onPointerDown={handlePointerDown}
             />
-            {/* Dangling from a vanished foreign region (docs/phases/2-sheet.md
-                section 5): a hollow marker at the end whose region claim did
-                not come back in this poll — overlay-only, never a scene
-                change (screen.ts#foreignShapes). */}
             {shape.danglingStart && (
               <circle
                 data-testid="foreign-dangling-marker"
@@ -155,20 +367,127 @@ export function Overlay({
                 className="sheet-overlay-static"
               />
             )}
-            {shape.label && (
-              <text
-                x={mx}
-                y={my}
-                fontSize={11}
-                fill={stroke}
-                className="sheet-overlay-static"
-              >
-                {shape.label}
-              </text>
-            )}
           </g>
         );
       })}
+      {regionLabels.map((label) => (
+        <g
+          key={label.shapeId}
+          data-testid="foreign-region-label"
+          data-foreign-id={label.shapeId}
+          className="sheet-overlay-static"
+        >
+          {label.leader && (
+            <line
+              x1={label.leader.x}
+              y1={label.leader.y}
+              x2={label.x + label.width / 2}
+              y2={label.y + label.height / 2}
+              stroke={
+                label.selected
+                  ? 'var(--region-stroke)'
+                  : 'var(--foreign-stroke)'
+              }
+              strokeWidth={1}
+              opacity={0.45}
+            />
+          )}
+          <foreignObject
+            data-testid="foreign-region-label-box"
+            data-label-owner={label.shapeId}
+            x={label.x}
+            y={label.y}
+            width={label.width}
+            height={label.height}
+          >
+            <button
+              type="button"
+              className="sheet-foreign-region-label"
+              data-selected={label.selected || undefined}
+              aria-label={`Select foreign region: ${label.label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect(label.shapeId);
+              }}
+            >
+              {label.label}
+            </button>
+          </foreignObject>
+        </g>
+      ))}
+      {labels.map((label) => (
+        <g
+          key={label.id}
+          data-testid="connection-label"
+          data-connection-id={label.id}
+          data-connection-source={label.foreign ? 'foreign' : 'own'}
+          data-relation-dimmed={label.dimmed || undefined}
+          opacity={label.dimmed ? 0.12 : 1}
+          pointerEvents="all"
+          className="sheet-overlay-static"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            if (label.foreign) onSelect(label.id);
+            else onSelectOwn(label.id.slice('own-'.length));
+          }}
+        >
+          {(() => {
+            const [a, b] = label.line;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const lengthSquared = dx * dx + dy * dy || 1;
+            const center = {
+              x: label.x + label.width / 2,
+              y: label.y + label.height / 2,
+            };
+            const t = Math.max(
+              0,
+              Math.min(
+                1,
+                ((center.x - a.x) * dx + (center.y - a.y) * dy) / lengthSquared,
+              ),
+            );
+            const anchor = { x: a.x + t * dx, y: a.y + t * dy };
+            return Math.hypot(anchor.x - center.x, anchor.y - center.y) > 12 ? (
+              <line
+                x1={anchor.x}
+                y1={anchor.y}
+                x2={center.x}
+                y2={center.y}
+                stroke={
+                  label.foreign ? 'var(--foreign-stroke)' : 'var(--edge-stroke)'
+                }
+                strokeWidth={1}
+                opacity={label.dimmed ? 0.12 : 0.45}
+              />
+            ) : null;
+          })()}
+          <rect
+            x={label.x}
+            y={label.y}
+            width={label.width}
+            height={label.height}
+            rx={4}
+            fill="var(--sheet-label-bg, #fff)"
+            stroke="var(--sheet-label-border, #d0d7de)"
+          />
+          <text
+            x={label.x + label.width / 2}
+            y={label.y + label.height / 2}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize={11}
+            fill={
+              label.foreign ? 'var(--foreign-stroke)' : 'var(--edge-stroke)'
+            }
+            textLength={Math.min(label.width - 10, label.textWidth)}
+            lengthAdjust="spacingAndGlyphs"
+          >
+            {label.label}
+          </text>
+        </g>
+      ))}
       {peers.map((p) => {
         const pt = sceneToScreen({ x: p.x, y: p.y }, viewport, offset);
         return (

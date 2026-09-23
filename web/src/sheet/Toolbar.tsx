@@ -1,13 +1,5 @@
-// Our four tools plus our own zoom/undo/redo, replacing Excalidraw's stock
-// toolbar and footer wholesale (docs/phases/2-sheet.md section 1;
-// canvas/README.md — `ui={false}` is what took the stock ones away). select/
-// pan map straight onto Excalidraw's own tools; region/edge are ours
-// (Sheet.tsx wires them to `{type: 'custom', customType}` via
-// `tools.setTool`, per research/excalidraw: a custom tool gets no built-in
-// pointer behaviour at all, so nothing here fights our own drag handling in
-// DrawLayer.tsx). Zoom/undo/redo talk to the canvas seam's handle directly —
-// this component is the one place outside `canvas/` allowed to import its
-// TYPE (not the `@excalidraw` package, never that).
+// Our four tools plus zoom, undo and redo. Every action goes through the
+// canvas handle; region/edge drawing is handled by DrawLayer.tsx.
 import { useEffect } from 'react';
 import type { CanvasHandle } from './canvas/types.ts';
 import type { Tool } from './gestures.ts';
@@ -106,8 +98,8 @@ function ToolIcon({
   }
 }
 
-/** True while an input/textarea/contenteditable — including Excalidraw's
- * own bound-text editor — has focus, so a shortcut key does not steal a
+/** True while an input/textarea/contenteditable has focus, so a shortcut
+ * key does not steal a
  * letter the owner is typing. */
 function typing(): boolean {
   const el = document.activeElement;

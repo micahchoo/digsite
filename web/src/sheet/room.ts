@@ -4,8 +4,7 @@
 // debounced and de-duplicated by `sync.ts#signature`), presence pointers and
 // the peer roster. Moved out of Sheet.tsx so that file is composition only
 // (docs/phases/2-sheet.md section 7). Talks to the canvas only through
-// `CanvasHandle` — no `@excalidraw` import, per
-// ../../.claude/rules/sheet-canvas-seam.md.
+// `CanvasHandle` — no canvas implementation details.
 import type { PeersPayload, PointerBroadcastPayload } from '@digsite/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Socket, io } from 'socket.io-client';

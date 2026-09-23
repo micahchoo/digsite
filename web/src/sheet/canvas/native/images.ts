@@ -3,12 +3,11 @@
 // decode once, keep the bitmap, never re-decode a frame that already has
 // it). Our source is `../../images.ts#loadImageFiles`'s `CanvasFile.dataURL`
 // rather than a vault file's object URL (the sheet loads every image once,
-// as a data URL, before handing `files` to whichever canvas adapter is
+// as a data URL, before handing `files` to the canvas
 // mounted — see canvas/types.ts's own comment on `CanvasProps.files`), so
 // there is no object URL to revoke here: a `data:` URL costs nothing to
 // leave assigned, and this cache never removes an entry once added, the
-// same lifetime rule Excalidraw's own file store keeps
-// (excalidraw/ExcalidrawCanvas.tsx's `addedFileIds`).
+// same lifetime rule used by the native canvas file cache.
 import type { CanvasFile } from '../types.ts';
 
 export class ImageCache {
@@ -45,8 +44,7 @@ export class ImageCache {
 
   /** Brings every entry of `files` into the cache, calling `onReady` after
    * each newly-decoded one — `NativeCanvas.tsx`'s effect on the `files`
-   * prop, the same "add once, never remove" pass Excalidraw's adapter runs
-   * over its own file store. */
+   * prop, calling `ensure` only for files not yet cached. */
   sync(files: ReadonlyMap<string, CanvasFile>, onReady: () => void): void {
     for (const file of files.values()) this.ensure(file, onReady);
   }

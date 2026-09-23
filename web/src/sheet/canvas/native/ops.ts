@@ -1,8 +1,5 @@
-// Building a brand-new region or edge out of the product's own facts, and
-// applying a `ScenePatch` — the native adapter's answer to
-// `../excalidraw/convert.ts`'s `buildRegion`/`buildEdge`/`applyPatch`, over
-// plain `SceneElement` objects instead of Excalidraw's skeleton-building
-// helpers. Pure: no canvas, no DOM.
+// Build a region or edge from product facts and apply a `ScenePatch` over
+// plain `SceneElement` objects. Pure: no canvas and no DOM.
 import { arrowheadsFor } from '@digsite/shared';
 import { truncateLabel } from '../../labels.ts';
 import type {
@@ -159,8 +156,7 @@ function buildEdge(op: NewEdgeOp): SceneElement[] {
   return elements;
 }
 
-/** Applies every op in `patch`, in order, against `current` — the native
- * mirror of `excalidraw/convert.ts#applyPatch`. Pure; does not retarget
+/** Applies every op in `patch`, in order, against `current`. Pure; does not retarget
  * bound edges (`scene.ts#retargetEdges` is a separate pass the caller runs
  * after, same as it runs after an interactive drag). */
 export function applyPatch(
@@ -235,7 +231,7 @@ export function diffForHistory(
  * preview left it (fields updated frame by frame, version left alone).
  * Every touched element is bumped ONE version past `origin`, and the
  * result is one history step — the drag was one gesture, not one step per
- * frame, same as Excalidraw's own undo stack. */
+ * frame, keeping restored content newer than any prior version. */
 export function finalizeDrag(
   origin: readonly SceneElement[],
   current: readonly SceneElement[],

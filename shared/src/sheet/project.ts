@@ -16,6 +16,8 @@ export type SceneElement = {
   id: string;
   version: number;
   versionNonce: number;
+  /** Legacy scene z-order, retained when a saved element is merged or reloaded. */
+  index?: string | null;
   type: string;
   isDeleted?: boolean;
   x: number;

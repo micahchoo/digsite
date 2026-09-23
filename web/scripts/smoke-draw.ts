@@ -46,7 +46,7 @@ async function main() {
   );
   await page.waitForTimeout(1500); // let every image file decode and paint
 
-  async function excalidrawBox() {
+  async function canvasBox() {
     const box = await page.locator('.digsite-canvas').boundingBox();
     assert(box, 'no .digsite-canvas container on screen');
     return box;
@@ -61,7 +61,7 @@ async function main() {
   }
 
   async function sceneToClient(sx: number, sy: number) {
-    const [box, vp] = await Promise.all([excalidrawBox(), viewport()]);
+    const [box, vp] = await Promise.all([canvasBox(), viewport()]);
     return {
       x: box.x + (sx + vp.scrollX) * vp.zoom,
       y: box.y + (sy + vp.scrollY) * vp.zoom,
@@ -293,7 +293,7 @@ async function main() {
   );
 
   // select the image (and, since it shares groupIds, the region drawn on it —
-  // Excalidraw's own grouping) and delete via a real Delete keypress.
+  // image grouping) and delete via a real Delete keypress.
   await setTool('select');
   const clickImg10 = await sceneToClient(img10.x + 8, img10.y + 8); // a corner outside the region
   await page.mouse.click(clickImg10.x, clickImg10.y);

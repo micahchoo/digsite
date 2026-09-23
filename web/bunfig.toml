@@ -1,9 +1,0 @@
-# `@excalidraw/excalidraw` touches `window`/`document`/etc. at module load
-# (it's a browser UI package, not meant to run outside one) — bun test has
-# no DOM by default, so `canvas.test.ts` (which imports
-# `src/sheet/canvas/convert.ts`) needs one. `test/dom-shim.ts` is the
-# minimal shim that makes the package's PURE element-building functions
-# load and run; see its own header comment for what it does and doesn't
-# emulate.
-[test]
-preload = ["./test/dom-shim.ts"]

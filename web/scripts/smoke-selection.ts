@@ -9,7 +9,7 @@
 // column refreshes after a sheet is created/renamed/deleted (an event, not
 // a poll); (c) sign-out is race-free (a reload after it always shows the
 // sign-in page); (d) Ctrl/Cmd+K on a sheet page opens our switcher, not
-// Excalidraw's own link dialog.
+// a canvas-specific dialog.
 //
 // Drives the running dev server (`bun run dev`) against the stub
 // (`bun run stub`). Exits nonzero on any failed assertion.
@@ -500,9 +500,9 @@ async function main() {
   );
   console.log(`PASS: over-cap copy: "${overCapText}"`);
 
-  // -- (d) Ctrl/Cmd+K on a sheet page opens OUR switcher, not Excalidraw's
+  // -- (d) Ctrl/Cmd+K on a sheet page opens OUR switcher
   // own link dialog — Shell.tsx's global keydown listener is capture-phase
-  // and stops propagation, so it wins the race before Excalidraw's own
+  // and stops propagation before any canvas key handler
   // bubble-phase binding on the canvas ever sees the keystroke. -------------
   await page.goto(`${WEB}/s/s2`);
   await page.waitForFunction(() => typeof window.__digsite !== 'undefined');
@@ -520,9 +520,7 @@ async function main() {
   await page.waitForSelector('[data-testid="quick-switcher-input"]', {
     state: 'detached',
   });
-  console.log(
-    'PASS (d): Ctrl/Cmd+K on a sheet page opens the quick switcher, not an Excalidraw dialog',
-  );
+  console.log('PASS (d): Ctrl/Cmd+K on a sheet page opens the quick switcher');
 
   // -- (c) sign-out is race-free: a reload right after it always shows the
   // sign-in page (Shell.tsx awaits signOut() then hard-navigates). ----------

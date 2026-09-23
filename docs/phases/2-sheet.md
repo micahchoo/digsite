@@ -1,5 +1,9 @@
 # Phase 2 — make the sheet complete
 
+> Historical phase record. The canvas implementation described in this
+> document was later replaced by the native-only canvas; adapter names and
+> implementation details below describe the earlier project state.
+
 The skeleton's sheet proves the seams: own elements sync, claims
 project to rows, foreign claims live on the overlay. This phase makes
 it the document a group works in. Words: `../../CONTEXT.md`. Rules:

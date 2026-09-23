@@ -1,19 +1,21 @@
-// Pure tests, no DOM, no Excalidraw — see ../src/sheet/overlay/screen.ts.
+// Pure tests, no DOM or canvas — see ../src/sheet/overlay/screen.ts.
 import { describe, expect, test } from 'bun:test';
 import type { Foreign } from '@digsite/shared';
+import { relationOpacity } from '../src/sheet/connection-emphasis.ts';
 import {
   type ElementLike,
   foreignCopyRect,
   foreignShapes,
+  placeConnectionLabels,
+  placeRegionLabels,
   rectToScreen,
   sceneToScreen,
   screenToScene,
 } from '../src/sheet/overlay/screen.ts';
 
 describe('sceneToScreen', () => {
-  test("matches Excalidraw's sceneCoordsToViewportCoords formula", () => {
+  test('matches the sheet scene-to-viewport coordinate formula', () => {
     // screenX = (sceneX + scrollX) * zoom.value + offsetLeft — verified
-    // against research/excalidraw/packages/common/src/utils.ts.
     const vp = { scrollX: 50, scrollY: -20, zoom: 2 };
     const offset = { left: 10, top: 5 };
     const p = sceneToScreen({ x: 100, y: 200 }, vp, offset);
@@ -25,6 +27,14 @@ describe('sceneToScreen', () => {
     const vp = { scrollX: 0, scrollY: 0, zoom: 1.5 };
     const p = sceneToScreen({ x: 40, y: 40 }, vp, { left: 0, top: 0 });
     expect(p).toEqual({ x: 60, y: 60 });
+  });
+});
+
+describe('relation emphasis', () => {
+  test('dims only nonmatching connections without changing their identity', () => {
+    expect(relationOpacity('resembles', 'resembles')).toBe(1);
+    expect(relationOpacity('resembles', null)).toBe(1);
+    expect(relationOpacity('overlaps', 'resembles')).toBe(0.12);
   });
 });
 
@@ -48,6 +58,85 @@ describe('rectToScreen', () => {
     expect(r).toEqual({ x: 20, y: 20, width: 60, height: 80 });
   });
 });
+
+describe('placeConnectionLabels', () => {
+  test('moves labels clear of image boxes and other connection labels', () => {
+    const line = [
+      { x: 10, y: 150 },
+      { x: 490, y: 150 },
+    ] as const;
+    const labels = placeConnectionLabels(
+      [
+        { id: 'a', label: 'resembles', line, priority: 10 },
+        { id: 'b', label: 'resembles', line, priority: 0 },
+      ],
+      [{ x: 220, y: 100, width: 60, height: 100 }],
+      500,
+      300,
+      (label) => label.length * 7,
+    );
+    expect(labels).toHaveLength(2);
+    const first = labels[0];
+    const second = labels[1];
+    if (!first || !second) throw new Error('expected both labels to be placed');
+    const intersects = (
+      a: { x: number; y: number; width: number; height: number },
+      b: { x: number; y: number; width: number; height: number },
+    ) =>
+      a.x < b.x + b.width &&
+      a.x + a.width > b.x &&
+      a.y < b.y + b.height &&
+      a.y + a.height > b.y;
+    expect(intersects(first, { x: 220, y: 100, width: 60, height: 100 })).toBe(
+      false,
+    );
+    expect(intersects(second, { x: 220, y: 100, width: 60, height: 100 })).toBe(
+      false,
+    );
+    expect(intersects(first, second)).toBe(false);
+  });
+});
+
+describe('placeRegionLabels', () => {
+  test('separates overlapping foreign claims from each other and an own-region label', () => {
+    const region = { x: 180, y: 120, width: 150, height: 110 };
+    const ownLabel = { x: 184, y: 123, width: 54, height: 14 };
+    const labels = placeRegionLabels(
+      [
+        { id: 'foreign-a', label: 'find one', rect: region, priority: 0 },
+        { id: 'foreign-b', label: 'find two', rect: region, priority: 0 },
+        { id: 'foreign-c', label: 'find three', rect: region, priority: 100 },
+      ],
+      [ownLabel],
+      600,
+      400,
+      (label) => label.length * 7,
+    );
+    expect(labels.map((label) => label.id)[0]).toBe('foreign-c');
+    expect(labels).toHaveLength(3);
+    for (let i = 0; i < labels.length; i += 1) {
+      const label = labels[i];
+      if (!label) continue;
+      expect(intersects(label, ownLabel)).toBe(false);
+      for (let j = i + 1; j < labels.length; j += 1) {
+        const other = labels[j];
+        if (other) expect(intersects(label, other)).toBe(false);
+      }
+    }
+  });
+});
+
+function intersects(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): boolean {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
 
 function image(
   id: string,

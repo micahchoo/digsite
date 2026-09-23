@@ -1,13 +1,11 @@
-// Pure: no DOM, no Excalidraw import. Two jobs (docs/design.md "web/" §
+// Pure geometry helpers. Two jobs (docs/design.md "web/" §
 // "The sheet page"):
 //
 // 1. scene -> screen, verified against
-//    research/excalidraw/packages/common/src/utils.ts#sceneCoordsToViewportCoords:
-//      screenX = (sceneX + scrollX) * zoom.value + offsetLeft
+//      screenX = (sceneX + scrollX) * zoom + offsetLeft
 //      screenY = (sceneY + scrollY) * zoom.value + offsetTop
-//    `offset` is the overlay <svg>'s own box relative to the SAME container
-//    Excalidraw measures offsetLeft/offsetTop from. Sheet.tsx renders the
-//    svg as a full-bleed sibling inset over Excalidraw's own container, so
+//    `offset` is the overlay <svg>'s own box relative to the canvas container.
+//    Sheet.tsx renders the svg as a full-bleed sibling over the canvas, so
 //    at the call site `offset` is always {left: 0, top: 0} — both boxes
 //    share one origin, and offsetLeft/offsetTop cancel. The parameter stays
 //    explicit so this stays testable without a DOM.
@@ -47,6 +45,191 @@ export interface Viewport {
 export interface ContainerOffset {
   left: number;
   top: number;
+}
+
+export interface ConnectionLabelJob {
+  id: string;
+  label: string;
+  line: readonly [Point, Point];
+  priority: number;
+  ignoreObstacleIds?: readonly string[];
+}
+
+export interface LabelObstacle extends Rect {
+  id?: string;
+}
+
+export interface RegionLabelJob {
+  id: string;
+  label: string;
+  rect: Rect;
+  priority: number;
+}
+
+export interface PlacedRegionLabel extends PlacedConnectionLabel {
+  leader: Point | null;
+}
+
+export interface PlacedConnectionLabel {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  textWidth: number;
+}
+
+function overlaps(a: Rect, b: Rect): boolean {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
+
+/** Place connection labels around their lines while avoiding images and one
+ * another. This is a display-only layout; it never writes back to the scene. */
+export function placeConnectionLabels(
+  jobs: readonly ConnectionLabelJob[],
+  obstacles: readonly LabelObstacle[],
+  width: number,
+  height: number,
+  measure: (label: string) => number,
+): PlacedConnectionLabel[] {
+  const along = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8];
+  const sides = [0, -1, 1, -2, 2];
+  const labelHeight = 18;
+  const padding = 7;
+  const taken: Rect[] = [];
+  const placed: PlacedConnectionLabel[] = [];
+
+  for (const job of [...jobs].sort(
+    (a, b) => b.priority - a.priority || a.id.localeCompare(b.id),
+  )) {
+    const textWidth = measure(job.label);
+    const rawWidth = Math.ceil(textWidth) + padding * 2;
+    const boxWidth = Math.min(Math.max(24, rawWidth), Math.max(24, width - 8));
+    const [a, b] = job.line;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const nx = -dy / length;
+    const ny = dx / length;
+    let found: Rect | null = null;
+
+    for (const fraction of along) {
+      for (const side of sides) {
+        const cx = a.x + dx * fraction + nx * side * labelHeight * 1.2;
+        const cy = a.y + dy * fraction + ny * side * labelHeight * 1.2;
+        const candidate = {
+          x: cx - boxWidth / 2,
+          y: cy - labelHeight / 2,
+          width: boxWidth,
+          height: labelHeight,
+        };
+        if (
+          candidate.x < 4 ||
+          candidate.y < 4 ||
+          candidate.x + candidate.width > width - 4 ||
+          candidate.y + candidate.height > height - 4 ||
+          obstacles.some(
+            (obstacle) =>
+              !job.ignoreObstacleIds?.includes(obstacle.id ?? '') &&
+              overlaps(candidate, obstacle),
+          ) ||
+          taken.some((other) => overlaps(candidate, other))
+        ) {
+          continue;
+        }
+        found = candidate;
+        break;
+      }
+      if (found) break;
+    }
+
+    if (found) {
+      taken.push(found);
+      placed.push({ ...found, id: job.id, label: job.label, textWidth });
+    }
+  }
+  return placed;
+}
+
+/** Keep foreign-region labels readable when claims occupy the same area.
+ * Their candidates sit inside or beside their owning rectangle; every placed
+ * label and caller-supplied obstacle is display-only. */
+export function placeRegionLabels(
+  jobs: readonly RegionLabelJob[],
+  obstacles: readonly Rect[],
+  width: number,
+  height: number,
+  measure: (label: string) => number,
+): PlacedRegionLabel[] {
+  const labelHeight = 18;
+  const padding = 7;
+  const gap = 4;
+  const taken = [...obstacles];
+  const placed: PlacedRegionLabel[] = [];
+
+  for (const job of [...jobs].sort(
+    (a, b) => b.priority - a.priority || a.id.localeCompare(b.id),
+  )) {
+    const textWidth = measure(job.label);
+    const boxWidth = Math.min(
+      Math.max(24, Math.ceil(textWidth) + padding * 2),
+      Math.max(24, width - 8),
+    );
+    const r = job.rect;
+    const left = r.x + gap;
+    const right = r.x + r.width - boxWidth - gap;
+    const top = r.y + gap;
+    const bottom = r.y + r.height - labelHeight - gap;
+    const midY = r.y + (r.height - labelHeight) / 2;
+    const candidates = [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: left, y: bottom },
+      { x: right, y: bottom },
+      { x: r.x - boxWidth - gap, y: top },
+      { x: r.x + r.width + gap, y: top },
+      { x: left, y: r.y - labelHeight - gap },
+      { x: right, y: r.y - labelHeight - gap },
+      { x: left, y: r.y + r.height + gap },
+      { x: right, y: r.y + r.height + gap },
+      { x: r.x - boxWidth - gap, y: midY },
+      { x: r.x + r.width + gap, y: midY },
+    ];
+    const candidate = candidates.find((position) => {
+      const box = { ...position, width: boxWidth, height: labelHeight };
+      return (
+        box.x >= 4 &&
+        box.y >= 4 &&
+        box.x + box.width <= width - 4 &&
+        box.y + box.height <= height - 4 &&
+        !taken.some((other) => overlaps(box, other))
+      );
+    });
+    if (!candidate) continue;
+
+    const box = { ...candidate, width: boxWidth, height: labelHeight };
+    taken.push(box);
+    const center = {
+      x: box.x + box.width / 2,
+      y: box.y + box.height / 2,
+    };
+    const nearest = {
+      x: Math.max(r.x, Math.min(r.x + r.width, center.x)),
+      y: Math.max(r.y, Math.min(r.y + r.height, center.y)),
+    };
+    const leader =
+      Math.hypot(nearest.x - center.x, nearest.y - center.y) > 12
+        ? nearest
+        : null;
+    placed.push({ ...box, id: job.id, label: job.label, textWidth, leader });
+  }
+  return placed;
 }
 
 export function sceneToScreen(
@@ -89,7 +272,7 @@ export function rectToScreen(
   };
 }
 
-/** The minimal shape screen.ts needs from a live Excalidraw element. */
+/** The minimal shape screen.ts needs from a live canvas element. */
 export interface ElementLike {
   id: string;
   isDeleted?: boolean;
@@ -130,7 +313,7 @@ export type ForeignShape =
 /**
  * The pure heart of `tools.ts#copyForeign`: given a foreign row's fraction
  * and the image's rect NOW (never a rect cached from an earlier poll or an
- * earlier render), the rect of the copy. Kept here, free of any Excalidraw
+ * earlier render), the rect of the copy. Kept here, free of canvas renderer
  * import, so it is testable without constructing a scene — see
  * ../../../test/copy-foreign.test.ts and
  * ../../../.claude/rules/foreign-never-in-scene.md ("Never read the

@@ -1,9 +1,7 @@
-// The region and edge tools' own pointer handling (docs/phases/2-sheet.md
-// section 1). A full-bleed sibling of Excalidraw's canvas, `pointer-events`
-// 'all' only while the active tool is 'region' or 'edge' — 'select' and
-// 'pan' are Excalidraw's own tools (`pointerIntent` in gestures.ts answers
-// 'native' for both) and this layer gets out of the way entirely so it
-// never shadows Excalidraw's default drag-select/hand-pan.
+// The region and edge tools' pointer handling (docs/phases/2-sheet.md
+// section 1). A full-bleed sibling layer, `pointer-events` 'all' only while
+// the active tool is 'region' or 'edge' — 'select' and 'pan' use the canvas
+// interaction path, so this layer gets out of the way.
 //
 // What a press means is decided once, by `pointerIntent` (gestures.ts) —
 // this component turns a DOM PointerEvent into a scene point
@@ -13,13 +11,13 @@
 // Region: press on an image starts a drag; a live rectangle follows the
 // pointer; release commits it through `tools.pointerDraw` (scene
 // coordinates, the same entry point the test hook and smoke script use) and
-// opens OUR OWN small text input over the new region for the label — not
-// Excalidraw's bound-text editor. The canvas seam's imperative handle has
+// opens our small text input over the new region for the label. The canvas
+// seam's imperative handle has
 // no "start editing this bound text" call; the alternatives were
 // `setActiveTool({type:'text'})` (steals the *tool*, not just this element)
 // or simulating a double-click on the container (brittle, and re-enters
-// Excalidraw's own text-fit machinery that drawRegion already works around
-// — see tools.ts#drawRegion). A floating input is a few lines, reliable,
+// canvas text-fit behavior that drawRegion avoids — see tools.ts#drawRegion).
+// A floating input is a few lines, reliable,
 // and commits through the existing `setProperty(id, 'label', value)` path,
 // so a typed label is truncated for display exactly like an Inspector edit.
 //
@@ -220,7 +218,7 @@ export function DrawLayer({
 
   return (
     // Same layer as the foreign overlay (sheet.css's z-index) — both sit
-    // above Excalidraw's canvas, below its chrome.
+    // above the canvas, below product controls.
     <div
       data-testid="draw-layer"
       className="sheet-draw-layer"

@@ -59,7 +59,7 @@ async function main() {
     { timeout: 10_000 },
   );
   // Image files decode async (fetch -> blob -> dataURL -> addFiles); give
-  // Excalidraw a moment to paint them before the sheet screenshot.
+  // the canvas a moment to paint them before the sheet screenshot.
   await page.waitForTimeout(3000);
 
   const noForeignInScene = await page.evaluate(() =>

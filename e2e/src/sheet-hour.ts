@@ -378,7 +378,93 @@ async function main() {
 
   await scenario(
     0,
-    'a rapid Excalidraw delete removes its projected server row',
+    'a delayed sheet response preserves the initial socket snapshot',
+    async () => {
+      const imageId = firstPassImages[0];
+      if (!imageId) fail('the first pass sheet has no test image');
+      const label = `join-race-${Math.random().toString(36).slice(2, 8)}`;
+      const elementId = await workerA.page.evaluate(
+        ({ imageId, label }) =>
+          (window as unknown as DigsiteWindow).__digsite?.drawRegion(
+            imageId,
+            { fx: 0.15, fy: 0.15, fw: 0.2, fh: 0.2 },
+            label,
+          ) ?? null,
+        { imageId, label },
+      );
+      if (!elementId) fail('could not create the persisted join-race region');
+
+      const rowId = `${firstPassId}:${elementId}`;
+      const persistedDeadline = Date.now() + 7000;
+      while (Date.now() < persistedDeadline) {
+        const rows = await member.get<{ regions: RegionRowLike[] }>(
+          `/sheets/${firstPassId}/rows`,
+        );
+        if (rows.json.regions.some((row) => row.id === rowId)) break;
+        await sleep(100);
+      }
+      const persisted = await member.get<{ regions: RegionRowLike[] }>(
+        `/sheets/${firstPassId}/rows`,
+      );
+      if (!persisted.json.regions.some((row) => row.id === rowId))
+        fail('the join-race region did not reach the server snapshot');
+
+      const late = await pageFor(member);
+      let releaseMetadata!: () => void;
+      let requestedMetadata!: () => void;
+      const metadataGate = new Promise<void>((resolve) => {
+        releaseMetadata = resolve;
+      });
+      const metadataRequested = new Promise<void>((resolve) => {
+        requestedMetadata = resolve;
+      });
+      await late.page.route(`**/sheets/${firstPassId}`, async (route) => {
+        const url = new URL(route.request().url());
+        if (
+          route.request().method() === 'GET' &&
+          url.pathname === `/sheets/${firstPassId}`
+        ) {
+          requestedMetadata();
+          await metadataGate;
+        }
+        await route.continue();
+      });
+
+      try {
+        const navigation = late.page.goto(`${WEB}/s/${firstPassId}`);
+        await metadataRequested;
+        // Keep metadata blocked long enough for the eager socket join and its
+        // initial snapshot to complete before a canvas can mount.
+        await sleep(1000);
+        releaseMetadata();
+        await navigation;
+        await waitForDigsite(late.page);
+        await late.page.waitForFunction(
+          ({ id, label }) =>
+            Boolean(
+              (window as unknown as DigsiteWindow).__digsite
+                ?.getElements()
+                .some(
+                  (element) =>
+                    element.id === id &&
+                    element.customData?.kind === 'region' &&
+                    element.customData.label === label,
+                ),
+            ),
+          { id: elementId, label },
+          { timeout: 5000 },
+        );
+      } finally {
+        releaseMetadata();
+        await late.context.close();
+      }
+      return 'persisted region was present after the metadata-delayed join';
+    },
+  );
+
+  await scenario(
+    1,
+    'a rapid scene delete removes its projected server row',
     async () => {
       const imageId = firstPassImages[0];
       if (!imageId) fail('the first pass sheet has no test image');
@@ -420,7 +506,7 @@ async function main() {
 
       // Check the live scene immediately, then let the socket debounce and
       // projection run. The endpoint is checked separately so a stale
-      // Excalidraw callback cannot leave a server-only claim behind.
+      // canvas callback cannot leave a server-only claim behind.
       const clientHasRegion = await workerA.page.evaluate((id) => {
         return Boolean(
           (window as unknown as DigsiteWindow).__digsite
@@ -428,8 +514,7 @@ async function main() {
             .some((element) => element.id === id),
         );
       }, regionId);
-      if (clientHasRegion)
-        fail('the Excalidraw delete did not remove the region');
+      if (clientHasRegion) fail('the canvas delete did not remove the region');
 
       const deleteDeadline = Date.now() + 7000;
       let serverHasRegion = true;
@@ -451,7 +536,7 @@ async function main() {
   // imageId by id lookup) has it on hand without re-querying the DOM.
   void ownImageElId;
 
-  await scenario(1, `run ~${ACTIONS} actions across both sheets`, async () => {
+  await scenario(2, `run ~${ACTIONS} actions across both sheets`, async () => {
     for (let i = 0; i < ACTIONS; i++) {
       const worker = Math.random() < 0.5 ? workerA : workerB;
       try {
@@ -499,7 +584,7 @@ async function main() {
   }>(`/sheets/${facesId}/foreign`);
 
   await scenario(
-    2,
+    3,
     'sheet A (First pass) rows == project(getElements())',
     async () => {
       const els = await elementsOf(workerA.page);
@@ -521,7 +606,7 @@ async function main() {
   );
 
   await scenario(
-    3,
+    4,
     'sheet B (Faces) rows == project(getElements())',
     async () => {
       const els = await elementsOf(workerB.page);
@@ -543,7 +628,7 @@ async function main() {
   );
 
   await scenario(
-    4,
+    5,
     "sheet A's foreign == sheet B's rows filtered to A's images",
     async () => {
       const imagesA = new Set(workerA.images);
@@ -570,7 +655,7 @@ async function main() {
   );
 
   await scenario(
-    5,
+    6,
     "sheet B's foreign == sheet A's rows filtered to B's images",
     async () => {
       const imagesB = new Set(workerB.images);
@@ -596,7 +681,7 @@ async function main() {
     },
   );
 
-  await scenario(6, 'GET /stats foreignInScene == 0', async () => {
+  await scenario(7, 'GET /stats foreignInScene == 0', async () => {
     const stats = await member.get<{ foreignInScene: number }>('/stats');
     if (stats.json.foreignInScene !== 0) {
       fail(`foreignInScene = ${stats.json.foreignInScene}, want 0`);
@@ -605,7 +690,7 @@ async function main() {
   });
 
   await scenario(
-    7,
+    8,
     'no element in either scene carries a foreign key',
     async () => {
       const elsA = await elementsOf(workerA.page);

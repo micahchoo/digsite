@@ -10,8 +10,7 @@
 //   it, from `tools.ts#removeDangling`.
 //
 // Pure and DOM-free so it is unit-testable: takes the full element list
-// (including tombstones) as it comes out of Excalidraw's
-// getSceneElementsIncludingDeleted, returns a new list. Sheet.tsx's onChange
+// (including tombstones), returns a new list. Sheet.tsx's onChange
 // calls this once per change, the same way it already calls the region
 // clamp — an unchanged pass returns `changed: false` so the caller can skip
 // a no-op updateScene.
@@ -107,10 +106,9 @@ export function applyCascade<T extends CascadeElement>(
   let afterImageDelete: readonly T[] = elements;
 
   if (deletedImageIds.size > 0) {
-    // Every region in a dead image's group — DELETED OR NOT. Excalidraw's
-    // own native group-delete (its `groupIds` selection expanded the image
-    // click to the whole group) can hand this function a region that is
-    // ALREADY `isDeleted: true` in the SAME elements array as its image.
+    // Every region in a dead image's group — deleted or not. Group
+    // selection can hand this function a region already marked deleted in
+    // the same elements array as its image.
     // Skipping those here (as a first cut did) meant an edge bound to that
     // region never matched `regionIdsInDeadGroup` below, and outlived both
     // the image and the region that hit "Delete" together deleted.
@@ -123,21 +121,14 @@ export function applyCascade<T extends CascadeElement>(
       }
     }
 
-    // Measured 2026-09-22 against the running app: a REAL Delete keypress
-    // goes through Excalidraw's own `actionDeleteSelected`, which calls
-    // `fixBindingsAfterDeletion` and NULLS the arrow's startBinding/
-    // endBinding pointing at whatever it just deleted — before this
-    // function ever sees the change. Reading `el.startBinding`/`endBinding`
-    // on the EDGE therefore misses exactly the case a native multi-select
-    // delete produces. What survives is the DEAD element's OWN
-    // `boundElements` (Excalidraw only mutates the still-live side of a
-    // binding, never the element being deleted), so that is the primary
+    // A group delete can null an arrow binding to an endpoint before this
+    // correction pass sees the change. What survives is the deleted
+    // element's `boundElements`, so that is the primary
     // signal; the direct binding-field check stays as a second net for a
     // delete that does NOT go through that action (tools.ts#deleteSelected
     // and #removeDangling call `updateScene` directly, which does not
-    // trigger `fixBindingsAfterDeletion` — confirmed against
-    // packages/element/src/binding.ts `fixBindingsAfterDeletion`/
-    // `unbindAffected` and packages/element/src/Scene.ts, delta.ts).
+    // trigger that binding cleanup, so the direct binding check remains a
+    // second net.
     const deadArrowIds = new Set<string>();
     for (const el of elements) {
       const data = dataOf(el);
@@ -206,10 +197,8 @@ function rebindDangling<T extends CascadeElement>(
     return null;
   }
 
-  // A deleted region reached through a native Excalidraw delete (entering
-  // its group first, then Delete) has already had ITS SIDE of the arrow's
-  // binding nulled by `fixBindingsAfterDeletion` — same mechanism as the
-  // image-delete case above. `boundElements` on the region survives that,
+  // A group delete may already have nulled the deleted region's side of an
+  // arrow binding. `boundElements` on the region survives that,
   // so a null side on an edge this map lists for is inferred to be the one
   // that used to point at the now-dead region (every edge this app creates
   // always sets both bindings, so a null one is never "just unbound").
@@ -249,7 +238,7 @@ function rebindDangling<T extends CascadeElement>(
           continue; // alive (region or image), or a deleted image — nothing to do here
         }
       } else {
-        // Already nulled by Excalidraw itself — infer from boundElements.
+        // Already nulled by group deletion — infer from boundElements.
         const inferred = deadRegionByArrow.get(el.id);
         if (!inferred) continue;
         deadRegion = inferred;

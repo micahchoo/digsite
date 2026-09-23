@@ -27,13 +27,12 @@ const FORBIDDEN_PORTS = new Set([8800, 5180]); // the owner's demo — never the
 const SCRIPTS = [
   'scripts/smoke.ts',
   'scripts/smoke-board.ts',
+  'scripts/smoke-upload-scale.ts',
   'scripts/smoke-draw.ts',
   'scripts/smoke-explore.ts',
   'scripts/smoke-groups.ts',
-  // docs/ux/audit.md #2 (grey placeholder images) and #3 (blank-sheet
-  // race) — both diagnosed and fixed in canvas/excalidraw/ExcalidrawCanvas.tsx.
+  // Image decoding and canvas readiness on the native sheet canvas.
   'scripts/smoke-image-render.ts',
-  'scripts/smoke-canvas-race.ts',
   'scripts/smoke-errors.ts',
   'scripts/smoke-invite.ts',
   // docs/ux/design.md §7 slice 1 — the shell (rail, channel column, top

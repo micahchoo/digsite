@@ -64,19 +64,12 @@ jobs:
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium
 
-      # docs/phases/5-hardening.md section 6: a fresh database per run, both
-      # sheet canvas adapters — scripts/e2e-fresh.ts creates and drops its
+      # docs/phases/5-hardening.md section 6: a fresh database per run —
+      # scripts/e2e-fresh.ts creates and drops its
       # own `digsite_e2e_<ts>` database on this same container and never
       # touches `digsite` itself.
-      - name: e2e (VITE_CANVAS=excalidraw)
+      - name: e2e (native sheet canvas)
         run: bun run e2e:fresh
-        env:
-          VITE_CANVAS: excalidraw
-
-      - name: e2e (VITE_CANVAS=native)
-        run: bun run e2e:fresh
-        env:
-          VITE_CANVAS: native
 
       # The web/scripts/smoke*.ts definition-of-done scripts, each against
       # its own fresh stub (web/stub/server.ts) — no database involved.

@@ -1,7 +1,7 @@
 // Sheet-from-a-neighbourhood's layout (docs/phases/2-sheet.md section 4):
 // rings by hop count around the image the neighbourhood was explored from.
 // Pure and deterministic — the same `items` array always produces the same
-// positions — so it is tested here with no server, no Excalidraw, no DOM.
+// positions — so it is tested here with no server, canvas, or DOM.
 //
 // A position is the CENTRE of an item's `cell`-sized box (matching
 // server/src/sheets/routes.ts's own CELL=320 grid layout, which centres

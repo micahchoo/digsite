@@ -67,7 +67,7 @@ export function useSheetTools(deps: UseSheetToolsDeps): SheetTools {
   // scenario 8 (../.claude/rules/foreign-never-in-scene.md) reads
   // `.selectedElementIds`, `smoke-draw.ts#viewport` reads
   // `.scrollX`/`.scrollY`/`.zoom.value` — both the same way they did before
-  // the split, now sourced from `CanvasHandle` instead of Excalidraw's own
+  // the split, now sourced from `CanvasHandle` instead of an engine API
   // appState directly.
   useEffect(() => {
     window.__digsiteSheetDebug = {

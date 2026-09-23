@@ -6,16 +6,14 @@
 // Every rect and every edge segment drawn here is the SAME one `scene.ts`'s
 // `hitAt` measures — ../../../../.claude/rules/image-graph-hit-what-was-drawn.md.
 import { dataOf, fileId as fileIdFor } from '@digsite/shared';
+import { relationOpacity } from '../../connection-emphasis.ts';
 import type { Arrowhead, SceneElement, Viewport } from '../types.ts';
 import { toScreen } from './camera.ts';
 import type { Point, Rect } from './geometry.ts';
 import type { ImageCache } from './images.ts';
 import { type HandleId, regionHandles } from './scene.ts';
 
-// Same hex `../excalidraw/convert.ts` bakes into an Excalidraw element's
-// `strokeColor`, and the same tokens `../../sheet.css` defines — kept in
-// sync by eye across all three, exactly as that file's own comment already
-// warns ("change one, change the other").
+// Colors match the sheet's semantic canvas tokens.
 const REGION_STROKE = '#1971c2';
 const EDGE_STROKE = '#2f9e44';
 const SELECTION_STROKE = '#1971c2';
@@ -36,6 +34,8 @@ export interface RenderInput {
   images: ImageCache;
   /** A region drag-to-draw or band-select in progress, scene space. */
   marquee?: Rect | null;
+  /** Display-only relation emphasis. */
+  dimRelations?: string | null;
 }
 
 function rectOf(el: SceneElement): Rect {
@@ -144,14 +144,15 @@ function drawEdge(
   ctx: CanvasRenderingContext2D,
   el: SceneElement,
   vp: Viewport,
-  label: string | null,
   selected: boolean,
+  relationOpacityValue: number,
 ): void {
   const first = el.points[0] ?? [0, 0];
   const last = el.points[el.points.length - 1] ?? first;
   const start = toScreen(vp, { x: el.x + first[0], y: el.y + first[1] });
   const end = toScreen(vp, { x: el.x + last[0], y: el.y + last[1] });
   ctx.strokeStyle = EDGE_STROKE;
+  ctx.globalAlpha = relationOpacityValue;
   ctx.lineWidth = selected ? 2.5 : 1.5;
   ctx.beginPath();
   ctx.moveTo(start.x, start.y);
@@ -159,16 +160,7 @@ function drawEdge(
   ctx.stroke();
   drawArrowhead(ctx, start, end, el.startArrowhead);
   drawArrowhead(ctx, end, start, el.endArrowhead);
-  if (label) {
-    const mx = (start.x + end.x) / 2;
-    const my = (start.y + end.y) / 2;
-    ctx.font = `11px ${UI_FONT}`;
-    ctx.fillStyle = EDGE_STROKE;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ctx.fillText(label, mx, my);
-    ctx.textAlign = 'left';
-  }
+  ctx.globalAlpha = 1;
 }
 
 function drawGrips(
@@ -198,6 +190,7 @@ export function renderFrame(input: RenderInput): void {
     selectedIds,
     images,
     marquee,
+    dimRelations,
   } = input;
   ctx.save();
   ctx.fillStyle = '#ffffff';
@@ -236,7 +229,13 @@ export function renderFrame(input: RenderInput): void {
       continue;
     }
     if (data.kind === 'edge') {
-      drawEdge(ctx, el, viewport, boundText(el, byId), selected);
+      drawEdge(
+        ctx,
+        el,
+        viewport,
+        selected,
+        relationOpacity(data.relation, dimRelations ?? null),
+      );
     }
   }
 

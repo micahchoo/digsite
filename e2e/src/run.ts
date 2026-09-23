@@ -528,12 +528,7 @@ async function main() {
       img8ElId = img8El.id;
       img9ElId = img9El.id;
 
-      // Short on purpose: convertToExcalidrawElements (used by both
-      // drawRegion and, on the copy side, tools.ts#copyForeign) auto-grows a
-      // container to fit its bound text. A long label here wraps inside the
-      // 30%-width box and grows the box taller than requested — genuine
-      // Excalidraw behaviour, not a product bug (see RESULTS.md) — so this
-      // stays short enough to fit one line and never trigger that growth.
+      // Keep this label short enough to fit on one line in the narrow region.
       regionLabel = `e2e${Math.random().toString(36).slice(2, 8)}`;
       const fraction: Fraction = { fx: 0.1, fy: 0.1, fw: 0.3, fh: 0.3 };
       const t0 = Date.now();
@@ -549,13 +544,8 @@ async function main() {
       );
       if (!regionElId) fail('drawRegion returned null on sheet A');
 
-      // drawRegion passes `label` to Excalidraw's convertToExcalidrawElements,
-      // which auto-grows a container to fit its bound text — a long label
-      // (the timestamp tag used for uniqueness here) against a 30%-height
-      // box grows the box taller than requested. That growth is genuine
-      // Excalidraw behaviour, not a product bug (see RESULTS.md); pin the
-      // rect back to the exact fraction with setRegionRect, which writes the
-      // rect directly and does not invoke label layout.
+      // Restore the exact test fraction after applying a unique label so the
+      // screenshot and projection assertions remain deterministic.
       await pageA.evaluate(
         ({ id, fraction }) =>
           (window as unknown as DigsiteWindow).__digsite?.setRegionRect(
@@ -808,9 +798,7 @@ async function main() {
           ).__digsiteSheetDebug?.getAppState()?.selectedElementIds ?? null,
       );
       if (!selectedIds || Object.keys(selectedIds).length !== 0) {
-        fail(
-          `Excalidraw's own appState.selectedElementIds not empty: ${JSON.stringify(selectedIds)}`,
-        );
+        fail(`owned selection is not empty: ${JSON.stringify(selectedIds)}`);
       }
 
       await a.screenshot({

@@ -49,8 +49,8 @@ line here before it gets a file.
 
 - **Sheet** — a permanent, named document under a board, holding up to 150
   of the board's images, hand-arranged, edited live by several people.
-  One Excalidraw scene. Inherits its board's access. Discord's "thread".
-- **Element** — an Excalidraw element in a sheet's scene. Every element the
+  One native canvas scene. Inherits its board's access. Discord's "thread".
+- **Element** — a versioned element in a sheet's scene. Every element the
   app makes carries `customData.kind`: `image`, `region` or `edge`.
 - **Claim** — a region or an edge. The sheet that drew it **owns** it. Two
   sheets may disagree; that is the point.
@@ -68,9 +68,9 @@ line here before it gets a file.
   live region, one per live edge. Rows are how the board and other sheets
   learn a claim. Seconds of lag, by design.
 - **Foreign** — a claim from another sheet, seen on a sheet that holds the
-  same image. Read-only. Drawn on the **overlay**, never in the Excalidraw
+  same image. Read-only. Drawn on the **overlay**, never in the native
   scene. Can be jumped to (its sheet) or **copied** (becomes your own).
-- **Overlay** — our layer above the Excalidraw canvas that draws foreign
+- **Overlay** — our layer above the native canvas that draws foreign
   claims and handles its own pointer events. What is on the overlay is
   never an element.
 - **Dangling** — an edge whose end is gone (image missing, foreign region

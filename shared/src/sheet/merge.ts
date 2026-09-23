@@ -1,15 +1,13 @@
-// The server's snapshot merge, ported from Excalidraw's own rule (see
-// ../../../prototype/sheet/server/reconcile.ts): higher version wins, a
+// The server's snapshot merge: higher version wins, a
 // tie breaks to the lower versionNonce so a stale client cannot roll a
-// newer save back. The client uses the excalidraw package's own
-// reconcileElements for the same rule against live scenes; this is the
+// newer save back. The client uses the same rule against live scenes; this is the
 // server's copy, over plain data, for the one write path that persists.
 
 export type Versioned = {
   id: string;
   version: number;
   versionNonce: number;
-  /** Excalidraw's fractional index: the scene's z-order, and a bound text
+  /** Fractional index: the scene's z-order, and a bound text
    * must sort after its container. Absent on a freshly seeded element. */
   index?: string | null;
 };
@@ -35,7 +33,7 @@ export function mergeByVersion<T extends Versioned>(
   }
 
   // Scene order is the fractional index, not the id: sorting by id once
-  // put bound labels before their containers and Excalidraw refused the
+  // put bound labels before their containers and rendering refused the
   // snapshot on load (2026-09-22). Elements without an index go last.
   return [...byId.values()].sort((a, b) => {
     const ai = a.index ?? null;

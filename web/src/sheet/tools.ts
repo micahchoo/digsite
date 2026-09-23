@@ -4,8 +4,7 @@
 // never a cached element list — which is what keeps `copyForeign` honest per
 // ../../.claude/rules/foreign-never-in-scene.md: "Never read the overlay's
 // last-rendered rect". Talks to the canvas only through `CanvasHandle` and
-// `SceneElement` (canvas/types.ts) — no `@excalidraw` import, no Excalidraw
-// type, per ../../.claude/rules/sheet-canvas-seam.md.
+// `SceneElement` (canvas/types.ts) through the canvas contract.
 import {
   type Direction,
   type Fraction,

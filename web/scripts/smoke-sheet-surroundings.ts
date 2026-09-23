@@ -35,14 +35,183 @@ async function main() {
     .click();
   await page.waitForURL(/\/s\/s1$/);
   console.log('PASS: previous and next follow board sheet order');
+  await page.route('**/sheets/s2/foreign', async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as {
+      regions: Array<Record<string, unknown>>;
+      edges: unknown[];
+    };
+    const base = payload.regions.find((region) => region.imageId === 'img-8');
+    if (base) {
+      for (const [id, label, sourceId] of [
+        ['fixture-overlap-a', 'overlap alpha', 'fixture-a'],
+        ['fixture-overlap-b', 'overlap beta', 'fixture-b'],
+      ]) {
+        payload.regions.push({
+          ...base,
+          id,
+          label,
+          sheetId: id,
+          sheetName: label,
+          sourceId,
+        });
+      }
+    }
+    await route.fulfill({ response, body: JSON.stringify(payload) });
+  });
   await page.getByRole('button', { name: 'Next sheet: Faces' }).click();
   await page.waitForURL(/\/s\/s2$/);
+  await page.waitForFunction(
+    () => window.__digsite?.getElements().length === 12,
+  );
+  await page.evaluate(() =>
+    window.__digsite.drawRegion(
+      'img-8',
+      { fx: 0.1, fy: 0.1, fw: 0.35, fh: 0.35 },
+      'owned find',
+    ),
+  );
+  await page.waitForFunction(
+    () =>
+      window.__digsite
+        ?.getElements()
+        .some(
+          (element) =>
+            (element.customData as { label?: string } | undefined)?.label ===
+            'owned find',
+        ) === true,
+  );
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll(
+        '[data-testid="foreign-shape"][data-foreign-kind="region"]',
+      ).length === 4,
+  );
+  await page.evaluate(() => window.__digsite.zoomToFit());
+  await page.waitForTimeout(100);
+  assert(
+    await page.evaluate(
+      () => (window.__digsiteSheetDebug?.getAppState()?.zoom.value ?? 1) < 1,
+    ),
+    'sheet fit did not show the full image grid',
+  );
+  assert(
+    (await page.locator('[data-testid="connection-label"]').count()) > 0,
+    'no connection labels were placed at desktop size',
+  );
+  const regionLabelBoxes = await page
+    .locator('[data-testid="foreign-region-label-box"]')
+    .evaluateAll((rects) =>
+      rects.map((rect) => {
+        const box = rect.getBoundingClientRect();
+        return {
+          id: rect.getAttribute('data-label-owner'),
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          height: box.height,
+        };
+      }),
+    );
+  const overlappingClaimIds = await page.evaluate(() =>
+    window.__digsite
+      .getForeign()
+      .filter(
+        (shape) => shape.kind === 'region' && shape.row.imageId === 'img-8',
+      )
+      .map((shape) => shape.id),
+  );
+  const overlappingClaimLabels = regionLabelBoxes.filter((box) =>
+    overlappingClaimIds.includes(box.id ?? ''),
+  );
+  assert(
+    overlappingClaimLabels.length === 3,
+    'not all three overlapping regions received labels',
+  );
+  for (let i = 0; i < overlappingClaimLabels.length; i += 1) {
+    const box = overlappingClaimLabels[i];
+    if (!box) continue;
+    for (let j = i + 1; j < overlappingClaimLabels.length; j += 1) {
+      const other = overlappingClaimLabels[j];
+      if (!other) continue;
+      assert(
+        box.x + box.width <= other.x ||
+          other.x + other.width <= box.x ||
+          box.y + box.height <= other.y ||
+          other.y + other.height <= box.y,
+        'overlapping foreign region labels collided',
+      );
+    }
+  }
+  const ownRegionLabelBox = await page.evaluate(() => {
+    const region = window.__digsite
+      .getElements()
+      .find(
+        (element) =>
+          (element.customData as { label?: string } | undefined)?.label ===
+          'owned find',
+      );
+    const appState = window.__digsiteSheetDebug?.getAppState();
+    const canvasArea = document
+      .querySelector('.sheet-canvas-area')
+      ?.getBoundingClientRect();
+    if (!region || !appState || !canvasArea) return null;
+    const ctx = document.createElement('canvas').getContext('2d');
+    if (ctx) ctx.font = '11px system-ui, sans-serif';
+    const rect = {
+      x: (region.x + appState.scrollX) * appState.zoom.value,
+      y: (region.y + appState.scrollY) * appState.zoom.value,
+      width: region.width * appState.zoom.value,
+      height: region.height * appState.zoom.value,
+    };
+    return {
+      x: canvasArea.x + rect.x + 4,
+      y: canvasArea.y + rect.y + 3,
+      width: Math.min(
+        ctx?.measureText('owned find').width ?? 70,
+        Math.max(0, rect.width - 8),
+      ),
+      height: 14,
+    };
+  });
+  assert(ownRegionLabelBox, 'own-region label fixture was not found');
+  for (const box of regionLabelBoxes) {
+    assert(
+      box.x + box.width <= ownRegionLabelBox.x ||
+        ownRegionLabelBox.x + ownRegionLabelBox.width <= box.x ||
+        box.y + box.height <= ownRegionLabelBox.y ||
+        ownRegionLabelBox.y + ownRegionLabelBox.height <= box.y,
+      'foreign region label collided with the owned region label',
+    );
+  }
+  const labelFixtureScene = await page.evaluate(() =>
+    JSON.stringify(window.__digsite.getElements()),
+  );
+  await page
+    .locator('[data-testid="foreign-region-label-box"]')
+    .first()
+    .click();
+  assert(
+    await page.evaluate(
+      () => window.__digsite.getSelected()?.kind === 'foreign',
+    ),
+    'clicking a placed foreign label did not select its region',
+  );
+  assert(
+    labelFixtureScene ===
+      (await page.evaluate(() =>
+        JSON.stringify(window.__digsite.getElements()),
+      )),
+    'placing/selecting foreign region labels changed the scene',
+  );
   await page.screenshot({
     path: '/tmp/sheet-surroundings-desktop.png',
     fullPage: true,
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.__digsite.zoomToFit());
+  await page.waitForTimeout(100);
   const toggle = page.locator('.sheet-mobile-inspector-toggle');
   await toggle.click();
   const panel = page.locator('#sheet-inspector-panel');
@@ -73,32 +242,41 @@ async function main() {
     'Shift+Tab escaped the inspector focus cycle',
   );
 
-  const relationFilter = page.locator('#foreign-relation-filter');
+  const relationFilter = page.locator('#connection-relation-filter');
   if (await relationFilter.isVisible()) {
     const shapesBefore = await page
       .locator('[data-testid="foreign-shape"][data-foreign-kind="edge"]')
       .count();
     const sceneBefore = await page.evaluate(() =>
-      window.__digsite.getElements().map((element) => element.id),
+      JSON.stringify(window.__digsite.getElements()),
     );
     if ((await relationFilter.locator('option').count()) > 1) {
       await relationFilter.selectOption({ index: 1 });
       const shapesAfter = await page
         .locator('[data-testid="foreign-shape"][data-foreign-kind="edge"]')
         .count();
+      const matchingForeignDimmed = await page
+        .locator(
+          '[data-testid="foreign-shape"][data-foreign-kind="edge"][data-relation-dimmed="true"]',
+        )
+        .count();
       const sceneAfter = await page.evaluate(() =>
-        window.__digsite.getElements().map((element) => element.id),
+        JSON.stringify(window.__digsite.getElements()),
       );
       assert(
         shapesAfter === shapesBefore,
         'relation emphasis removed foreign connection shapes',
       );
       assert(
-        JSON.stringify(sceneAfter) === JSON.stringify(sceneBefore),
+        sceneAfter === sceneBefore,
         'foreign relation emphasis changed the shared scene',
       );
+      assert(
+        matchingForeignDimmed === 0,
+        'matching foreign connection was incorrectly dimmed',
+      );
       console.log(
-        'PASS: relation emphasis preserves overlay and scene elements',
+        'PASS: relation emphasis preserves matching labels and scene elements',
       );
     }
     await relationFilter.focus();

@@ -1,9 +1,8 @@
 // The native adapter's one component: a plain `<canvas>`, sized to its
 // container with devicePixelRatio, drawn every frame by `render.ts` from
-// this file's own element/viewport/selection state — no `@excalidraw`
-// import anywhere under `native/` (../../../../.claude/rules/sheet-canvas-seam.md).
+// this file's own element/viewport/selection state.
 //
-// Mirrors `../excalidraw/ExcalidrawCanvas.tsx`'s division of labour:
+// Its division of labour is:
 // `camera.ts` is the arithmetic, `gestures.ts` decides what a pointer press
 // means, `scene.ts` is what is on screen and what a point lands on,
 // `history.ts`/`ops.ts` are the undo stack and the patch/build logic,
@@ -101,7 +100,7 @@ function typing(): boolean {
 }
 
 export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
-  function NativeCanvas({ files, tool, onChange }, ref) {
+  function NativeCanvas({ files, tool, onChange, dimRelations }, ref) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -157,8 +156,9 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         selectedIds: selectedIdsRef.current,
         images: imagesRef.current,
         marquee,
+        dimRelations,
       });
-    }, []);
+    }, [dimRelations]);
 
     const scheduleRender = useCallback(() => {
       if (rafRef.current !== null) return;
@@ -514,10 +514,8 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         applyRemote(raw) {
           // No `onChange` here on purpose: `room.ts` calls this and then
           // re-reads `elements()`/`viewport()` itself for its own state,
-          // the same defensive pattern the Excalidraw adapter's own comment
-          // notes ("does not reliably fire onChange for a programmatic
-          // update") — see `excalidraw/ExcalidrawCanvas.tsx`'s
-          // `applyViewportAndEmit` comment.
+          // Programmatic updates do not emit onChange; the owner re-reads
+          // state through this handle after applying the update.
           elementsRef.current = mergeByVersion(
             elementsRef.current,
             raw as SceneElement[],

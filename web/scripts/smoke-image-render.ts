@@ -1,23 +1,7 @@
-// docs/ux/audit.md #2: the Excalidraw sheet canvas rendered every image as
-// a generic grey placeholder while the native adapter rendered the same
-// data correctly. Diagnosed cause: `ExcalidrawCanvas.tsx`'s own
-// `apiRef.current` (Excalidraw's imperative API) is not guaranteed ready by
-// the time this component's effects first run — its own initialisation can
-// outlast ours under load. The `files` effect that registers each image's
-// bitmap (`api.addFiles`) checked `apiRef.current` and silently gave up,
-// with no retry, if it was still null; since `files` only changes once (one
-// `setFiles` after every preview finishes loading — `sheet/images.ts`), a
-// single missed run meant that image's `fileId` was never registered and
-// Excalidraw drew its own placeholder forever. Fixed by queueing the flush
-// and replaying it once the API exists (`ExcalidrawCanvas.tsx`'s
-// `readyQueue`).
-//
-// This script proves the fix at the pixel level, the same way a human
-// would notice the bug: decode an actual canvas pixel inside a known
-// image's rect, on BOTH adapters, and check it against the colour the stub
+// This script checks decoded image pixels on the native sheet canvas: it
+// samples inside a known image's rect and compares the pixel with the colour
 // painted that image with (`web/stub/server.ts#paintImage`:
-// `hsl((slot * 137.508) % 360, 65%, 55%)`) — a grey/blank placeholder does
-// not match, on either adapter, regardless of how it's drawn.
+// `hsl((slot * 137.508) % 360, 65%, 55%)`).
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { type Page, chromium } from 'playwright';
 
@@ -78,8 +62,8 @@ function closeColor(
   );
 }
 
-async function checkAdapter(page: Page, adapter: 'excalidraw' | 'native') {
-  await page.goto(`${WEB}/s/s1?canvas=${adapter}`);
+async function checkCanvas(page: Page) {
+  await page.goto(`${WEB}/s/s1`);
   await page.waitForFunction(() => typeof window.__digsite !== 'undefined');
   await page.waitForFunction(
     () => window.__digsite.getElements().length > 0,
@@ -97,11 +81,11 @@ async function checkAdapter(page: Page, adapter: 'excalidraw' | 'native') {
         e.customData?.kind === 'image' && e.customData.imageId === 'img-0',
     ),
   );
-  assert(rect, `[${adapter}] no image element for img-0`);
+  assert(rect, 'no image element for img-0');
   const r = rect as { x: number; y: number; width: number; height: number };
 
   const box = await page.locator('.digsite-canvas').first().boundingBox();
-  assert(box, `[${adapter}] no .digsite-canvas container on screen`);
+  assert(box, 'no .digsite-canvas container on screen');
   const vp = await page.evaluate(() => {
     // biome-ignore lint/suspicious/noExplicitAny: crosses the browser boundary
     const s: any = window.__digsiteSheetDebug?.getAppState();
@@ -119,10 +103,10 @@ async function checkAdapter(page: Page, adapter: 'excalidraw' | 'native') {
   const expected = hslToRgb((0 * 137.508) % 360, 0.65, 0.55); // img-0 -> slot 0
   assert(
     closeColor(pixel, expected, 40),
-    `[${adapter}] pixel at img-0's quarter-point was rgb(${pixel[0]},${pixel[1]},${pixel[2]}), expected close to rgb(${expected[0]},${expected[1]},${expected[2]}) — looks like a placeholder, not the real image`,
+    `pixel at img-0's quarter-point was rgb(${pixel[0]},${pixel[1]},${pixel[2]}), expected close to rgb(${expected[0]},${expected[1]},${expected[2]})`,
   );
   console.log(
-    `PASS [${adapter}]: img-0 decodes to rgb(${pixel[0]},${pixel[1]},${pixel[2]}), matching the painted colour rgb(${expected[0]},${expected[1]},${expected[2]})`,
+    `PASS: img-0 decodes to rgb(${pixel[0]},${pixel[1]},${pixel[2]}), matching the painted colour rgb(${expected[0]},${expected[1]},${expected[2]})`,
   );
 }
 
@@ -139,8 +123,7 @@ async function main() {
   await page.waitForURL(/\/groups$/);
   console.log('signed in');
 
-  await checkAdapter(page, 'native');
-  await checkAdapter(page, 'excalidraw');
+  await checkCanvas(page);
 
   await browser.close();
   console.log('smoke-image-render: all assertions passed');
