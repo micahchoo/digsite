@@ -475,6 +475,11 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/boards/${fx.bPrivateId}/sheets`,
     outsider: 403,
   },
+  'GET /boards/:id/relation-web': {
+    method: 'GET',
+    path: (fx) => `/boards/${fx.bPrivateId}/relation-web?relation=x`,
+    outsider: 403,
+  },
   'GET /boards/:id/neighbourhood': {
     method: 'GET',
     path: (fx) =>

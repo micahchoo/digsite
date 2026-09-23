@@ -82,3 +82,47 @@ export async function neighbourhoodFrom(
 
   return { images, edges, truncated };
 }
+
+/**
+ * The web of one relation (roadmap horizon 3): every connection on the
+ * board that means `relation` (its aliases included), across all sheets,
+ * and the pictures at their ends. There is no anchor, so every hop count
+ * is 0. Cut at `limit` pictures, the most connected kept first, so the
+ * web's hubs survive and the loose ends go (`truncated: true`).
+ */
+export async function relationWeb(
+  boardId: string,
+  relation: string,
+  limit: number = SHEET_LIMIT,
+): Promise<Neighbourhood> {
+  const relations = termsMeaning(relation, (await aliasesOf(boardId)).relation);
+  const { rows } = await pool.query(
+    `WITH web AS (
+       SELECT e.src_image_id, e.dst_image_id FROM edges e
+       JOIN images si ON si.id = e.src_image_id AND si.board_id = $1
+       JOIN images di ON di.id = e.dst_image_id AND di.board_id = $1
+       WHERE e.relation = ANY($2::text[])
+     ), ends AS (
+       SELECT src_image_id AS image_id FROM web
+       UNION ALL SELECT dst_image_id FROM web
+     )
+     SELECT image_id, count(*) AS degree FROM ends
+     GROUP BY image_id ORDER BY degree DESC, image_id`,
+    [boardId, relations],
+  );
+  const truncated = rows.length > limit;
+  const images: NeighbourhoodImage[] = rows
+    .slice(0, limit)
+    .map((r) => ({ id: r.image_id as string, hops: 0 }));
+  let edges: EdgeRow[] = [];
+  if (images.length > 0) {
+    const { rows: edgeRows } = await pool.query(
+      `SELECT * FROM edges
+       WHERE src_image_id = ANY($1::uuid[]) AND dst_image_id = ANY($1::uuid[])
+         AND relation = ANY($2::text[])`,
+      [images.map((i) => i.id), relations],
+    );
+    edges = (edgeRows as EdgeDbRow[]).map(toEdgeRow);
+  }
+  return { images, edges, truncated };
+}

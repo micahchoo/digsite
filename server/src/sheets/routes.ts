@@ -45,7 +45,7 @@ import {
   readJsonBody,
   requireAuth,
 } from '../http.ts';
-import { neighbourhoodFrom } from './neighbourhood.ts';
+import { neighbourhoodFrom, relationWeb } from './neighbourhood.ts';
 import { participantsOf } from './participants.ts';
 import { reachOf } from './reach.ts';
 import {
@@ -145,6 +145,26 @@ export function registerSheetRoutes(router: Router) {
   // Sheet from a neighbourhood (docs/phases/2-sheet.md section 4), under
   // boardForViewing — exploring doesn't create anything, so it needs no
   // stronger intent than looking at the board.
+  // GET /boards/:id/relation-web?relation= (roadmap horizon 3): every
+  // connection meaning that relation across the board's sheets, and the
+  // pictures it joins; the neighbourhood's shape, every hop 0.
+  router.get('/boards/:id/relation-web', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    const relation = (ctx.url.searchParams.get('relation') ?? '').trim();
+    if (!relation || relation.length > 200) {
+      return json(ctx.res, 400, {
+        error: 'relation must be 1 to 200 characters',
+      });
+    }
+    const response: GetNeighbourhoodResponse = await relationWeb(
+      boardId,
+      relation,
+    );
+    json(ctx.res, 200, response);
+  });
+
   router.get('/boards/:id/neighbourhood', async (ctx) => {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
