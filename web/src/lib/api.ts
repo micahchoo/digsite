@@ -245,7 +245,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  const body = (await res.json()) as T;
+  if (token && typeof body === 'object' && body !== null)
+    builds.set(body, token);
+  return body;
+}
+
+/** Which order build an answer in ranks came from, as its reply named it. */
+const builds = new WeakMap<object, string>();
+export function buildOf(answer: object): string | undefined {
+  return builds.get(answer);
 }
 
 function post(body: unknown): RequestInit {

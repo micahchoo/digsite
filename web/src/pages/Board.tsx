@@ -37,10 +37,12 @@ import {
   CELL,
   COLS,
   DEFAULT_SORT,
+  type FindBoardResponse,
   type FindFilterClause,
   GRID_LAYOUT_VERSION,
   type GetImageResponse,
   type GetNeighbourhoodResponse,
+  type MeaningResponse,
   type Properties,
   type PropertyValue,
   SHEET_LIMIT,
@@ -58,6 +60,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -86,6 +89,7 @@ import {
   visibleRanks,
 } from '../board/detail.ts';
 import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
+import { RankedView, identity, useRanked } from '../board/ranked-view.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
 import { cellCorner, cellPolygon } from '../board/selection.ts';
 import {
@@ -97,12 +101,7 @@ import { useSelection } from '../board/useSelection.ts';
 import { Compare, type CompareEnd } from '../components/Compare.tsx';
 import { WHOLE } from '../components/compare-view.ts';
 import { modalOpen } from '../lib/modal.ts';
-import {
-  noteOrderVersion,
-  orderVersionOf,
-  subscribeOrderVersion,
-  waitForOrderVersion,
-} from '../lib/order-version.ts';
+import { noteOrderVersion, waitForOrderVersion } from '../lib/order-version.ts';
 import '../board/board.css';
 import { Confirm } from '../components/Confirm.tsx';
 import {
@@ -251,6 +250,18 @@ const WEB_STARTS = 40;
 
 /** A search by meaning asks for this many at a time. */
 const MEANING_PAGE = 24;
+const NO_SECTIONS: Section[] = [];
+const NO_IMAGES: BoardImageWithRank[] = [];
+const NO_RANKS: number[] = [];
+const NO_IDS: ReadonlySet<string> = new Set();
+
+type FindResult = {
+  ranks: number[];
+  imageIds: string[];
+  count: number;
+  /** Best first: a search by meaning, drawn stronger at the top. */
+  ranked?: boolean;
+};
 /** And shows this many of them as pictures in the Find panel. */
 const MEANING_STRIP = 12;
 
@@ -312,10 +323,16 @@ export function Board() {
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
   const [folderImport, setFolderImport] = useState(false);
-  /** Bumped when the order build moves on (order-version.ts): everything
-   * this page holds in ranks is refetched, and tiles take the new `v`. */
-  const [orderMoved, setOrderMoved] = useState(0);
-  const heldTokenRef = useRef<string | undefined>(undefined);
+  const currentSortId = sort ? sortId(sort) : DEFAULT_SORT.key.toString();
+  /** Every answer this page holds in ranks, under the build the map shows
+   * (board/ranked-view.ts). One per board and sort. */
+  const view = useMemo(
+    () => new RankedView(boardId, currentSortId),
+    [boardId, currentSortId],
+  );
+  useEffect(() => () => view.dispose(), [view]);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [comparing, setComparing] = useState<[CompareEnd, CompareEnd] | null>(
     null,
   );
@@ -332,8 +349,12 @@ export function Board() {
   const [, forceRender] = useState(0);
 
   // -- sections --------------------------------------------------------------
-  const [sections, setSections] = useState<Section[]>([]);
-  const [sectionsTruncated, setSectionsTruncated] = useState(false);
+  const sectionsAnswer = useRanked(view, board ? 'sections' : null, () =>
+    api.getSections(boardId, currentSortId),
+  );
+  // Without sections the map still works, just without labels.
+  const sections = sectionsAnswer?.value?.sections ?? NO_SECTIONS;
+  const sectionsTruncated = sectionsAnswer?.value?.truncated ?? false;
   const sectionsRef = useRef<Section[]>([]);
   sectionsRef.current = sections;
 
@@ -346,9 +367,24 @@ export function Board() {
 
   // -- selection: resolved images (order preserved by the server —
   // lib/api.ts's getBoardImagesByIds) --------------------------------------
-  const [selectedImages, setSelectedImages] = useState<BoardImageWithRank[]>(
-    [],
+  // Resolved with each image's rank under the current sort; the tray, the
+  // map outline, fly-to and window.__digsiteBoard.getSelection() read it.
+  const selectionAnswer = useRanked(
+    view,
+    selection.imageIds.length ? selection.imageIds.join(',') : null,
+    () => api.getBoardImagesByIds(boardId, currentSortId, selection.imageIds),
   );
+  /** Images this page has just marked missing, before the next answer. */
+  const [markedMissing, setMarkedMissing] =
+    useState<ReadonlySet<string>>(NO_IDS);
+  const selectedImages = useMemo(() => {
+    const found = selectionAnswer?.value?.images ?? NO_IMAGES;
+    return markedMissing.size
+      ? found.map((i) =>
+          markedMissing.has(i.id) ? { ...i, missing: true } : i,
+        )
+      : found;
+  }, [selectionAnswer, markedMissing]);
   const selectedImagesRef = useRef<BoardImageWithRank[]>([]);
   selectedImagesRef.current = selectedImages;
   const [selectionNote, setSelectionNote] = useState('');
@@ -367,19 +403,7 @@ export function Board() {
    * images sit under the current sort, for the lines on the map. */
   const [exploreGraph, setExploreGraph] =
     useState<GetNeighbourhoodResponse | null>(null);
-  const [exploreRanks, setExploreRanks] = useState<Map<string, number>>(
-    new Map(),
-  );
-  /** Ranks of images any sheet has annotated, for the corner marks. */
-  const [annotatedRanks, setAnnotatedRanks] = useState<number[]>([]);
   const vocab = useVocabulary(boardId);
-  const [findResult, setFindResult] = useState<{
-    ranks: number[];
-    imageIds: string[];
-    count: number;
-    /** Best first: a search by meaning, drawn stronger at the top. */
-    ranked?: boolean;
-  } | null>(null);
   /** Words match names and properties; meaning matches what is in the
    * picture (the server's embeddings). */
   const [findMode, setFindMode] = useState<'words' | 'meaning'>('words');
@@ -391,7 +415,6 @@ export function Board() {
     id: string;
     name: string;
   } | null>(null);
-  const [findError, setFindError] = useState('');
   const lastClickRankRef = useRef<number | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
 
@@ -666,8 +689,6 @@ export function Board() {
     }
   }
 
-  const currentSortId = sort ? sortId(sort) : DEFAULT_SORT.key.toString();
-
   // Refs, not the values themselves: `window.__digsiteBoard` is assigned
   // once with an empty dependency array (see that effect's own comment —
   // every function there closes over refs or the selection hook's own
@@ -711,7 +732,7 @@ export function Board() {
   const rangeSelect = useCallback(
     async (a: number, b: number, mode?: 'band') => {
       try {
-        const v = orderVersionOf(boardIdRef.current, currentSortIdRef.current);
+        const v = viewRef.current.build;
         const { imageIds } = await api.postSelectionRange(boardIdRef.current, {
           sort: currentSortIdRef.current,
           fromRank: a,
@@ -991,122 +1012,70 @@ export function Board() {
   }, [resolveImageAtRank, rangeSelect, selection]);
 
   // -- the order build the map shows ----------------------------------------
-  // The first token of a visit is not a move; any later new one is: the
-  // ranks this page holds (find, sections, selection, explore, marks, the
-  // rank-to-image cache) were read under an older build.
+  // A newer build: the tiles and the rank-to-image cache were drawn under
+  // the old one. The view itself asks every answer in ranks again.
   useEffect(() => {
-    heldTokenRef.current = orderVersionOf(boardId, currentSortId);
-    return subscribeOrderVersion(() => {
-      const token = orderVersionOf(
-        boardIdRef.current,
-        currentSortIdRef.current,
-      );
-      if (!token) return;
-      const held = heldTokenRef.current;
-      heldTokenRef.current = token;
-      if (!held || held === token) return;
+    setHoverTooltip(null);
+    return view.onMove(() => {
       for (const cache of imageCacheRef.current.values()) cache.clear();
       setTileVersion((n) => n + 1);
-      setOrderMoved((n) => n + 1);
+      setHoverTooltip(null);
     });
-  }, [boardId, currentSortId]);
+  }, [view]);
 
-  // -- sections: refetch on sort change -----------------------------------
-  // biome-ignore lint/correctness/useExhaustiveDependencies: orderMoved is a trigger: a new order build makes the ranks held here stale
-  useEffect(() => {
-    let cancelled = false;
-    setSections([]);
-    setSectionsTruncated(false);
-    if (!board) return;
-    void api
-      .getSections(boardId, currentSortId)
-      .then((res) => {
-        if (cancelled) return;
-        setSections(res.sections);
-        setSectionsTruncated(res.truncated);
-      })
-      .catch(() => {
-        // sections route not reachable this tick; the map still works
-        // without labels.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [board, boardId, currentSortId, orderMoved]);
-
-  // Search and typed property filters use the current rank table. Debounce
-  // keystrokes and discard any response for criteria that are now stale.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the aliases are a trigger (a merge changes what a term matches), not an input
-  useEffect(() => {
-    const byMeaning = findLike !== null || findMode === 'meaning';
-    const asked = byMeaning
-      ? findLike !== null || findQuery.trim() !== ''
-      : findQuery.trim() !== '' || findFilters.length > 0 || findClaim !== null;
-    if (!findOpen || !asked) {
-      setFindResult(null);
-      setFindError('');
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      const request = byMeaning
-        ? (findLike
-            ? api.similarImages(
-                boardId,
-                currentSortId,
-                findLike.id,
-                meaningLimit,
-              )
-            : api.searchMeaning(
-                boardId,
-                currentSortId,
-                findQuery.trim(),
-                meaningLimit,
-              )
-          ).then(({ matches }) => ({
-            ranks: matches.map((m) => m.rank),
-            imageIds: matches.map((m) => m.imageId),
-            count: matches.length,
-            ranked: true,
-          }))
+  // Search and typed property filters use the current rank table.
+  // Keystrokes wait a moment; an alias changes what a term means, so a find
+  // by term is asked again when the aliases change.
+  const byMeaning = findLike !== null || findMode === 'meaning';
+  const findAsked = byMeaning
+    ? findLike !== null || findQuery.trim() !== ''
+    : findQuery.trim() !== '' || findFilters.length > 0 || findClaim !== null;
+  const findAnswer = useRanked(
+    view,
+    findOpen && findAsked
+      ? JSON.stringify([
+          byMeaning,
+          findQuery.trim(),
+          findFilters,
+          findClaim,
+          findLike?.id,
+          meaningLimit,
+          identity(vocab.vocabulary.aliases),
+        ])
+      : null,
+    (): Promise<MeaningResponse | FindBoardResponse> =>
+      byMeaning
+        ? findLike
+          ? api.similarImages(boardId, currentSortId, findLike.id, meaningLimit)
+          : api.searchMeaning(
+              boardId,
+              currentSortId,
+              findQuery.trim(),
+              meaningLimit,
+            )
         : api.findBoard(boardId, currentSortId, findQuery.trim(), findFilters, {
             ...(findClaim?.kind === 'label' ? { label: findClaim.term } : {}),
             ...(findClaim?.kind === 'relation'
               ? { relation: findClaim.term }
               : {}),
-          });
-      void request
-        .then((result) => {
-          if (!cancelled) {
-            setFindResult(result);
-            setFindError('');
-          }
-        })
-        .catch((err: unknown) => {
-          if (!cancelled) {
-            setFindResult(null);
-            setFindError(findFailure(err, byMeaning));
-          }
-        });
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-    // An alias changes what a term means, so a find by term runs again.
-  }, [
-    boardId,
-    currentSortId,
-    findOpen,
-    findQuery,
-    findFilters,
-    findClaim,
-    findMode,
-    findLike,
-    meaningLimit,
-    vocab.vocabulary.aliases,
-    orderMoved,
-  ]);
+          }),
+    250,
+  );
+  const findResult = useMemo((): FindResult | null => {
+    const found = findAnswer?.value;
+    if (!found) return null;
+    if ('matches' in found)
+      return {
+        ranks: found.matches.map((m) => m.rank),
+        imageIds: found.matches.map((m) => m.imageId),
+        count: found.matches.length,
+        ranked: true,
+      };
+    return found;
+  }, [findAnswer]);
+  const findError = findAnswer?.error
+    ? findFailure(findAnswer.error, byMeaning)
+    : '';
   // A new question starts from the first page of answers.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the question is the trigger
   useEffect(() => {
@@ -1114,57 +1083,31 @@ export function Board() {
   }, [findQuery, findLike, findMode]);
 
   // Where the neighbourhood's images sit on the map under this sort.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: orderMoved is a trigger: a new order build makes the ranks held here stale
-  useEffect(() => {
-    if (!exploreGraph) {
-      setExploreRanks(new Map());
-      return;
-    }
-    let cancelled = false;
-    void api
-      .getBoardImagesByIds(
+  const exploreAnswer = useRanked(
+    view,
+    exploreGraph ? exploreGraph.images.map((i) => i.id).join(',') : null,
+    () =>
+      api.getBoardImagesByIds(
         boardId,
         currentSortId,
-        exploreGraph.images.map((i) => i.id),
-      )
-      .then(({ images }) => {
-        if (cancelled) return;
-        const ranks = new Map<string, number>();
-        for (const img of images)
-          if (typeof img.rank === 'number') ranks.set(img.id, img.rank);
-        setExploreRanks(ranks);
-      })
-      .catch(() => {
-        if (!cancelled) setExploreRanks(new Map());
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [boardId, currentSortId, exploreGraph, orderMoved]);
+        exploreGraph?.images.map((i) => i.id) ?? [],
+      ),
+  );
+  const exploreRanks = useMemo(() => {
+    const ranks = new Map<string, number>();
+    for (const img of exploreAnswer?.value?.images ?? [])
+      if (typeof img.rank === 'number') ranks.set(img.id, img.rank);
+    return ranks;
+  }, [exploreAnswer]);
 
-  // Which images carry any claim. Refetched when the vocabulary changes,
-  // which is when some sheet's claims did.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the vocabulary is the trigger, not an input
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .findBoard(boardId, currentSortId, '', [], { annotated: true })
-      .then((r) => {
-        if (!cancelled) setAnnotatedRanks(r.ranks);
-      })
-      .catch(() => {
-        if (!cancelled) setAnnotatedRanks([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [boardId, currentSortId, vocab.vocabulary, orderMoved]);
-
-  // -- hover tooltip goes stale across a sort change (the rank means a
-  // different image) --------------------------------------------------------
-  useEffect(() => {
-    setHoverTooltip(null);
-  }, []);
+  // Ranks of images any sheet has annotated, for the corner marks. Asked
+  // again when the vocabulary changes, which is when some sheet's claims did.
+  const annotatedAnswer = useRanked(
+    view,
+    `annotated ${identity(vocab.vocabulary)}`,
+    () => api.findBoard(boardId, currentSortId, '', [], { annotated: true }),
+  );
+  const annotatedRanks = annotatedAnswer?.value?.ranks ?? NO_RANKS;
 
   // -- fetch the tile ----------------------------------------------------------
   const fetchTile = useCallback(
@@ -1220,30 +1163,6 @@ export function Board() {
       ttftMs: null,
     };
   }, [currentSortId, tileVersion]);
-
-  // -- resolve the selection's ids to images (with rank under the CURRENT
-  // sort) whenever the ids or the sort change — the tray, the map outline,
-  // fly-to and window.__digsiteBoard.getSelection() all read this. --------
-  // biome-ignore lint/correctness/useExhaustiveDependencies: orderMoved is a trigger: a new order build makes the ranks held here stale
-  useEffect(() => {
-    let cancelled = false;
-    if (!selection.imageIds.length) {
-      setSelectedImages([]);
-      return;
-    }
-    void api
-      .getBoardImagesByIds(boardId, currentSortId, selection.imageIds)
-      .then(({ images: found }) => {
-        if (cancelled) return;
-        setSelectedImages(found);
-      })
-      .catch(() => {
-        if (!cancelled) setSelectedImages([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selection.imageIds, boardId, currentSortId, orderMoved]);
 
   // -- detail: past the tiles, each visible cell draws its own preview ------
   const [detailVersion, setDetailVersion] = useState(0);
@@ -2034,9 +1953,7 @@ export function Board() {
           cache.set(rank, { ...cached, missing: true });
       }
     }
-    setSelectedImages((prev) =>
-      prev.map((i) => (i.id === imageId ? { ...i, missing: true } : i)),
-    );
+    setMarkedMissing((prev) => new Set(prev).add(imageId));
   }
 
   // -- upload ------------------------------------------------------------------
