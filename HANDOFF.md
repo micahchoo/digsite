@@ -1,9 +1,12 @@
 # HANDOFF — digsite product repo
 
-Updated 2026-09-22 after the Luna agent pass. Phases 0–4 and both canvas adapters are built. Roadmap: `docs/roadmap.md`.
+Updated 2026-09-22 after the second Luna agent pass. Phases 0–4 and both canvas adapters are built. Roadmap: `docs/roadmap.md`.
 
-This pass committed the native canvas reset (`831efb3`), server and shared
-contracts (`feecca2`), and selection/interface work (`78a5121`). Nothing was deployed.
+The first pass committed the native canvas reset (`831efb3`), server/shared
+contracts (`feecca2`), and selection/interface work (`78a5121`). The second
+pass adds request diagnostics (`dcdfe8c`), live sheet additions and the
+Excalidraw delete fix (`d3be875`), and thread/mobile/upload UI (`698b293`).
+These changes run in the isolated local preview; nothing was deployed.
 
 ## Where things stand
 
@@ -36,8 +39,16 @@ The existing stub smokes do not prove that the entire product design is complete
 Find highlights returned matches and shows truncation. Full nonmatch dimming needs a response limited to the current viewport.
 Copy-to-board and download remain disabled. The neighbourhood menu opens Explore controls.
 Sort preferences stay in browser storage. Saved selections use the server.
-Adding images updates the stored sheet scene. The route does not broadcast those additions to peers already in the sheet.
-Live propagation of those additions needs a separate integration check and implementation.
+Adding images now broadcasts the committed scene to open sheet peers. Clients load
+new image previews before applying it and retain one merged pending scene while
+assets load. A two-user integration check covers a stale peer edit and rejoin.
+
+The next Luna pass adds a searchable board thread browser with image previews,
+unread state, archive and reopen. Opening a sheet marks it seen. The sheet has
+previous/next navigation and a mobile details drawer. The relation control dims
+other sheets' connections only; filtering owned connections still needs a
+canvas presentation API. Label collision handling, thread participants, GeoCities
+themes, board presence/claims, copy choices and richer property UI remain open.
 
 The historical demo OOM remains unconfirmed. The journal records two
 16 GB kills about 11 seconds after restart, at 15:23 and 16:14 local time.
@@ -49,22 +60,33 @@ Resetting the recycled canvas before repainting reduced a repeat run to 104–12
 Pixel checks passed in both runs. The harness is `server/scripts/repro-ladder-page-churn.ts`.
 This result proves a cache defect, but not the exact historical crash trigger.
 The demo worktree and database remain unchanged by this pass.
+Opt-in `DIGSITE_REQUEST_DIAGNOSTICS=1` now logs bounded start/end breadcrumbs
+and process memory for board/tile requests, including requests killed before
+completion. It retains at most 128 active entries. This is instrumentation,
+not proof of the historical cause.
 
 ## Validation so far
 
-Both final fresh-database runs (native and Excalidraw) passed the board-selection
-acceptance check, 10 walking-skeleton scenarios, 9 group lifecycle scenarios,
-and 7 sheet-session checks. All package typechecks, Biome, and seam checks passed.
-The isolated server suite passed 78 tests, with one skipped. After the final
-sheet-delete fix and concurrency test, the focused server run passed 8 tests.
-The search check then passed with 31 assertions, including ten simultaneous
-substring searches and an existing trigram extension.
-All 11 stub smoke scripts passed across the full run and the focused rerun.
-The full run caught a mobile sheet-toolbar offset and an outdated singular-count
-assertion. Both failed scripts passed after those fixes. The board smoke
-then passed a delayed second-batch upload check: the first ten images update
-the count while upload continues, and the dark activity list stays bounded
-and scrollable. The final package typechecks, Biome, and seam check passed.
+The current isolated server suite passed 83 tests, with one skipped and no
+failures. The final web suite passed 161 tests. Package typechecks, Biome,
+seam checks and the production web build passed.
+All 13 registered smoke scripts passed across the full 12-script run and
+the added sheet-surroundings check. The board smoke passed again after the
+upload feedback fix, including an intercepted rejected batch.
+
+Both fresh canvas runs passed board selection/live additions/thread archive,
+10 walking-skeleton scenarios, 9 group lifecycle scenarios and 8 sheet-session
+checks. The first Excalidraw run exposed stale canvas callbacks replacing a pending delete
+before socket transmission. The adapter now keeps the applied scene until the
+callback catches up. A focused unit regression and a deterministic browser
+check verify that the deleted claim disappears from the server projection.
+The final native run also passed the new deletion check. Both test databases
+were dropped by their runners.
+
+Upload status checks now retry within the existing 60-second window without
+re-uploading accepted files. If confirmation remains unavailable, the UI says
+so. Failed rows show a reason and a summary count. Unit tests cover transient
+and persistent status-read failures; the browser checks rejected-batch feedback.
 
 Latest demo check: port 5180 serves the older `../demo` frontend (HTTP 200),
 but port 8800 refuses connections. The formerly transient user service
@@ -72,7 +94,12 @@ but port 8800 refuses connections. The formerly transient user service
 The real preview runs on 5292 with its server on 8892. Login and an actual
 upload passed. Sign in as `owner@example.test` with `password1234`.
 Its isolated database is `digsite_preview_1790122818`; storage is
-`../.preview/digsite_preview_1790122818/data`. Server PID: 885316; web PID: 888121.
+`../.preview/digsite_preview_1790122818/data`. Server PID: 1713523; Vite PID: 1716578 (launcher 1716552).
+Request diagnostics are enabled on this isolated server. Browser login passed.
+The latest upload to Finds has 20 ready images and no failed or pending jobs;
+a separate browser confirmed the images render. The reported upload failure
+has not been attributed to a specific failed request. A misleading status-read
+failure path was fixed, but it is not confirmed as the cause of that report.
 Keep this preview available for review. Remove only these processes, this
 database, and this data directory when the preview is no longer needed.
 The older UI preview on 5291 uses a stub on 8891. It renders synthetic tiles
