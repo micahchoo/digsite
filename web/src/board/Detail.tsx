@@ -8,6 +8,7 @@
 import type { GetImageResponse, PropertyValue } from '@digsite/shared';
 import { useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
+import { captured, isCaptured } from './captured.ts';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -34,6 +35,8 @@ interface Props {
   onRemoveProperty: (key: string) => void;
   onDelete: () => void;
   onClose: () => void;
+  /** Find the pictures that look like this one (search by meaning). */
+  onMoreLike?: () => void;
 }
 
 export function Detail({
@@ -44,6 +47,7 @@ export function Detail({
   onRemoveProperty,
   onDelete,
   onClose,
+  onMoreLike,
 }: Props) {
   const [newKey, setNewKey] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -53,6 +57,49 @@ export function Detail({
     month: 'short',
     year: 'numeric',
   });
+
+  const entries = Object.entries(image.properties);
+  const own = entries.filter(([k]) => !isCaptured(k));
+  const camera = entries.filter(([k]) => isCaptured(k));
+  const shot = captured(image.properties);
+  const row = (k: string, v: PropertyValue) => (
+    <div key={k} className="board-property-row">
+      <label className="board-property-name" htmlFor={`detail-property-${k}`}>
+        {k}
+      </label>
+      <input
+        id={`detail-property-${k}`}
+        data-testid={`detail-prop-${k}`}
+        aria-label={k}
+        value={String(v)}
+        onChange={(e) => onSetProperty(k, coerce(e.target.value, typeOf(v)))}
+      />
+      <select
+        value={typeOf(v)}
+        aria-label={`Type of ${k}`}
+        onChange={(e) =>
+          onSetProperty(
+            k,
+            coerce(String(v), e.target.value as 'text' | 'number' | 'boolean'),
+          )
+        }
+      >
+        <option value="text">Text</option>
+        <option value="number">Number</option>
+        <option value="boolean">Yes/no</option>
+      </select>
+      <button
+        type="button"
+        className="board-property-remove"
+        aria-label={`Remove ${k}`}
+        title={`Remove ${k}`}
+        data-testid={`detail-prop-remove-${k}`}
+        onClick={() => onRemoveProperty(k)}
+      >
+        <Icon name="close" size={14} />
+      </button>
+    </div>
+  );
 
   return (
     <section className="board-panel-section" data-testid="detail-panel">
@@ -97,6 +144,51 @@ export function Detail({
         </button>
       </div>
 
+      {(shot.camera || shot.taken || shot.place) && (
+        <dl className="board-captured" data-testid="detail-captured">
+          {shot.taken && (
+            <div>
+              <dt>Taken</dt>
+              <dd>{shot.taken}</dd>
+            </div>
+          )}
+          {shot.camera && (
+            <div>
+              <dt>Camera</dt>
+              <dd>{shot.camera}</dd>
+            </div>
+          )}
+          {shot.place && (
+            <div>
+              <dt>Place</dt>
+              <dd>
+                <a
+                  href={`https://www.openstreetmap.org/?mlat=${shot.place.latitude}&mlon=${shot.place.longitude}#map=16/${shot.place.latitude}/${shot.place.longitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {shot.place.latitude.toFixed(5)},{' '}
+                  {shot.place.longitude.toFixed(5)}
+                </a>
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+
+      {onMoreLike && !image.missing && (
+        <div className="board-detail-actions">
+          <button
+            type="button"
+            data-testid="detail-more-like"
+            onClick={onMoreLike}
+          >
+            <Icon name="search" size={15} />
+            More like this
+          </button>
+        </div>
+      )}
+
       <div className="board-panel-heading">
         <h3>Properties</h3>
         <span
@@ -114,52 +206,13 @@ export function Detail({
                 : ''}
         </span>
       </div>
-      {Object.entries(image.properties).map(([k, v]) => (
-        <div key={k} className="board-property-row">
-          <label
-            className="board-property-name"
-            htmlFor={`detail-property-${k}`}
-          >
-            {k}
-          </label>
-          <input
-            id={`detail-property-${k}`}
-            data-testid={`detail-prop-${k}`}
-            aria-label={k}
-            value={String(v)}
-            onChange={(e) =>
-              onSetProperty(k, coerce(e.target.value, typeOf(v)))
-            }
-          />
-          <select
-            value={typeOf(v)}
-            aria-label={`Type of ${k}`}
-            onChange={(e) =>
-              onSetProperty(
-                k,
-                coerce(
-                  String(v),
-                  e.target.value as 'text' | 'number' | 'boolean',
-                ),
-              )
-            }
-          >
-            <option value="text">Text</option>
-            <option value="number">Number</option>
-            <option value="boolean">Yes/no</option>
-          </select>
-          <button
-            type="button"
-            className="board-property-remove"
-            aria-label={`Remove ${k}`}
-            title={`Remove ${k}`}
-            data-testid={`detail-prop-remove-${k}`}
-            onClick={() => onRemoveProperty(k)}
-          >
-            <Icon name="close" size={14} />
-          </button>
-        </div>
-      ))}
+      {own.map(([k, v]) => row(k, v))}
+      {camera.length > 0 && (
+        <details className="board-captured-fields">
+          <summary>Camera fields ({camera.length})</summary>
+          {camera.map(([k, v]) => row(k, v))}
+        </details>
+      )}
       <form
         className="board-property-add"
         onSubmit={(e) => {

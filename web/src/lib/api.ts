@@ -22,6 +22,7 @@ import type {
   CreateSheetResponse,
   FindBoardResponse,
   FindFilterClause,
+  FolderImport,
   GetBoardResponse,
   GetBoardSelectionResponse,
   GetBoardVocabularyResponse,
@@ -42,6 +43,7 @@ import type {
   ListGroupsResponse,
   ListMembersResponse,
   MarkSheetSeenResponse,
+  MeaningResponse,
   Member,
   PutAliasRequest,
   PutBoardSelectionRequest,
@@ -364,6 +366,29 @@ export const api = {
       `/boards/${boardId}/find?${params.toString()}`,
     );
   },
+  /** Pictures whose content matches the words, best first (search by
+   * meaning). Scores sit close together, so the order is the answer. */
+  searchMeaning: (boardId: string, sort: string, text: string, limit = 200) =>
+    request<MeaningResponse>(
+      `/boards/${boardId}/search?${new URLSearchParams({ text, sort, limit: String(limit) })}`,
+    ),
+  /** Pictures that look like `imageId`, best first. */
+  similarImages: (
+    boardId: string,
+    sort: string,
+    imageId: string,
+    limit = 200,
+  ) =>
+    request<MeaningResponse>(
+      `/boards/${boardId}/similar?${new URLSearchParams({ image: imageId, sort, limit: String(limit) })}`,
+    ),
+  startFolderImport: (boardId: string, path: string) =>
+    request<FolderImport>(`/boards/${boardId}/imports`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+  getFolderImport: (boardId: string, importId: string) =>
+    request<FolderImport>(`/boards/${boardId}/imports/${importId}`),
   // Phase 2 section 4: see ListBoardImagesByIdsResponse's header comment —
   // `ids`/per-image `rank` are not in the real server's contract yet.
   getBoardImagesByIds: (boardId: string, sort: string, ids: string[]) =>

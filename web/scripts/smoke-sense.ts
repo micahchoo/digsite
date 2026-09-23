@@ -439,6 +439,52 @@ async function main() {
     'PASS: merging "fragment" into "find" widens the find to 3 images',
   );
 
+  // -- 9. search by meaning, and "More like this" -------------------------
+  await page.getByTestId('board-claim-chip').click();
+  await page.getByTestId('board-find-mode-meaning').check();
+  await page.getByTestId('board-find-query').fill('harbour at dusk');
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="board-find-count"]')
+        ?.textContent?.includes('closest first'),
+    undefined,
+    { timeout: 10_000 },
+  );
+  assert(
+    (await page.getByTestId('board-filter-key').count()) === 0,
+    'property filters should step aside while searching by meaning',
+  );
+  assert(
+    (await page.getByTestId('board-find-strip-item').count()) === 12,
+    'the best twelve should show as pictures',
+  );
+  console.log(
+    'PASS: Find by meaning answers with the best 24, the top 12 as pictures',
+  );
+
+  await page.evaluate(() =>
+    (
+      window as unknown as { __digsiteBoard: { select: (r: number) => void } }
+    ).__digsiteBoard.select(0),
+  );
+  const moreLike = page.getByTestId('detail-more-like');
+  await moreLike.waitFor({ timeout: 10_000 });
+  await moreLike.click();
+  await page.getByTestId('board-like-chip').waitFor();
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="board-find-count"]')
+        ?.textContent?.includes('closest'),
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.screenshot({
+    path: new URL('sense-more-like.png', SCREEN_DIR).pathname,
+  });
+  console.log('PASS: "More like this" on an image finds the pictures like it');
+
   await browser.close();
   console.log('smoke-sense: all assertions passed');
 }

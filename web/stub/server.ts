@@ -1542,6 +1542,58 @@ const httpServer = createServer(async (req, res) => {
     return json(200, list);
   }
 
+  // GET /boards/:id/search?text= and /similar?image= — search by meaning.
+  // The stub has no embeddings, so "meaning" is a stand-in that is stable
+  // and testable: similar is nearness in upload order, search is a hash of
+  // text and id. Best first, like the real server; scores close together.
+  const meaning = url.pathname.match(/^\/boards\/([^/]+)\/(search|similar)$/);
+  if (meaning && req.method === 'GET') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = meaning[1] ?? '';
+    const denied = boardForViewing(u, boardId);
+    if (denied) return json(403, denied);
+    if (!boardOf(boardId)) return json(404, { reason: 'not found' });
+    const sort = parseSortId(url.searchParams.get('sort') ?? '') ?? {
+      key: 'uploaded_at' as const,
+      dir: 'desc' as const,
+    };
+    const ranked = rankedImages(boardId, sort);
+    const limit = Math.min(Number(url.searchParams.get('limit') ?? 200), 500);
+    let scored: { img: Img; score: number }[];
+    if (meaning[2] === 'similar') {
+      const source = ranked.find(
+        (img) => img.id === url.searchParams.get('image'),
+      );
+      if (!source) return json(400, { error: 'image is not on this board' });
+      scored = ranked
+        .filter((img) => img.id !== source.id)
+        .map((img) => ({
+          img,
+          score: 0.31 - Math.abs(img.slot - source.slot) * 0.001,
+        }));
+    } else {
+      const text = (url.searchParams.get('text') ?? '').trim();
+      const hash = (key: string) => {
+        let h = 0;
+        for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+        return (h % 1000) / 1000;
+      };
+      scored = ranked.map((img) => ({
+        img,
+        score: 0.23 + 0.08 * hash(`${text}|${img.id}`),
+      }));
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return json(200, {
+      matches: scored.slice(0, limit).map(({ img, score }) => ({
+        imageId: img.id,
+        rank: ranked.indexOf(img),
+        score,
+      })),
+    });
+  }
+
   // GET /boards/:id/find?sort=&q=&filter= — bounded rank highlights plus
   // the first SHEET_LIMIT image ids for selection, and the uncapped count.
   const boardFind = url.pathname.match(/^\/boards\/([^/]+)\/find$/);

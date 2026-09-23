@@ -1636,3 +1636,75 @@
     display: none;
   }
 }
+
+/* -- what the camera wrote (board/captured.ts) --------------------------- */
+
+.board-captured {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+}
+.board-captured > div {
+  display: grid;
+  grid-template-columns: 5.5em 1fr;
+  gap: var(--space-2);
+}
+.board-captured dt {
+  color: var(--text-secondary);
+}
+.board-captured dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.board-detail-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.board-detail-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.board-captured-fields {
+  margin-top: var(--space-2);
+}
+.board-captured-fields > summary {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+/* -- the best matches of a search by meaning, as pictures ------------------ */
+
+.board-find-strip {
+  display: flex;
+  flex-basis: 100%;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+}
+.board-find-strip button {
+  display: block;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-sunken);
+}
+.board-find-strip button:hover,
+.board-find-strip button:focus-visible {
+  border-color: var(--accent);
+}
+.board-find-strip img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
