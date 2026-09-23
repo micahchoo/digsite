@@ -82,6 +82,8 @@ export type ImageRow = {
   status: 'ready' | 'pending' | 'failed';
   error: string | null;
   /** The phone or camera file this JPEG came from (0026_image_sources). */
+  /** The original's size; null for an image stored before 0026. */
+  bytes: string | null;
   source_sha256: string | null;
   source_format: string | null;
   source_bytes: string | null;

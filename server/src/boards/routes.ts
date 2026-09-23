@@ -99,6 +99,7 @@ import {
   presignedGetUrl,
   storageFromEnv,
 } from '../storage/index.ts';
+import { release } from '../storage/quota.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
@@ -108,6 +109,7 @@ import { findRanks } from './find.ts';
 import {
   ImportRefused,
   folderImport,
+  resumeFolderImport,
   startFolderImport,
 } from './folder-import.ts';
 import { type Examined, examine, store } from './intake.ts';
@@ -1135,6 +1137,7 @@ export function registerBoardRoutes(router: Router) {
         await storageFromEnv().delete(
           originalKey(image.board_id, image.sha256),
         );
+        await release(image.board_id, Number(image.bytes ?? 0));
       }
       // A kept camera source goes the same way, unless another image
       // still on the board came from the same file.
@@ -1149,6 +1152,7 @@ export function registerBoardRoutes(router: Router) {
           await storageFromEnv().delete(
             sourceKey(image.board_id, image.source_sha256),
           );
+          await release(image.board_id, Number(image.source_bytes ?? 0));
         }
       }
     }
@@ -1632,6 +1636,21 @@ export function registerBoardRoutes(router: Router) {
       param(ctx, 'importId'),
     );
     if (!found) return json(ctx.res, 404, { error: 'no such import' });
+    return json(ctx.res, 200, found);
+  });
+
+  // POST /boards/:id/imports/:importId/resume: a stopped import (the
+  // group's storage was full) starts again on the file it stopped at.
+  // 409 unless it is stopped.
+  router.post('/boards/:id/imports/:importId/resume', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForUploading(userId, boardId);
+    const importId = param(ctx, 'importId');
+    if (!(await resumeFolderImport(boardId, importId))) {
+      return json(ctx.res, 409, { error: 'this import is not stopped' });
+    }
+    const found = await folderImport(boardId, importId);
     return json(ctx.res, 200, found);
   });
 }

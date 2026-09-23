@@ -8,6 +8,7 @@ import { auth } from './auth.ts';
 import { env } from './env.ts';
 import { logError, logRequest, requestIdFor } from './logging.ts';
 import { startRequestDiagnostic } from './request-diagnostics.ts';
+import { QuotaExceeded, quotaRefusal } from './storage/quota.ts';
 import { StorageFull } from './storage/room.ts';
 
 export type Ctx = {
@@ -128,6 +129,13 @@ export class Router {
         await route.handler(ctx);
       } catch (err) {
         if (err instanceof StopHandling) {
+          finish();
+          return true;
+        }
+        if (err instanceof QuotaExceeded) {
+          // storage/quota.ts: the group's storage is full. 413, with the
+          // numbers, so the upload queue can say how full.
+          json(res, 413, quotaRefusal(err));
           finish();
           return true;
         }

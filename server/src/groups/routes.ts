@@ -2,6 +2,7 @@ import type {
   AcceptInvitationResponse,
   CreateGroupRequest,
   CreateGroupResponse,
+  GetGroupResponse,
   GetInvitationResponse,
   GroupActivityItem,
   GroupStatsResponse,
@@ -44,6 +45,7 @@ import {
   readJsonBody,
   requireAuth,
 } from '../http.ts';
+import { storageOf } from '../storage/quota.ts';
 import { recordActivity } from './activity.ts';
 
 // docs/ux/audit.md #7: an empty or malformed email currently reaches
@@ -104,6 +106,21 @@ export function registerGroupRoutes(router: Router) {
       name: r.name,
       role: r.role as Role,
     }));
+    json(ctx.res, 200, response);
+  });
+
+  // GET /groups/:id: one group, with its storage (storage/quota.ts).
+  router.get('/groups/:id', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const orgId = param(ctx, 'id');
+    const member = await groupForViewing(userId, orgId);
+    const group = (await groupsOfUser(userId)).find((g) => g.id === orgId);
+    const response: GetGroupResponse = {
+      id: orgId,
+      name: group?.name ?? '',
+      role: member.role as Role,
+      storage: await storageOf(orgId),
+    };
     json(ctx.res, 200, response);
   });
 

@@ -13,6 +13,7 @@
 import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.ts';
 import { storageFromEnv } from '../storage/index.ts';
+import { release, reserve } from '../storage/quota.ts';
 import { ensureRoomFor } from '../storage/room.ts';
 import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
@@ -43,14 +44,23 @@ export async function uploadOne(
   // Content-addressed by sha256 within a board (docs/README's "Known
   // deviation" note is unrelated) — two uploads of the same bytes already
   // share one object, so a second upload never overwrites the first.
-  if (!(await storage.exists(key))) {
-    await storage.put(key, bytes, contentType);
-  }
-  if (source && sourceSha) {
-    const kept = sourceKey(boardId, sourceSha);
-    if (!(await storage.exists(kept))) {
+  // The group pays for each object it newly stores (storage/quota.ts),
+  // claimed before the write and given back if the write fails.
+  const kept = source && sourceSha ? sourceKey(boardId, sourceSha) : null;
+  const originalNew = !(await storage.exists(key));
+  const sourceNew = kept !== null && !(await storage.exists(kept));
+  const claim =
+    (originalNew ? bytes.length : 0) +
+    (sourceNew && source ? source.bytes.length : 0);
+  await reserve(boardId, claim);
+  try {
+    if (originalNew) await storage.put(key, bytes, contentType);
+    if (sourceNew && kept && source) {
       await storage.put(kept, source.bytes, 'application/octet-stream');
     }
+  } catch (error) {
+    await release(boardId, claim);
+    throw error;
   }
 
   const client = await pool.connect();

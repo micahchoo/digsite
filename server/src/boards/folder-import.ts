@@ -12,6 +12,7 @@ import { join, relative, sep } from 'node:path';
 import type { FolderImport } from '@digsite/shared/api';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
+import { QuotaExceeded } from '../storage/quota.ts';
 import { schedule } from '../worker/schedule.ts';
 import { isCameraFile } from './camera.ts';
 
@@ -112,7 +113,8 @@ export async function folderImport(
   importId: string,
 ): Promise<FolderImport | null> {
   const { rows } = await pool.query(
-    `SELECT id, path, cardinality(files) AS total, imported, skipped, skips, state
+    `SELECT id, path, cardinality(files) AS total, imported, skipped, skips, state,
+       stop_reason AS "stopReason"
      FROM folder_imports WHERE board_id = $1 AND id::text = $2`,
     [boardId, importId],
   );
@@ -144,7 +146,23 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
       // full disk), never this file's. The job retries with the cursor
       // unmoved, and the import resumes on this file. Before, a missing
       // DATA_DIR skipped every file of a 901-file import as its own fault.
-      await intake.store(job.board_id, job.user_id, admitted);
+      try {
+        await intake.store(job.board_id, job.user_id, admitted);
+      } catch (error) {
+        // The group's storage is full: every later file would fail the
+        // same way, so the import stops here, cursor unmoved, and says
+        // why. Started again, it resumes on this file.
+        if (!(error instanceof QuotaExceeded)) throw error;
+        await pool.query(
+          `UPDATE folder_imports SET state = 'stopped', stop_reason = $2
+           WHERE id = $1`,
+          [
+            importId,
+            `group storage is full (${error.usedBytes} of ${error.quotaBytes} bytes)`,
+          ],
+        );
+        return;
+      }
     }
     await pool.query(
       `UPDATE folder_imports SET next = next + 1,
@@ -198,4 +216,21 @@ async function admit(
     { name, bytes, properties: dir ? { folder: dir } : {} },
     { skipDuplicates: true },
   );
+}
+
+/** Starts a stopped import again on the file it stopped at. False when
+ * the import is not stopped (running, done, or not on this board). */
+export async function resumeFolderImport(
+  boardId: string,
+  importId: string,
+): Promise<boolean> {
+  const { rows } = await pool.query(
+    `UPDATE folder_imports SET state = 'running', stop_reason = NULL
+     WHERE board_id = $1 AND id::text = $2 AND state = 'stopped'
+     RETURNING id`,
+    [boardId, importId],
+  );
+  if (rows.length === 0) return false;
+  await schedule('folder-import', { importId: rows[0].id });
+  return true;
 }

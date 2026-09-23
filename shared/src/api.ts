@@ -21,6 +21,12 @@ export type CreateGroupRequest = { name: string };
 export type CreateGroupResponse = { id: string };
 
 export type Group = { id: string; name: string; role: Role };
+/** GET /groups/:id: one group, with what its boards store. The list
+ * (GET /groups) stays without storage, so it stays cheap. quotaBytes is
+ * null when the group has no quota. */
+export type GetGroupResponse = Group & {
+  storage: { usedBytes: number; quotaBytes: number | null };
+};
 export type ListGroupsResponse = Group[];
 
 export type InviteRequest = { email: string };
@@ -151,7 +157,10 @@ export type FolderImport = {
   imported: number;
   skipped: number;
   skips: { file: string; reason: string }[];
-  state: 'running' | 'done';
+  /** 'stopped': the group's storage filled up; `stopReason` says so, and
+   * POST /boards/:id/imports/:importId/resume starts it again. */
+  state: 'running' | 'done' | 'stopped';
+  stopReason?: string | null;
 };
 
 // CONTEXT.md "Reply": what people say about a claim. GET /sheets/:id/replies

@@ -28,6 +28,7 @@ import { AccessDenied, boardForUploading } from '../access/index.ts';
 import { auth } from '../auth.ts';
 import { env } from '../env.ts';
 import { checkLimit } from '../limits.ts';
+import { QuotaExceeded, quotaRefusal } from '../storage/quota.ts';
 import { StorageFull } from '../storage/room.ts';
 import { examine, store } from './intake.ts';
 
@@ -147,6 +148,10 @@ export const tusServer = new Server({
     try {
       image = await store(meta.boardId, meta.userId, examined);
     } catch (err) {
+      if (err instanceof QuotaExceeded) {
+        await fileStore.remove(upload.id).catch(() => {});
+        throw { status_code: 413, body: JSON.stringify(quotaRefusal(err)) };
+      }
       if (!(err instanceof StorageFull)) throw err;
       await fileStore.remove(upload.id).catch(() => {});
       throw { status_code: 507, body: `${err.message}\n` };

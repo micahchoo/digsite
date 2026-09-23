@@ -176,6 +176,9 @@ export const env = {
   // meaning/embeddings.ts: a board's vectors are packed as float32 while
   // they fit this (1.5 GB is 750,000 images), int8 beyond it, so the
   // worker's arrangement stays bounded however large the board.
+  // storage/quota.ts: the storage quota of a group that has none of its
+  // own, in GB. 0 (the default) is no quota; usage is still counted.
+  GROUP_QUOTA_GB: Number(process.env.GROUP_QUOTA_GB ?? 0),
   ARRANGE_BUDGET_MB: Number(process.env.ARRANGE_BUDGET_MB ?? 1536),
   MODELS_DIR: resolve(
     REPO_ROOT,

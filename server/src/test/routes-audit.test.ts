@@ -178,6 +178,11 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: () => '/groups',
     outsider: 'skip', // own list, not Lab's — see POST /groups above
   },
+  'GET /groups/:id': {
+    method: 'GET',
+    path: (fx) => `/groups/${fx.labId}`,
+    outsider: 403,
+  },
   'GET /groups/:id/members': {
     method: 'GET',
     path: (fx) => `/groups/${fx.labId}/members`,
@@ -435,6 +440,12 @@ const EXPECTATIONS: Record<string, Expectation> = {
   'POST /boards/:id/imports': {
     method: 'POST',
     path: (fx) => `/boards/${fx.bPrivateId}/imports`,
+    outsider: 403,
+  },
+  'POST /boards/:id/imports/:importId/resume': {
+    method: 'POST',
+    path: (fx) =>
+      `/boards/${fx.bPrivateId}/imports/00000000-0000-0000-0000-000000000000/resume`,
     outsider: 403,
   },
   'GET /boards/:id/imports/:importId': {

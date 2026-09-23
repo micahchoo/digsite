@@ -168,6 +168,11 @@ sheet that made it. The board never writes a claim.
 - **Label suggestion** — a label term the board already uses (canonical
   after aliases), scored against an image's embedding. Offered as a chip;
   a person clicks it or ignores it. Never a new word, never filled in.
+- **Storage quota** — how many bytes a group's boards may store: the
+  originals and kept camera sources, each stored object counted once.
+  Set by the operator (`GROUP_QUOTA_GB`, or per group by script), never
+  by a route. An upload past it is refused with the numbers; a folder
+  import stops and can be resumed.
 - **Folder import** — a board filled from a folder on the server's disk,
   under a root the operator allowed (`IMPORT_ROOTS`). Each file takes the
   upload path; the import keeps its file list and a cursor, so it resumes.
