@@ -169,3 +169,23 @@ The `meaning` sort now has sections: the arrangement's groups, each
 about a sixteenth of the board. Each group takes the name of the board
 label term nearest its centroid, with a number when two groups share
 one, and "Group n" on a board without labels.
+
+## The board-wide duplicate sweep
+
+`GET /boards/:id/duplicate-groups` comes from a sweep after each
+arrangement. It compares every picture only with the next 32 in `meaning`
+order, then applies the per-image rule: similarity >= 0.975 and pixels
+changed <= 0.5%.
+
+| board | pairs | pixel checks | time | peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| owner's screenshots (142) | 56, the same 56 the exhaustive per-image search finds | 57 | 47 ms | — |
+| 20,001 photos | 0 | 295 | 2.2 s | — |
+| 1,000,000 random vectors | 0 | 0 | 21.3 s | 1.1 GB |
+
+The first million-image run had not finished after 15 minutes, at
+9.5 GB. Those synthetic vectors have norm 6.3, not 1. Every dot product
+therefore passed 0.975, and every pair went to a pixel check. The
+embedding store now returns unit vectors whatever was written, so the
+arrangement and the sweep can take a dot product as a cosine, and the
+int8 packing's ±1 range holds.

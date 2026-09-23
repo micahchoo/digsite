@@ -32,6 +32,15 @@ const HALF = (() => {
   return table;
 })();
 
+/** Scratch for one decoded vector before it is normalised. */
+const raw = new Float32Array(DIMS);
+
+/** Decodes one stored vector into `out` at `offset`, as a UNIT vector,
+ * times `scale` (127 for int8). Callers treat a dot product as a cosine
+ * (the arrangement, the duplicate sweep) and int8 packing assumes every
+ * component within ±1, so the store guarantees it rather than trusting
+ * every writer: a synthetic board with vectors of norm 6.3 made the
+ * sweep take half of all neighbour pairs for near-duplicates. */
 function decodeInto(
   bin: Buffer,
   out: Float32Array | Int8Array,
@@ -41,12 +50,19 @@ function decodeInto(
   if (bin.readUInt16BE(0) !== DIMS) {
     throw new Error(`an embedding is ${bin.readUInt16BE(0)}-d, not ${DIMS}`);
   }
+  let norm = 0;
   for (let k = 0; k < DIMS; k++) {
     const at = 4 + k * 2;
     const value = HALF[
       ((bin[at] as number) << 8) | (bin[at + 1] as number)
     ] as number;
-    out[offset + k] = scale === 1 ? value : Math.round(value * scale);
+    raw[k] = value;
+    norm += value * value;
+  }
+  const factor = norm > 0 ? scale / Math.sqrt(norm) : 0;
+  for (let k = 0; k < DIMS; k++) {
+    const value = (raw[k] as number) * factor;
+    out[offset + k] = scale === 1 ? value : Math.round(value);
   }
 }
 

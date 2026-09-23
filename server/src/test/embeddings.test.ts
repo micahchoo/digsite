@@ -51,6 +51,25 @@ describe('embedding store', () => {
     expect(await vectorOf(crypto.randomUUID())).toBeNull();
   });
 
+  test('every vector comes back as a unit vector, whatever was written', async () => {
+    const { boardId, ids } = await boardWith([[1, 0]]);
+    // Written with norm 5, as a synthetic board's were.
+    const long = new Float32Array(512);
+    long[0] = 3;
+    long[1] = 4;
+    await pool.query(
+      'UPDATE image_embeddings SET embedding = $2::halfvec WHERE image_id = $1',
+      [ids[0], toVectorText(long)],
+    );
+    const got = await vectorOf(ids[0] as string);
+    expect([got?.[0], got?.[1]]).toEqual([
+      expect.closeTo(0.6, 3),
+      expect.closeTo(0.8, 3),
+    ]);
+    const tight = await boardVectors(boardId, 1);
+    expect([tight.vectors.data[0], tight.vectors.data[1]]).toEqual([76, 102]);
+  });
+
   test('a board packs as float32 under the budget, int8 over it', async () => {
     const { boardId, ids } = await boardWith([
       [1, 0],
