@@ -56,7 +56,10 @@ describe('worker supervisor', () => {
       expect(
         await until(async () => (await readyCount(boardId)) === 20, 30_000),
       ).toBe(true);
-      expect(worker.exits()).toBeGreaterThanOrEqual(2);
+      // The last worker retires only after its batch ends, which can be a
+      // moment after the last image is ready: wait for its exit rather than
+      // assume it (roadmap C8: 2 failures in 100 runs, both this).
+      expect(await until(() => worker.exits() >= 2, 10_000)).toBe(true);
       expect(worker.crashes()).toBe(0);
     } finally {
       await worker.stop();
