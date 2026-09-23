@@ -10,6 +10,7 @@ import {
   type Fraction,
   type PropertyValue,
   type Rect,
+  type Stamp,
   arrowheadsFor,
   clampFraction,
   dataOf,
@@ -114,6 +115,9 @@ export interface ToolsDeps {
   setTool: (tool: Tool) => void;
   getSheetId: () => string;
   onRenamed: (name: string) => void;
+  /** Who is making changes here, for the stamps on a claim. Null when
+   * nobody is signed in (tests): then nothing is stamped. */
+  getAuthor?: () => { id: string; name: string } | null;
 }
 
 function newId(): string {
@@ -145,7 +149,22 @@ export function createTools(deps: ToolsDeps): Tools {
     setTool: setToolExternal,
     getSheetId,
     onRenamed,
+    getAuthor,
   } = deps;
+
+  /** Now, by whoever is signed in (CONTEXT.md "Stamp"). */
+  function stamp(): Stamp | undefined {
+    const who = getAuthor?.();
+    return who
+      ? { id: who.id, name: who.name, at: new Date().toISOString() }
+      : undefined;
+  }
+  /** A claim's data with its last change stamped. Every edit goes through
+   * this, so "edited by" is always the last hand on it. */
+  function edited<T extends object>(data: T): T {
+    const by = stamp();
+    return by ? { ...data, edited: by } : data;
+  }
 
   function drawRegion(
     imageId: string,
@@ -161,6 +180,7 @@ export function createTools(deps: ToolsDeps): Tools {
     handle.apply([
       {
         op: 'addRegion',
+        made: stamp(),
         id,
         imageId,
         groupId: imageGroupId(imageId),
@@ -191,6 +211,7 @@ export function createTools(deps: ToolsDeps): Tools {
     handle.apply([
       {
         op: 'addEdge',
+        made: stamp(),
         id,
         fromId,
         toId,
@@ -255,6 +276,7 @@ export function createTools(deps: ToolsDeps): Tools {
       handle.apply([
         {
           op: 'addRegion',
+          made: stamp(),
           id,
           imageId: shape.row.imageId,
           groupId: imageGroupId(shape.row.imageId),
@@ -338,7 +360,7 @@ export function createTools(deps: ToolsDeps): Tools {
         {
           op: 'update',
           id,
-          changes: { customData: { ...data, direction }, ...heads },
+          changes: { customData: edited({ ...data, direction }), ...heads },
         },
       ]);
       return;
@@ -350,7 +372,9 @@ export function createTools(deps: ToolsDeps): Tools {
       const next: Record<string, unknown> = { ...data };
       if (value === '' || value === null) delete next[key];
       else next[key] = value;
-      handle.apply([{ op: 'update', id, changes: { customData: next } }]);
+      handle.apply([
+        { op: 'update', id, changes: { customData: edited(next) } },
+      ]);
       return;
     }
 
@@ -368,7 +392,7 @@ export function createTools(deps: ToolsDeps): Tools {
         {
           op: 'update',
           id,
-          changes: { customData: { ...data, [key]: value } },
+          changes: { customData: edited({ ...data, [key]: value }) },
         },
       ];
       if (boundTextId) {
@@ -384,7 +408,11 @@ export function createTools(deps: ToolsDeps): Tools {
 
     const properties = { ...data.properties, [key]: value };
     handle.apply([
-      { op: 'update', id, changes: { customData: { ...data, properties } } },
+      {
+        op: 'update',
+        id,
+        changes: { customData: edited({ ...data, properties }) },
+      },
     ]);
   }
 
@@ -401,7 +429,7 @@ export function createTools(deps: ToolsDeps): Tools {
       ops.push({
         op: 'update',
         id: el.id,
-        changes: { customData: { ...data, [key]: term } },
+        changes: { customData: edited({ ...data, [key]: term }) },
       });
       const boundTextId = el.boundElements?.find((b) => b.type === 'text')?.id;
       if (boundTextId) {
@@ -428,7 +456,11 @@ export function createTools(deps: ToolsDeps): Tools {
     const properties = { ...data.properties };
     delete properties[key];
     handle.apply([
-      { op: 'update', id, changes: { customData: { ...data, properties } } },
+      {
+        op: 'update',
+        id,
+        changes: { customData: edited({ ...data, properties }) },
+      },
     ]);
   }
 

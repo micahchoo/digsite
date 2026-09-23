@@ -6,6 +6,7 @@ import type {
   Direction,
   SceneElement as ProjectableElement,
   Properties,
+  Stamp,
 } from '@digsite/shared';
 
 export type Tool = 'select' | 'region' | 'edge' | 'pan';
@@ -90,6 +91,8 @@ export interface NewRegionOp {
   rect: Rect;
   label: string;
   properties: Properties;
+  /** Who made it and when; absent when nobody is signed in (tests). */
+  made?: Stamp;
 }
 
 export interface NewEdgeOp {
@@ -102,6 +105,7 @@ export interface NewEdgeOp {
   relation: string;
   direction: Direction;
   properties: Properties;
+  made?: Stamp;
 }
 
 export interface UpdateOp {

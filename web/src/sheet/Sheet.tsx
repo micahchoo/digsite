@@ -56,6 +56,14 @@ export function Sheet() {
   const location = useLocation();
   const navigate = useNavigate();
   const { data: session } = useSession();
+  const authorRef = useRef<{ id: string; name: string } | null>(null);
+  authorRef.current = session
+    ? {
+        id: session.user.id,
+        name:
+          session.user.name || session.user.email.split('@')[0] || 'Someone',
+      }
+    : null;
 
   const canvasRef = useRef<CanvasHandle | null>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -130,6 +138,8 @@ export function Sheet() {
     getSyncStatus: () => room.getStatus(),
     onRenamed: (name) =>
       setSheetInfo((prev) => (prev ? { ...prev, name } : prev)),
+    // Read through a ref: the tools are made once, the session arrives later.
+    getAuthor: () => authorRef.current,
   });
 
   const [sheetError, setSheetError] = useState<ErrorStateInfo | null>(null);

@@ -16,6 +16,8 @@ export interface UseSheetToolsDeps {
   getForeignShapes: () => ForeignShape[];
   getSyncStatus: () => SyncStatus;
   onRenamed: (name: string) => void;
+  /** Who is signed in, for the stamps on a claim. */
+  getAuthor?: () => { id: string; name: string } | null;
 }
 
 export interface SheetTools {
@@ -26,8 +28,14 @@ export interface SheetTools {
 }
 
 export function useSheetTools(deps: UseSheetToolsDeps): SheetTools {
-  const { sheetId, getHandle, getForeignShapes, getSyncStatus, onRenamed } =
-    deps;
+  const {
+    sheetId,
+    getHandle,
+    getForeignShapes,
+    getSyncStatus,
+    onRenamed,
+    getAuthor,
+  } = deps;
   const toolRef = useRef<Tool>('select');
   const [tool, setToolState] = useState<Tool>('select');
   const selectedForeignRef = useRef<string | null>(null);
@@ -56,6 +64,7 @@ export function useSheetTools(deps: UseSheetToolsDeps): SheetTools {
       setTool,
       getSheetId: () => sheetId,
       onRenamed,
+      getAuthor,
     });
   }
   const tools = toolsRef.current;

@@ -11,12 +11,21 @@ export type Direction = 'none' | 'forward' | 'reverse' | 'both';
 export type Properties = Record<string, PropertyValue>;
 
 export type ImageData = { kind: 'image'; imageId: string };
+
+/** Who did something to a claim, and when (CONTEXT.md "Stamp"). Written by
+ * the client that made the change; a claim without one predates stamps. */
+export type Stamp = { id: string; name: string; at: string };
+
+/** Who made a claim and who last changed it. Carried through every edit,
+ * because every edit rebuilds customData from dataOf. */
+type Stamps = { made?: Stamp; edited?: Stamp };
+
 export type RegionData = {
   kind: 'region';
   imageId: string;
   label: string;
   properties: Properties;
-};
+} & Stamps;
 export type EdgeData = {
   kind: 'edge';
   relation: string;
@@ -26,7 +35,7 @@ export type EdgeData = {
   confidence?: Confidence;
   /** Why the connection holds. Absent reads as ''. */
   note?: string;
-};
+} & Stamps;
 export type ElementData = ImageData | RegionData | EdgeData;
 
 export function imageGroupId(imageId: string): string {
@@ -82,6 +91,24 @@ function isProperties(v: unknown): v is Properties {
   );
 }
 
+export function isStamp(v: unknown): v is Stamp {
+  return (
+    isRecord(v) &&
+    typeof v.id === 'string' &&
+    typeof v.name === 'string' &&
+    typeof v.at === 'string'
+  );
+}
+
+/** The stamps a claim carries. A malformed one is dropped: it never
+ * voids the claim it sits on. */
+function stampsOf(d: Record<string, unknown>): Stamps {
+  return {
+    ...(isStamp(d.made) ? { made: d.made } : {}),
+    ...(isStamp(d.edited) ? { edited: d.edited } : {}),
+  };
+}
+
 /** Validates customData's shape; a malformed or foreign element is null. */
 export function dataOf(el: { customData?: unknown }): ElementData | null {
   const d = el.customData;
@@ -101,6 +128,7 @@ export function dataOf(el: { customData?: unknown }): ElementData | null {
       imageId: d.imageId,
       label: d.label,
       properties: d.properties,
+      ...stampsOf(d),
     };
   }
 
@@ -117,6 +145,7 @@ export function dataOf(el: { customData?: unknown }): ElementData | null {
       properties: d.properties,
       ...(d.confidence ? { confidence: d.confidence } : {}),
       ...(d.note ? { note: d.note } : {}),
+      ...stampsOf(d),
     };
   }
 

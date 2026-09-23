@@ -311,6 +311,11 @@ async function main(): Promise<void> {
     );
     await m.getByTestId('inspector-confidence-likely').check();
     await m.getByTestId('inspector-note').fill('same chimney line');
+    const stamps = await m.getByTestId('inspector-stamps').innerText();
+    assert(
+      /Added by member/.test(stamps),
+      `the connection should say who made it: "${stamps}"`,
+    );
     await m.waitForTimeout(3500); // the room's snapshot debounce, then the save
     await m.screenshot({ path: `${SHOTS}2-evidence.png` });
     await M.open(firstPass.id);

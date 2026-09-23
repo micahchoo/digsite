@@ -67,6 +67,7 @@ function buildRegion(op: NewRegionOp): SceneElement[] {
       imageId: op.imageId,
       label: op.label,
       properties: op.properties,
+      ...(op.made ? { made: op.made } : {}),
     },
   };
   if (!op.label) return [container];
@@ -126,6 +127,7 @@ function buildEdge(op: NewEdgeOp): SceneElement[] {
       relation: op.relation,
       direction: op.direction,
       properties: op.properties,
+      ...(op.made ? { made: op.made } : {}),
     },
   };
   const elements: SceneElement[] = [arrow];

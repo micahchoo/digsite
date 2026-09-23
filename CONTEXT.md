@@ -102,6 +102,13 @@ sheet that made it. The board never writes a claim.
 - **Note** — an edge's free text: why the connection holds.
 - **Evidence** — an edge's two ends shown side by side: the crops of its
   regions, or the images when an end is a whole image.
+- **Comparison** — the two ends opened in one view to check the claim:
+  side by side, swiped, or overlaid (with a difference blend). One zoom
+  drives both, in units of each end's region.
+- **Stamp** — who did something to a claim and when: `made` when it was
+  drawn, `edited` at its last change. Written by the client of the person
+  signed in; a claim drawn before stamps has none. Not yet checked by the
+  server against the socket's user.
 - **Reach** — an edge from another sheet with exactly one end on this
   sheet. Drawn on the overlay as a stub leading off the image, never in
   the scene. Bringing its far image onto the sheet turns it into an

@@ -14,6 +14,7 @@ import type {
   Foreign,
   GetImageResponse,
   PropertyValue,
+  Stamp,
   VocabularyTerm,
 } from '@digsite/shared';
 import { dataOf } from '@digsite/shared';
@@ -24,6 +25,7 @@ import { Icon } from '../components/Icon.tsx';
 import { TermInput } from '../components/TermInput.tsx';
 import { ApiError, api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
+import { ago } from '../lib/when.ts';
 import {
   CONFIDENCE_LABEL,
   ConfidenceControl,
@@ -273,6 +275,31 @@ function Properties({
   );
 }
 
+/** Who made this claim and who last changed it (CONTEXT.md "Stamp"). */
+function Stamps({ made, edited }: { made?: Stamp; edited?: Stamp }) {
+  if (!made && !edited) return null;
+  // A change within a minute of the making, by the same hand, is the making.
+  const sameHand =
+    made &&
+    edited &&
+    made.id === edited.id &&
+    Date.parse(edited.at) - Date.parse(made.at) < 60_000;
+  return (
+    <p className="claim-stamps" data-testid="inspector-stamps">
+      {made && (
+        <span>
+          Added by <b>{made.name}</b> {ago(made.at)}
+        </span>
+      )}
+      {edited && !sameHand && (
+        <span>
+          Changed by <b>{edited.name}</b> {ago(edited.at)}
+        </span>
+      )}
+    </p>
+  );
+}
+
 function Heading({
   title,
   from,
@@ -342,6 +369,7 @@ function OwnClaim(
     return (
       <div data-testid="inspector" className="claim">
         <Heading title="Region" onDelete={onDeleteSelected} />
+        <Stamps made={data.made} edited={data.edited} />
         {end && (
           <div className="claim-evidence claim-evidence--single">
             <Crop end={end} src={imageSrc(data.imageId)} size={160} />
@@ -385,6 +413,7 @@ function OwnClaim(
   return (
     <div data-testid="inspector" className="claim">
       <Heading title="Connection" onDelete={onDeleteSelected} />
+      <Stamps made={data.made} edited={data.edited} />
       {ends && (
         <Evidence
           ends={ends}

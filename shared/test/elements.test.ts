@@ -98,3 +98,32 @@ describe('dataOf', () => {
     expect(edge({ note: 42 })).toBeNull();
   });
 });
+
+describe('stamps: who made a claim and who changed it', () => {
+  const made = { id: 'u1', name: 'Micah', at: '2026-09-23T01:00:00.000Z' };
+  test('a stamp is carried through dataOf, so an edit keeps it', () => {
+    const data = dataOf({
+      customData: {
+        kind: 'edge',
+        relation: 'same place',
+        direction: 'forward',
+        properties: {},
+        made,
+      },
+    });
+    expect(data).toMatchObject({ made });
+  });
+  test('a malformed stamp is dropped and the claim stands', () => {
+    const data = dataOf({
+      customData: {
+        kind: 'region',
+        imageId: 'i',
+        label: 'x',
+        properties: {},
+        made: { id: 7 },
+      },
+    });
+    expect(data).not.toBeNull();
+    expect(data && 'made' in data).toBe(false);
+  });
+});
