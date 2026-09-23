@@ -327,9 +327,11 @@ export async function onJobFailedFinal(
   if (kind !== 'ladder') return;
   const imageId = payload.imageId as string | undefined;
   if (!imageId) return;
-  await pool.query('UPDATE images SET status = $1, error = $2 WHERE id = $3', [
-    'failed',
-    reason,
-    imageId,
-  ]);
+  const { rows } = await pool.query(
+    'UPDATE images SET status = $1, error = $2 WHERE id = $3 RETURNING board_id',
+    ['failed', reason, imageId],
+  );
+  // A pending cell was drawn as a placeholder and a failed one is not: the
+  // pixels changed, so the order's version must (roadmap item 7).
+  if (rows[0]) await markBoardRanksStale(rows[0].board_id);
 }

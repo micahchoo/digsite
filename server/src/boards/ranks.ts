@@ -15,7 +15,7 @@ import { COLS, type Zoom, tileRanks } from '@digsite/shared/board/grid';
 import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
-import { invalidate } from './invalidation.ts';
+import { catchUp, invalidate } from './invalidation.ts';
 import { ensurePropertyIndex } from './property-index.ts';
 
 /** The ORDER BY that defines a sort. The rebuild and sections.ts must use
@@ -284,6 +284,9 @@ export async function rankOrder(
   // the next request rebuilds.
   if (!row?.slot_order) return decodeOrder('', Buffer.alloc(0));
   const order = decodeOrder(row.version, row.slot_order);
+  // A new build: before anything is drawn under its version, this process
+  // applies every invalidation published before it (roadmap item 7).
+  await catchUp();
   remember(key, order);
   return order;
 }

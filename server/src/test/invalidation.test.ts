@@ -5,15 +5,19 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import {
   type Invalidation,
+  catchUp,
   listenForInvalidation,
   publish,
 } from '../boards/invalidation.ts';
 import { getPage, residentPagesForTest } from '../boards/ladder.ts';
+import { ensureRank } from '../boards/ranks.ts';
 import {
   composedGeneration,
   getComposedTile,
   setComposedTile,
 } from '../boards/tiles-cache.ts';
+import { pool } from '../db/pool.ts';
+import { onJobFailedFinal } from '../worker/jobs.ts';
 
 const MODULE = join(import.meta.dir, '../boards/invalidation.ts');
 
@@ -77,5 +81,41 @@ describe('invalidation across processes', () => {
     await publish({ kind: 'page', boardId, s: 32, page: 0 });
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(residentPagesForTest(boardId)).toBe(1);
+  });
+
+  test('catchUp returns only after what was published before it is applied', async () => {
+    const boardId = crypto.randomUUID();
+    await getPage(boardId, 32, 0);
+    expect(residentPagesForTest(boardId)).toBe(1);
+    // Another process's page event, committed just before the barrier.
+    const event: Invalidation = { kind: 'page', boardId, s: 32, page: 0 };
+    await pool.query('SELECT pg_notify($1, $2)', [
+      'digsite_cache',
+      JSON.stringify({ origin: 'another-process', event }),
+    ]);
+    await catchUp();
+    expect(residentPagesForTest(boardId)).toBe(0);
+  });
+
+  test('a ladder job that fails for good makes the order stale', async () => {
+    const { rows } = await pool.query(
+      `INSERT INTO boards (org_id, name, open, created_by, image_count)
+       VALUES ('org-fail', $1, true, 'tester', 1) RETURNING id`,
+      [`fail-${Date.now()}`],
+    );
+    const boardId = rows[0].id as string;
+    const { rows: img } = await pool.query(
+      `INSERT INTO images (board_id, slot, sha256, name, width, height, uploaded_by, properties)
+       VALUES ($1, 0, 'sha-fail', 'x.png', 10, 10, 'tester', '{}') RETURNING id`,
+      [boardId],
+    );
+    const sort = { key: 'uploaded_at', dir: 'desc' } as const;
+    await ensureRank(boardId, sort);
+    await onJobFailedFinal('ladder', { imageId: img[0].id }, 'bad file');
+    const { rows: state } = await pool.query(
+      'SELECT stale FROM board_rank_state WHERE board_id = $1',
+      [boardId],
+    );
+    expect(state.map((r) => r.stale)).toEqual([true]);
   });
 });

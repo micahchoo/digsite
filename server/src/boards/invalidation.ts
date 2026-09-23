@@ -29,6 +29,7 @@ import {
 const CHANNEL = 'digsite_cache';
 const ORIGIN = randomUUID();
 const RECONNECT_MS = 1_000;
+const CATCH_UP_MS = 2_000;
 
 export type Invalidation =
   /** Ranks changed or went stale: every composed and coarse tile is wrong. */
@@ -38,6 +39,9 @@ export type Invalidation =
   /** New coarse files are on disk: a resident copy of the old ones is wrong.
    * The writer installs the new ones itself, so it only publishes this. */
   | { kind: 'materialised'; boardId: string };
+
+/** A process's own marker (catchUp), never applied by anyone. */
+type Sync = { kind: 'sync'; id: string };
 
 function apply(event: Invalidation): void {
   if (event.kind === 'page') {
@@ -67,6 +71,47 @@ export async function invalidate(event: Invalidation): Promise<void> {
   await publish(event);
 }
 
+// catchUp's waiters, by marker id; and whether a listener is connected.
+const waiting = new Map<string, () => void>();
+let listening = false;
+
+function forgetEverything(): void {
+  forgetAllPages();
+  invalidateAllComposedTiles();
+  invalidateAllResidentSorts();
+}
+
+/** Returns once this process has applied every invalidation that was
+ * published before the call. Roadmap item 7: a tile is cached by the
+ * browser forever under its order's version, so a process that learns a
+ * new version from the database must not draw it from pixels it has not
+ * yet been told are old. The worker publishes a repainted page BEFORE it
+ * marks ranks stale, so the page event is committed before any build it
+ * causes; NOTIFY delivers in commit order, so once our own marker comes
+ * back, the page event has been applied. Without a listener there is
+ * nothing to lag behind. If the marker does not come back in time, this
+ * process drops every cache, as it does on a reconnect. */
+export async function catchUp(): Promise<void> {
+  if (!listening) return;
+  const id = randomUUID();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const back = new Promise<boolean>((resolve) => {
+    waiting.set(id, () => resolve(true));
+    timer = setTimeout(() => resolve(false), CATCH_UP_MS);
+  });
+  await pool.query('SELECT pg_notify($1, $2)', [
+    CHANNEL,
+    JSON.stringify({ origin: ORIGIN, event: { kind: 'sync', id } }),
+  ]);
+  const returned = await back;
+  clearTimeout(timer);
+  waiting.delete(id);
+  if (!returned) {
+    console.error('[invalidation] catch-up timed out; dropping every cache');
+    forgetEverything();
+  }
+}
+
 /** Holds one dedicated connection (LISTEN needs its own; the pool's clients
  * are shared) and reconnects if it drops. Returns a stop function. */
 export function listenForInvalidation(): () => void {
@@ -85,14 +130,22 @@ export function listenForInvalidation(): () => void {
     next.on('notification', (message) => {
       if (message.channel !== CHANNEL || !message.payload) return;
       try {
-        const { origin, event } = JSON.parse(message.payload);
-        if (origin !== ORIGIN) apply(event as Invalidation);
+        const { origin, event } = JSON.parse(message.payload) as {
+          origin: string;
+          event: Invalidation | Sync;
+        };
+        if (event.kind === 'sync') {
+          if (origin === ORIGIN) waiting.get(event.id)?.();
+          return;
+        }
+        if (origin !== ORIGIN) apply(event);
       } catch (error) {
         console.error('[invalidation] bad message', error);
       }
     });
     next.on('error', (error) => {
       console.error('[invalidation] listener lost', error);
+      listening = false;
       next.end().catch(() => {});
       reconnect();
     });
@@ -104,12 +157,9 @@ export function listenForInvalidation(): () => void {
         return;
       }
       client = next;
-      if (connectedBefore) {
-        forgetAllPages();
-        invalidateAllComposedTiles();
-        invalidateAllResidentSorts();
-      }
+      if (connectedBefore) forgetEverything();
       connectedBefore = true;
+      listening = true;
     } catch (error) {
       console.error('[invalidation] listen failed', error);
       next.end().catch(() => {});
@@ -120,6 +170,7 @@ export function listenForInvalidation(): () => void {
   connect();
   return () => {
     stopped = true;
+    listening = false;
     if (retry) clearTimeout(retry);
     client?.end().catch(() => {});
   };
