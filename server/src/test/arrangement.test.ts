@@ -1,15 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 // meaning/arrangement.ts against the database: positions are written for
 // every embedded image, the `meaning` sort puts the rest last, a new
-// arrangement is a new build, and a burst of embeds queues one job.
+// arrangement is a new build (queueing it: schedule.test.ts).
 import { rankOrder } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
-import {
-  arrangeBoard,
-  arrangementOf,
-  enqueueArrangeDebounced,
-  ensureArrangeQueued,
-} from '../meaning/arrangement.ts';
+import { arrangeBoard, arrangementOf } from '../meaning/arrangement.ts';
 import { MODEL, toVectorText } from '../meaning/model.ts';
 
 function unitVector(values: number[]): Float32Array {
@@ -93,20 +88,5 @@ describe('arrangement', () => {
     const before = (await rankOrder(boardId, meaning)).version;
     await arrangeBoard(boardId);
     expect((await rankOrder(boardId, meaning)).version).not.toBe(before);
-  });
-
-  test('a burst of embeds queues one arrangement', async () => {
-    const { boardId } = await boardWith([[1, 0]]);
-    for (let i = 0; i < 3; i++) await enqueueArrangeDebounced(boardId);
-    const { rows } = await pool.query(
-      `SELECT count(*)::int AS n FROM jobs
-       WHERE kind = 'arrange' AND state = 'pending' AND payload->>'boardId' = $1`,
-      [boardId],
-    );
-    expect(rows[0].n).toBe(1);
-    await pool.query(
-      `DELETE FROM jobs WHERE kind = 'arrange' AND payload->>'boardId' = $1`,
-      [boardId],
-    );
   });
 });

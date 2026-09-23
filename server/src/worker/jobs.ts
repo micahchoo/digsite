@@ -2,9 +2,9 @@
 // "Materialised coarse levels"): `ladder` (decode, cap at 4096, paint,
 // mark ready), `rank-rebuild` (debounced per board, rebuilds every sort
 // this board has ever had ranked), `materialise` (writes z <= -3 tiles to
-// disk for one sort). The enqueue* functions here are the only way
-// anything inserts into `jobs` — worker/index.ts only claims and retries
-// them; it does not know what a job means.
+// disk for one sort), plus `embed`, `arrange` and `folder-import`. Every
+// job is queued through worker/schedule.ts; worker/index.ts only claims
+// and retries them; it does not know what a job means.
 import { LADDER, type LadderSize, perPage } from '@digsite/shared/board/ladder';
 import { parseSortId, sortId as toSortId } from '@digsite/shared/board/sort';
 import { boardChanged, pagesRepainted } from '../boards/change.ts';
@@ -18,51 +18,11 @@ import { MODEL, toVectorText } from '../meaning/model.ts';
 import { storageFromEnv } from '../storage/index.ts';
 import { capturedProperties } from './captured.ts';
 import { decodeOriginal } from './decode.ts';
+import { type JobKind, isJobKind, schedule } from './schedule.ts';
 
 // worker/index.ts's one hook into what a failure means: a DecodeError is
 // retried without backoff, anything else with it.
 export { DecodeError } from './decode.ts';
-
-export async function enqueueJob(
-  kind: string,
-  payload: Record<string, unknown>,
-  runAfter: Date = new Date(),
-): Promise<void> {
-  await pool.query(
-    'INSERT INTO jobs (kind, payload, run_after) VALUES ($1,$2,$3)',
-    [kind, JSON.stringify(payload), runAfter],
-  );
-}
-
-export async function enqueueLadderJob(
-  boardId: string,
-  imageId: string,
-): Promise<void> {
-  await enqueueJob('ladder', { boardId, imageId });
-}
-
-export async function enqueueMaterialiseJob(
-  boardId: string,
-  sid: string,
-): Promise<void> {
-  await enqueueJob('materialise', { boardId, sortId: sid });
-}
-
-/** One pending rank-rebuild per board — a second call while one is already
- * pending pushes its run_after out another 2s instead of adding a row
- * (jobs_rank_rebuild_pending_board, 0003_phase1.sql). */
-export async function enqueueRankRebuildDebounced(
-  boardId: string,
-): Promise<void> {
-  await pool.query(
-    `INSERT INTO jobs (kind, payload, run_after)
-     VALUES ('rank-rebuild', jsonb_build_object('boardId', $1::text), now() + interval '2 seconds')
-     ON CONFLICT ((payload->>'boardId'))
-       WHERE kind = 'rank-rebuild' AND state = 'pending'
-       DO UPDATE SET run_after = now() + interval '2 seconds'`,
-    [boardId],
-  );
-}
 
 type Prepared = {
   id: string;
@@ -152,9 +112,9 @@ export async function runLadderGroup(
       ],
     );
     await boardChanged(boardId);
-    await enqueueRankRebuildDebounced(boardId);
+    await schedule('rank-rebuild', { boardId });
     if (env.EMBEDDINGS) {
-      await enqueueJob('embed', { boardId, imageIds: ready.map((p) => p.id) });
+      await schedule('embed', { boardId, imageIds: ready.map((p) => p.id) });
     }
   } catch (error) {
     const failed = new Set(ready.map((p) => p.id));
@@ -200,8 +160,7 @@ async function runEmbedJob(payload: Record<string, unknown>): Promise<void> {
       vectors.map(toVectorText),
     ],
   );
-  const { enqueueArrangeDebounced } = await import('../meaning/arrangement.ts');
-  await enqueueArrangeDebounced(boardId);
+  await schedule('arrange', { boardId });
 }
 
 async function runLadderJob(payload: Record<string, unknown>): Promise<void> {
@@ -223,7 +182,9 @@ async function runRankRebuildJob(
     const sort = parseSortId(row.sort_id);
     if (!sort) continue;
     const { built } = await ensureRank(boardId, sort);
-    if (built) await enqueueMaterialiseJob(boardId, toSortId(sort));
+    if (built) {
+      await schedule('materialise', { boardId, sortId: toSortId(sort) });
+    }
   }
 }
 
@@ -299,25 +260,29 @@ export async function planUnits(jobs: ClaimedJob[]): Promise<Unit[]> {
   return units;
 }
 
-export async function runJob(
-  kind: string,
-  payload: Record<string, unknown>,
-): Promise<void> {
-  if (kind === 'ladder') return runLadderJob(payload);
-  if (kind === 'rank-rebuild') return runRankRebuildJob(payload);
-  if (kind === 'materialise') return runMaterialiseJob(payload);
-  if (kind === 'embed') return runEmbedJob(payload);
-  if (kind === 'arrange') {
+type Payload = Record<string, unknown>;
+
+/** What each kind does. A Record over JobKind: a kind added to
+ * schedule.ts without a runner here does not compile. */
+const RUNNERS: Record<JobKind, (payload: Payload) => Promise<void>> = {
+  ladder: runLadderJob,
+  'rank-rebuild': runRankRebuildJob,
+  materialise: runMaterialiseJob,
+  embed: runEmbedJob,
+  arrange: async (payload) => {
     const { arrangeBoard } = await import('../meaning/arrangement.ts');
     await arrangeBoard(payload.boardId as string);
-    return;
-  }
-  if (kind === 'folder-import') {
-    // Dynamic: boards/folder-import.ts enqueues through this file.
+  },
+  // Dynamic: boards/folder-import.ts reaches this file through intake.
+  'folder-import': async (payload) => {
     const { runFolderImportBatch } = await import('../boards/folder-import.ts');
-    return runFolderImportBatch(payload.importId as string);
-  }
-  throw new Error(`unknown job kind: ${kind}`);
+    await runFolderImportBatch(payload.importId as string);
+  },
+};
+
+export function runJob(kind: string, payload: Payload): Promise<void> {
+  if (!isJobKind(kind)) throw new Error(`unknown job kind: ${kind}`);
+  return RUNNERS[kind](payload);
 }
 
 /** Runs after a job has exhausted its attempts (worker/index.ts). Only

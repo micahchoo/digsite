@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.ts';
 import { storageFromEnv } from '../storage/index.ts';
 import { ensureRoomFor } from '../storage/room.ts';
-import { enqueueLadderJob } from '../worker/jobs.ts';
+import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
 import { originalKey } from './paths.ts';
 
@@ -67,7 +67,7 @@ export async function uploadOne(
   // After the commit: a build made in between lacks this row, and is
   // still one whole build under its own token.
   await boardChanged(boardId);
-  await enqueueLadderJob(boardId, imageId);
+  await schedule('ladder', { boardId, imageId });
 
   return { id: imageId, slot, status: 'pending' };
 }

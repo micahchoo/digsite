@@ -89,7 +89,7 @@ import {
   toWebRequest,
 } from '../http.ts';
 import { checkLimit, tooManyRequests } from '../limits.ts';
-import { arrangementOf, ensureArrangeQueued } from '../meaning/arrangement.ts';
+import { arrangementOf } from '../meaning/arrangement.ts';
 import { duplicatesOf } from '../meaning/duplicates.ts';
 import { suggestLabels } from '../meaning/labels.ts';
 import { searchText, similarTo } from '../meaning/search.ts';
@@ -100,7 +100,7 @@ import {
   storageFromEnv,
 } from '../storage/index.ts';
 import { Semaphore } from '../util/semaphore.ts';
-import { enqueueMaterialiseJob } from '../worker/jobs.ts';
+import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
 import { extractRegion, parseFraction } from './extract.ts';
 import type { FilterClause } from './filter.ts';
@@ -305,7 +305,10 @@ async function sortableKeysFor(
   // embedded before arrangements existed has no positions: queue one.
   if (arrangement && arrangement.embedded > 0) {
     keys.push({ key: 'meaning', label: 'Meaning' });
-    if (arrangement.placed === 0) await ensureArrangeQueued(boardId);
+    // `soon`, never `settle`: a read must not postpone the job it queues,
+    // or a board polled every 3 s is never arranged.
+    if (arrangement.placed === 0)
+      await schedule('arrange', { boardId }, 'soon');
   }
   const { rows } = await pool.query(
     `SELECT e.key, jsonb_typeof(e.value) AS t,
@@ -1179,7 +1182,7 @@ export function registerBoardRoutes(router: Router) {
     const sort = parseSortId(param(ctx, 'sortId'));
     if (!sort) return json(ctx.res, 400, { error: 'bad sort id' });
     await forceRebuildRank(boardId, sort);
-    await enqueueMaterialiseJob(boardId, param(ctx, 'sortId'));
+    await schedule('materialise', { boardId, sortId: param(ctx, 'sortId') });
     const response: RebuildSortResponse = { ok: true };
     json(ctx.res, 202, response);
   });

@@ -12,7 +12,7 @@ import { join, relative, sep } from 'node:path';
 import type { FolderImport } from '@digsite/shared/api';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
-import { enqueueJob } from '../worker/jobs.ts';
+import { schedule } from '../worker/schedule.ts';
 import { isCameraFile } from './camera.ts';
 
 const IMAGE = /\.(png|jpe?g|webp|gif|avif)$/i;
@@ -95,7 +95,7 @@ export async function startFolderImport(
     ],
   );
   const id = rows[0].id as string;
-  if (files.length) await enqueueJob('folder-import', { importId: id });
+  if (files.length) await schedule('folder-import', { importId: id });
   return {
     id,
     path: folder,
@@ -169,7 +169,7 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
     [importId],
   );
   if (after[0]?.state === 'running') {
-    await enqueueJob('folder-import', { importId });
+    await schedule('folder-import', { importId });
   }
 }
 
