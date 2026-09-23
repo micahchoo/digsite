@@ -1453,6 +1453,36 @@ export function registerBoardRoutes(router: Router) {
   // has the same shape: the images that are nearly this one, which a
   // person may then accept or decline. `meaning/duplicates.ts` says why
   // it takes pixels as well as meaning.
+  // What every meaning route checks, in one order: signed in and allowed
+  // to see the board, embeddings on (503), and for a route about one
+  // picture, that picture on THIS board (400): an image of a board the
+  // viewer cannot see must never become a query here. Null means the
+  // request has already been answered.
+  async function askMeaning(
+    ctx: Parameters<Parameters<typeof router.get>[1]>[0],
+    anchored: boolean,
+  ): Promise<{ boardId: string; image: string } | null> {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    if (!env.EMBEDDINGS) {
+      json(ctx.res, 503, { error: 'embeddings are off' });
+      return null;
+    }
+    const image = ctx.url.searchParams.get('image') ?? '';
+    if (anchored) {
+      const { rows } = await pool.query(
+        'SELECT 1 FROM images WHERE board_id = $1 AND id::text = $2',
+        [boardId, image],
+      );
+      if (rows.length === 0) {
+        json(ctx.res, 400, { error: 'image is not on this board' });
+        return null;
+      }
+    }
+    return { boardId, image };
+  }
+
   for (const [path, find] of [
     [
       '/boards/:id/similar',
@@ -1465,22 +1495,9 @@ export function registerBoardRoutes(router: Router) {
     ],
   ] as const) {
     router.get(path, async (ctx) => {
-      const userId = requireAuth(ctx);
-      const boardId = param(ctx, 'id');
-      await boardForViewing(userId, boardId);
-      if (!env.EMBEDDINGS) {
-        return json(ctx.res, 503, { error: 'embeddings are off' });
-      }
-      const image = ctx.url.searchParams.get('image') ?? '';
-      // The anchor must be on this board: an image of a board the viewer
-      // cannot see must not become a query here.
-      const { rows } = await pool.query(
-        'SELECT 1 FROM images WHERE board_id = $1 AND id::text = $2',
-        [boardId, image],
-      );
-      if (rows.length === 0) {
-        return json(ctx.res, 400, { error: 'image is not on this board' });
-      }
+      const asked = await askMeaning(ctx, true);
+      if (!asked) return;
+      const { boardId, image } = asked;
       const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
       const build = await buildOf(boardId, sort);
       sayOrder(ctx.res, build);
@@ -1497,20 +1514,9 @@ export function registerBoardRoutes(router: Router) {
   // the board's own label terms that best describe the image, best first,
   // as {suggestions: [{term, score}]}. Statuses as /similar.
   router.get('/boards/:id/label-suggestions', async (ctx) => {
-    const userId = requireAuth(ctx);
-    const boardId = param(ctx, 'id');
-    await boardForViewing(userId, boardId);
-    if (!env.EMBEDDINGS) {
-      return json(ctx.res, 503, { error: 'embeddings are off' });
-    }
-    const image = ctx.url.searchParams.get('image') ?? '';
-    const { rows } = await pool.query(
-      'SELECT 1 FROM images WHERE board_id = $1 AND id::text = $2',
-      [boardId, image],
-    );
-    if (rows.length === 0) {
-      return json(ctx.res, 400, { error: 'image is not on this board' });
-    }
+    const meaning = await askMeaning(ctx, true);
+    if (!meaning) return;
+    const { boardId, image } = meaning;
     const asked = Number(ctx.url.searchParams.get('limit') ?? 5);
     const limit =
       Number.isInteger(asked) && asked > 0 ? Math.min(asked, 50) : 5;
@@ -1523,12 +1529,9 @@ export function registerBoardRoutes(router: Router) {
   });
 
   router.get('/boards/:id/search', async (ctx) => {
-    const userId = requireAuth(ctx);
-    const boardId = param(ctx, 'id');
-    await boardForViewing(userId, boardId);
-    if (!env.EMBEDDINGS) {
-      return json(ctx.res, 503, { error: 'embeddings are off' });
-    }
+    const asked = await askMeaning(ctx, false);
+    if (!asked) return;
+    const { boardId } = asked;
     const text = (ctx.url.searchParams.get('text') ?? '').trim();
     if (!text || text.length > 200) {
       return json(ctx.res, 400, { error: 'text must be 1 to 200 characters' });
