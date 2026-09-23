@@ -39,6 +39,7 @@ import type {
   GetStatsResponse,
   InviteRequest,
   InviteResponse,
+  LabelSuggestionsResponse,
   ListBoardImagesResponse,
   ListGroupSheetsResponse,
   ListGroupThreadsResponse,
@@ -411,6 +412,11 @@ export const api = {
   nearDuplicates: (boardId: string, sort: string, imageId: string) =>
     request<MeaningResponse>(
       `/boards/${boardId}/duplicates?${new URLSearchParams({ image: imageId, sort })}`,
+    ),
+  /** Labels this board already uses, scored against a picture. */
+  labelSuggestions: (boardId: string, imageId: string, limit = 5) =>
+    request<LabelSuggestionsResponse>(
+      `/boards/${boardId}/label-suggestions?${new URLSearchParams({ image: imageId, limit: String(limit) })}`,
     ),
   startFolderImport: (boardId: string, path: string) =>
     request<FolderImport>(`/boards/${boardId}/imports`, {

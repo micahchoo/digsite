@@ -128,6 +128,13 @@ export type FindBoardResponse = {
 export type MeaningMatch = { imageId: string; rank: number; score: number };
 export type MeaningResponse = { matches: MeaningMatch[] };
 
+// GET /boards/:id/label-suggestions?image=&limit= (CONTEXT.md "Label
+// suggestion"): the board's own label terms, canonical after aliases,
+// scored against the picture by CLIP, best first. Only words people
+// already use; never a new one. Statuses as /similar.
+export type LabelSuggestion = { term: string; score: number };
+export type LabelSuggestionsResponse = { suggestions: LabelSuggestion[] };
+
 // Import a folder the server can read: POST /boards/:id/imports {path}
 // answers 202 with this; GET /boards/:id/imports/:importId polls it.
 // 503 when IMPORT_ROOTS is unset, 403 outside the roots, 400 for no such

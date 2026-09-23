@@ -810,6 +810,12 @@ export function Sheet() {
           onDrawn={rerender}
           onEdgeDrawn={(edgeId, at) => setNaming({ edgeId, at })}
           labelTerms={labelTerms}
+          suggestLabels={(imageId) =>
+            api
+              .labelSuggestions(sheetInfo.boardId, imageId)
+              .then(({ suggestions }) => suggestions.map((x) => x.term))
+              .catch(() => [])
+          }
           onPan={panCanvas}
           onWheel={wheelCanvas}
         />

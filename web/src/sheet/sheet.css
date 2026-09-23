@@ -1848,3 +1848,29 @@
   color: var(--text-primary);
   font-size: var(--text-2xs);
 }
+
+/* Labels the board already uses that fit this picture (DrawLayer.tsx). */
+.sheet-label-suggestions {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-width: 360px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-s);
+  font-size: var(--text-xs);
+}
+.sheet-label-suggestions > span {
+  color: var(--text-secondary);
+}
+.sheet-label-suggestions button {
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+}

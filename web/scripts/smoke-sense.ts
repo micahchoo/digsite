@@ -455,6 +455,62 @@ async function main() {
     'PASS: "Looks like" suggests; Bring here adds one, and only a click connects it',
   );
 
+  // -- 7c. a new region is offered the board's own labels ------------------
+  await h.setTool('region');
+  const suggestFor = await h.imageEl('img-2');
+  const from = await h.toClient(suggestFor.x + 20, suggestFor.y + 20);
+  const to = await h.toClient(suggestFor.x + 70, suggestFor.y + 70);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  await page.mouse.up();
+  await page.getByTestId('label-suggestions').waitFor({ timeout: 5000 });
+  const firstTerm = await page
+    .getByTestId('label-suggestion')
+    .first()
+    .innerText();
+  await page.getByTestId('label-suggestion').first().click();
+  const filled = await page.getByTestId('region-label-input').inputValue();
+  assert(
+    filled === firstTerm,
+    `a suggestion should fill the label box, and only fill it: "${filled}" vs "${firstTerm}"`,
+  );
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(
+    (term: string) =>
+      window.__digsite
+        .getElements()
+        .some(
+          (e) =>
+            !e.isDeleted &&
+            e.customData?.kind === 'region' &&
+            e.customData.label === term &&
+            e.customData.imageId === 'img-2',
+        ),
+    firstTerm,
+  );
+  await h.setTool('select');
+  // Leave the board's counts as the later steps expect them.
+  await page.evaluate((term: string) => {
+    const made = window.__digsite
+      .getElements()
+      .find(
+        (e) =>
+          !e.isDeleted &&
+          e.customData?.kind === 'region' &&
+          e.customData.label === term &&
+          e.customData.imageId === 'img-2',
+      );
+    if (made) {
+      window.__digsite.select(made.id);
+      window.__digsite.deleteSelected();
+    }
+  }, firstTerm);
+  await page.waitForTimeout(3500); // the room's save, before the board reads
+  console.log(
+    "PASS: a new region is offered the board's own labels; a click fills the box, Enter keeps it",
+  );
+
   // -- 8. the board's Terms index finds images, and a merge widens it ------
   // "find" is on img-8 (seed) and img-11 (step 4); "fragment" on img-9.
   await page.goto(`${WEB}/b/b1`);

@@ -63,6 +63,9 @@ interface Props {
   onEdgeDrawn: (edgeId: string, at: Point) => void;
   /** The board's labels, for the new region's label field. */
   labelTerms: readonly VocabularyTerm[];
+  /** Labels the board already uses that fit this picture, best first
+   * (CONTEXT.md "Label suggestion"); [] when there are none or it is off. */
+  suggestLabels?: (imageId: string) => Promise<string[]>;
   onPan: (dx: number, dy: number) => void;
   onWheel: (input: WheelInput, point: Point) => void;
 }
@@ -108,6 +111,7 @@ export function DrawLayer({
   labelTerms,
   onPan,
   onWheel,
+  suggestLabels,
 }: Props) {
   const [drag, setDrag] = useState<Drag>(null);
   const [dragNow, setDragNow] = useState<Point | null>(null);
@@ -118,6 +122,9 @@ export function DrawLayer({
     screenRect: { x: number; y: number; width: number; height: number };
   } | null>(null);
   const [labelValue, setLabelValue] = useState('');
+  const [suggested, setSuggested] = useState<string[]>([]);
+  /** The region the label box is open for, as the suggestions see it. */
+  const labelIdRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fallbackRef = useRef<FallbackPointer | null>(null);
   const spaceHeldRef = useRef(false);
@@ -301,6 +308,13 @@ export function DrawLayer({
     );
     setLabelValue('');
     setLabelFor({ id, screenRect });
+    // Suggestions arrive when they arrive; the box never waits for them,
+    // and a late answer for an earlier region is dropped.
+    setSuggested([]);
+    labelIdRef.current = id;
+    void suggestLabels?.(drag.imageId).then((terms) => {
+      if (labelIdRef.current === id) setSuggested(terms);
+    });
   }
 
   function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
@@ -402,6 +416,36 @@ export function DrawLayer({
             width: Math.max(180, labelFor.screenRect.width),
           }}
         />
+      )}
+      {labelFor && suggested.length > 0 && (
+        <div
+          className="sheet-label-suggestions"
+          data-testid="label-suggestions"
+          style={{
+            left: labelFor.screenRect.x,
+            top: Math.max(4, labelFor.screenRect.y - 34),
+          }}
+        >
+          <span>Suggested:</span>
+          {suggested.map((term) => (
+            <button
+              key={term}
+              type="button"
+              data-testid="label-suggestion"
+              // Not a press on the canvas: the layer would start a region
+              // drag and capture the pointer, so the click never came here.
+              onPointerDown={(e) => e.stopPropagation()}
+              // Keep the label box focused: a blur would commit it.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setLabelValue(term);
+                inputRef.current?.focus();
+              }}
+            >
+              {term}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

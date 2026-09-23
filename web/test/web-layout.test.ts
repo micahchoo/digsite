@@ -77,3 +77,24 @@ describe('ringLayout', () => {
     );
   });
 });
+
+describe('parts no edge joins', () => {
+  // Found on the claims walk: "same place" joins 4-5 and 10-11. On one set
+  // of rings the 4-5 line crossed the middle and its label sat on 10-11's.
+  test('sit side by side, and no line crosses from one to the other', () => {
+    const pairs = [e('A', 'B'), e('C', 'D')];
+    const placed = new Map(
+      ringLayout(['A'], ['A', 'B', 'C', 'D'], pairs).map((p) => [p.id, p]),
+    );
+    const x = (id: string) => placed.get(id)?.x ?? 0;
+    // A's part is at the origin; C and D sit wholly to its right.
+    expect(Math.min(x('C'), x('D'))).toBeGreaterThan(Math.max(x('A'), x('B')));
+    // Each part keeps its own rings: C-D as close as A-B.
+    const len = (a: string, b: string) =>
+      Math.hypot(
+        x(a) - x(b),
+        (placed.get(a)?.y ?? 0) - (placed.get(b)?.y ?? 0),
+      );
+    expect(len('C', 'D')).toBeCloseTo(len('A', 'B'), 0);
+  });
+});

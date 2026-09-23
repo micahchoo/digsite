@@ -1555,6 +1555,28 @@ const httpServer = createServer(async (req, res) => {
     return json(200, list);
   }
 
+  // GET /boards/:id/label-suggestions?image= — the stub's stand-in: the
+  // board's own labels, most used first (the real server scores them with
+  // CLIP against the picture).
+  const suggestLabels = url.pathname.match(
+    /^\/boards\/([^/]+)\/label-suggestions$/,
+  );
+  if (suggestLabels && req.method === 'GET') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = suggestLabels[1] ?? '';
+    const counts = new Map<string, number>();
+    for (const r of claimsOnBoard(boardId).regions)
+      if (r.label) counts.set(r.label, (counts.get(r.label) ?? 0) + 1);
+    const limit = Number(url.searchParams.get('limit') ?? 5);
+    return json(200, {
+      suggestions: [...counts]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([term], i) => ({ term, score: 0.3 - i * 0.01 })),
+    });
+  }
+
   // GET /boards/:id/search?text= and /similar?image= — search by meaning.
   // The stub has no embeddings, so "meaning" is a stand-in that is stable
   // and testable: similar is nearness in upload order, search is a hash of
