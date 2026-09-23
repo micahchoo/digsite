@@ -4,9 +4,7 @@ import {
   dataOf,
   fileId,
   sortId,
-  toFraction,
 } from '@digsite/shared';
-import type { ClaimReply } from '@digsite/shared/api';
 // Composition only: loads the sheet, owns its room and foreign poll, and
 // lays out the page. Imperative canvas work goes through `CanvasHandle`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -29,9 +27,9 @@ import { ConnectLayer } from './ConnectLayer.tsx';
 import { DrawLayer } from './DrawLayer.tsx';
 import { RelationPicker } from './RelationPicker.tsx';
 import { SidePanel } from './SidePanel.tsx';
+import { createSheetActions, imageElementOf } from './actions.ts';
 import { describeSelection } from './announce.ts';
 import { type Direction, nextInDirection } from './arrow-walk.ts';
-import { besideSpot } from './beside.ts';
 import { Canvas } from './canvas/Canvas.tsx';
 import type {
   CanvasFile,
@@ -41,7 +39,6 @@ import type {
   Viewport,
 } from './canvas/types.ts';
 import { cropToDataUrl } from './crop.ts';
-import { ownEvidence } from './evidence.ts';
 import { type ImageMeta, loadImageFiles } from './images.ts';
 import { Overlay } from './overlay/Overlay.tsx';
 import { Reach } from './overlay/Reach.tsx';
@@ -49,7 +46,7 @@ import { screenToScene } from './overlay/screen.ts';
 import { usePolled } from './overlay/usePolled.ts';
 import { peerCursors } from './presence.ts';
 import { nextImage } from './reading-order.ts';
-import { type ReportClaim, buildReport } from './report.ts';
+import { buildReport } from './report.ts';
 import { useRoom } from './room.ts';
 import { reconcileLocalChange } from './scene-diff.ts';
 import { type MenuTarget, sheetMenu } from './sheet-menu.ts';
@@ -101,6 +98,11 @@ export function Sheet() {
     null,
   );
   const [files, setFiles] = useState(new Map<string, CanvasFile>());
+  // Read by the sheet's actions, which are made once (actions.ts).
+  const sheetInfoRef = useRef(sheetInfo);
+  sheetInfoRef.current = sheetInfo;
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const [sceneElements, setSceneElements] = useState<SceneElement[]>([]);
   const [viewport, setViewport] = useState<Viewport>(ZERO_VIEWPORT);
   const [pendingEdge, setPendingEdge] = useState(false);
@@ -163,6 +165,30 @@ export function Sheet() {
     // Read through a ref: the tools are made once, the session arrives later.
     getAuthor: () => authorRef.current,
   });
+
+  /** Everything the sheet does in more than one step (actions.ts). */
+  const actions = useMemo(
+    () =>
+      createSheetActions({
+        sheetId,
+        boardId: () => sheetInfoRef.current?.boardId ?? null,
+        scene: () => canvasRef.current,
+        tools,
+        server: api,
+        crop: (imageId, fraction) =>
+          cropToDataUrl(
+            filesRef.current.get(fileId(imageId))?.dataURL ??
+              api.previewUrl(imageId),
+            fraction,
+          ),
+        nameOf: (imageId) =>
+          sheetInfoRef.current?.images.find((img) => img.id === imageId)
+            ?.name ?? 'picture',
+        origin: window.location.origin,
+        changed: rerender,
+      }),
+    [sheetId, tools, rerender],
+  );
 
   const [sheetError, setSheetError] = useState<ErrorStateInfo | null>(null);
   useEffect(() => {
@@ -412,84 +438,15 @@ export function Sheet() {
 
   /** The element that shows `imageId` on this sheet, if any. */
   function imageElement(imageId: string): SceneElement | undefined {
-    return canvasRef.current?.elements().find((el) => {
-      if (el.isDeleted) return false;
-      const d = dataOf(el);
-      return d?.kind === 'image' && d.imageId === imageId;
-    });
-  }
-
-  /**
-   * Adds a board picture to this sheet and moves it to the first free side
-   * of `parentImageId`'s picture (sheet/beside.ts). Waits for it to arrive
-   * through the room; its element, or null when it never came.
-   */
-  async function bringBeside(
-    parentImageId: string,
-    imageId: string,
-  ): Promise<SceneElement | null> {
     const canvas = canvasRef.current;
-    const info = sheetInfo;
-    const parent = imageElement(parentImageId);
-    if (!canvas || !info || !parent) return null;
-    await api.addSheetImages(info.boardId, sheetId, { imageIds: [imageId] });
-    let added = imageElement(imageId);
-    for (let i = 0; i < 80 && !added; i++) {
-      await new Promise((r) => setTimeout(r, 125));
-      added = imageElement(imageId);
-    }
-    if (!added) return null;
-    const others = canvas
-      .elements()
-      .filter(
-        (el) =>
-          !el.isDeleted && el.id !== added?.id && dataOf(el)?.kind === 'image',
-      );
-    const spot = besideSpot(parent, added, others);
-    if (spot) tools.moveImage(imageId, spot.x - added.x, spot.y - added.y);
-    rerender();
-    return imageElement(imageId) ?? added;
+    return canvas ? imageElementOf(canvas.elements(), imageId) : undefined;
   }
 
-  /**
-   * A region made into a picture of its own (CONTEXT.md "Extract"): the
-   * server crops the original; once the new picture is read it joins the
-   * sheet beside its parent, and a "derived from" connection says where it
-   * came from. Each step waits for the one before, because a picture the
-   * worker has not read has no size yet to place it by.
-   */
+  /** A region made into a picture of its own (CONTEXT.md "Extract"),
+   * each step said where the person is looking. */
   async function extractToPicture(regionId: string) {
-    const canvas = canvasRef.current;
-    const info = sheetInfo;
-    if (!canvas || !info) return;
-    const region = canvas.elements().find((el) => el.id === regionId);
-    const data = region ? dataOf(region) : null;
-    if (!region || data?.kind !== 'region') return;
-    const parent = imageElement(data.imageId);
-    if (!parent) return;
-    const label = data.label || 'Region';
     try {
-      setWorking(`Making a picture of "${label}"…`);
-      const made = await api.extractRegion(data.imageId, {
-        ...toFraction(region, parent),
-        label: data.label,
-      });
-      for (let i = 0; i < 60; i++) {
-        const { images } = await api.uploadImageStatuses(info.boardId, [
-          made.id,
-        ]);
-        const status = images[0]?.status;
-        if (status === 'ready') break;
-        if (status === 'failed')
-          throw new Error('the new picture could not be read');
-        await new Promise((r) => setTimeout(r, 250));
-      }
-      setWorking(`Adding "${label}" to the sheet…`);
-      const added = await bringBeside(data.imageId, made.id);
-      if (!added) throw new Error('the new picture did not reach the sheet');
-      tools.connect(added.id, region.id, 'derived from');
-      canvas.select([added.id]);
-      rerender();
+      await actions.extract(regionId, setWorking);
       setWorking(null);
     } catch (err) {
       setWorking(
@@ -502,76 +459,14 @@ export function Sheet() {
   /**
    * A report of this sheet's claims, downloaded as one HTML file that
    * carries its own pictures (report.ts): the work, shown to someone who
-   * does not use digsite. Crops come from the pictures this sheet loaded.
+   * does not use digsite.
    */
   async function exportReport() {
-    const canvas = canvasRef.current;
     const info = sheetInfo;
-    if (!canvas || !info) return;
+    if (!info) return;
     setWorking('Making the report…');
     try {
-      const elements = canvas.elements().filter((el) => !el.isDeleted);
-      const nameOf = (imageId: string) =>
-        info.images.find((img) => img.id === imageId)?.name ?? 'picture';
-      const srcOf = (imageId: string) =>
-        files.get(fileId(imageId))?.dataURL ?? api.previewUrl(imageId);
-      const { replies } = await api.getReplies(sheetId).catch(() => ({
-        replies: [] as ClaimReply[],
-      }));
-      const origin = window.location.origin;
-      const claims: ReportClaim[] = [];
-      for (const el of elements) {
-        const data = dataOf(el);
-        if (data?.kind !== 'edge' && data?.kind !== 'region') continue;
-        const common = {
-          made: data.made ?? null,
-          edited: data.edited ?? null,
-          properties: data.properties,
-          replies: replies
-            .filter((r) => r.elementId === el.id)
-            .map((r) => ({ name: r.by.name, at: r.at, text: r.text })),
-          link: `${origin}/s/${sheetId}?claim=${el.id}`,
-        };
-        if (data.kind === 'edge') {
-          const ends = ownEvidence(el, elements);
-          claims.push({
-            ...common,
-            kind: 'connection',
-            term: data.relation,
-            direction: data.direction,
-            confidence: data.confidence ?? null,
-            note: data.note ?? '',
-            ends: ends
-              ? await Promise.all(
-                  ends.map(async (end) => ({
-                    name: nameOf(end.imageId),
-                    label: end.label,
-                    crop: await cropToDataUrl(srcOf(end.imageId), end.fraction),
-                  })),
-                )
-              : [],
-          });
-        } else {
-          const image = imageElement(data.imageId);
-          claims.push({
-            ...common,
-            kind: 'region',
-            term: data.label,
-            ends: [
-              {
-                name: nameOf(data.imageId),
-                label: data.label,
-                crop: image
-                  ? await cropToDataUrl(
-                      srcOf(data.imageId),
-                      toFraction(el, image),
-                    )
-                  : null,
-              },
-            ],
-          });
-        }
-      }
+      const claims = await actions.reportClaims();
       const boardName =
         (await api.getBoard(info.boardId).catch(() => null))?.name ?? '';
       const html = buildReport({
@@ -579,7 +474,7 @@ export function Sheet() {
         boardName,
         by: authorRef.current?.name ?? 'someone',
         at: new Date().toISOString(),
-        link: `${origin}/s/${sheetId}`,
+        link: `${window.location.origin}/s/${sheetId}`,
         claims,
       });
       const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
@@ -1001,11 +896,10 @@ export function Sheet() {
                 sort: sortId(DEFAULT_SORT),
                 onSheet: new Set(sheetInfo.images.map((img) => img.id)),
                 onBring: async (parentImageId, imageId) =>
-                  (await bringBeside(parentImageId, imageId))?.id ?? null,
+                  (await actions.bringBeside(parentImageId, imageId))?.id ??
+                  null,
                 onConnect: (parentImageId, elementId, relation) => {
-                  const from = imageElement(parentImageId);
-                  if (from) tools.connect(from.id, elementId, relation);
-                  rerender();
+                  actions.connectFrom(parentImageId, elementId, relation);
                 },
               }
             : undefined,
