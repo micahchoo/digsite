@@ -73,8 +73,11 @@ export async function runLadderGroup(
   boardId: string,
   imageIds: string[],
 ): Promise<(unknown | null)[]> {
+  // An image deleted before its paint is left out: its original is gone
+  // on purpose, and three retries of "original missing" would only end in
+  // a failed job for a picture nobody wants.
   const { rows } = await pool.query(
-    'SELECT id, slot, sha256 FROM images WHERE id = ANY($1::uuid[])',
+    'SELECT id, slot, sha256 FROM images WHERE id = ANY($1::uuid[]) AND NOT missing',
     [imageIds],
   );
   const byId = new Map(rows.map((row) => [row.id as string, row]));

@@ -7,7 +7,7 @@
 // symlinks and `..` included — and must land inside a root. Every file then
 // takes the same intake as a browser upload (intake.ts), with duplicates
 // skipped.
-import { readdir, realpath } from 'node:fs/promises';
+import { readdir, realpath, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import type { FolderImport } from '@digsite/shared/api';
 import { pool } from '../db/pool.ts';
@@ -103,6 +103,7 @@ export async function startFolderImport(
     total: files.length,
     imported: 0,
     skipped: 0,
+    unchanged: 0,
     skips: [],
     state: files.length ? 'running' : 'done',
   };
@@ -113,7 +114,7 @@ export async function folderImport(
   importId: string,
 ): Promise<FolderImport | null> {
   const { rows } = await pool.query(
-    `SELECT id, path, cardinality(files) AS total, imported, skipped, skips, state,
+    `SELECT id, path, cardinality(files) AS total, imported, skipped, unchanged, skips, state,
        stop_reason AS "stopReason"
      FROM folder_imports WHERE board_id = $1 AND id::text = $2`,
     [boardId, importId],
@@ -138,7 +139,21 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
   // Loaded here: intake reaches the worker's queue, and the worker's jobs
   // module imports this one.
   const intake = await import('./intake.ts');
+  const known = await filesKnown(job.board_id, job.path, job.batch);
   for (const file of job.batch as string[]) {
+    const full = join(job.path, file);
+    const seen = await statOf(full);
+    // Unchanged since an earlier import put it on this board: passed over
+    // without reading it.
+    const was = known.get(full);
+    if (seen && was && was.size === seen.size && was.mtimeMs === seen.mtimeMs) {
+      await pool.query(
+        `UPDATE folder_imports SET next = next + 1, unchanged = unchanged + 1
+         WHERE id = $1`,
+        [importId],
+      );
+      continue;
+    }
     const admitted = await admit(intake, job.board_id, job.path, file);
     const skip = admitted.ok ? null : admitted.reason;
     if (admitted.ok) {
@@ -163,6 +178,17 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
         );
         return;
       }
+    }
+    // Its bytes are on the board now, stored this time or found there:
+    // the next import of this folder can pass it over while it is unchanged.
+    if (seen && (admitted.ok || admitted.status === 409)) {
+      await pool.query(
+        `INSERT INTO folder_files (board_id, path, size, mtime_ms)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (board_id, path)
+           DO UPDATE SET size = EXCLUDED.size, mtime_ms = EXCLUDED.mtime_ms`,
+        [job.board_id, full, seen.size, seen.mtimeMs],
+      );
     }
     await pool.query(
       `UPDATE folder_imports SET next = next + 1,
@@ -233,4 +259,36 @@ export async function resumeFolderImport(
   if (rows.length === 0) return false;
   await schedule('folder-import', { importId: rows[0].id });
   return true;
+}
+
+/** What earlier imports recorded for this batch's files, by full path. */
+async function filesKnown(
+  boardId: string,
+  folder: string,
+  batch: string[],
+): Promise<Map<string, { size: number; mtimeMs: number }>> {
+  const { rows } = await pool.query(
+    `SELECT path, size, mtime_ms FROM folder_files
+     WHERE board_id = $1 AND path = ANY($2::text[])`,
+    [boardId, batch.map((file) => join(folder, file))],
+  );
+  return new Map(
+    rows.map((r) => [
+      r.path as string,
+      { size: Number(r.size), mtimeMs: Number(r.mtime_ms) },
+    ]),
+  );
+}
+
+/** A file's size and whole-millisecond modification time, or null when it
+ * cannot be read (it is then examined, and skipped with the reason). */
+async function statOf(
+  path: string,
+): Promise<{ size: number; mtimeMs: number } | null> {
+  try {
+    const info = await stat(path);
+    return { size: info.size, mtimeMs: Math.floor(info.mtimeMs) };
+  } catch {
+    return null;
+  }
 }

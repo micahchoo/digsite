@@ -156,6 +156,9 @@ export type FolderImport = {
   total: number;
   imported: number;
   skipped: number;
+  /** Files passed over unread: an earlier import of this folder put them
+   * on the board, and their size and modification time are unchanged. */
+  unchanged: number;
   skips: { file: string; reason: string }[];
   /** 'stopped': the group's storage filled up; `stopReason` says so, and
    * POST /boards/:id/imports/:importId/resume starts it again. */

@@ -176,6 +176,9 @@ sheet that made it. The board never writes a claim.
 - **Folder import** — a board filled from a folder on the server's disk,
   under a root the operator allowed (`IMPORT_ROOTS`). Each file takes the
   upload path; the import keeps its file list and a cursor, so it resumes.
+  Importing the same folder again passes over, unread, every file an
+  earlier import put on the board whose size and modification time are
+  unchanged (**unchanged**), so a re-sync reads only what is new.
   A **skip** is the file's fault only: it vanished, is unreadable, is not
   an image, or its bytes are already an image on the board. Each one
   carries its reason, so a folder imported twice adds nothing twice. A fault of the server

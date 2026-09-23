@@ -161,7 +161,7 @@ describe('folder import', () => {
     });
   });
 
-  test('a folder imported twice adds nothing the second time, and says where each file already is', async () => {
+  test('a folder imported again reads only what changed, and says where a copy already is', async () => {
     env.IMPORT_ROOTS = [root];
     const { rows } = await pool.query(
       `INSERT INTO boards (org_id, name, open, created_by)
@@ -173,20 +173,32 @@ describe('folder import', () => {
     await drain();
     expect(await folderImport(boardId, first.id)).toMatchObject({
       imported: 4,
+      unchanged: 0,
     });
+
+    // Since then: b.png was edited, and a byte-copy of a.png appeared.
+    await writeFile(join(root, 'b.png'), await png(33));
+    await copyFile(join(root, 'a.png'), join(root, 'copy-of-a.png'));
+
     const again = await startFolderImport(boardId, 'importer', root);
     await drain();
     const done = await folderImport(boardId, again.id);
-    expect(done).toMatchObject({ state: 'done', imported: 0, skipped: 6 });
+    // a, trip/c and the HEIC are passed over unread; b is read and new;
+    // the copy is read and refused with where its bytes already are.
+    expect(done).toMatchObject({
+      state: 'done',
+      imported: 1,
+      unchanged: 3,
+      skipped: 3,
+    });
     const why = Object.fromEntries(
       (done?.skips ?? []).map((s) => [s.file, s.reason]),
     );
-    expect(why['a.png']).toBe('already on this board as a.png');
-    expect(why['IMG_0001.HEIC']).toBe('already on this board as IMG_0001.HEIC');
+    expect(why['copy-of-a.png']).toBe('already on this board as a.png');
     const { rows: count } = await pool.query(
       'SELECT count(*)::int AS n FROM images WHERE board_id = $1',
       [boardId],
     );
-    expect(count[0].n).toBe(4);
+    expect(count[0].n).toBe(5);
   });
 });
