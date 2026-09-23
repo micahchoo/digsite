@@ -171,10 +171,11 @@ replies-routes extract-routes making-sense access.test routes-audit`.
 Open, needing the user: a read-only view for people outside the group
 (horizon 5) is a decision about who may see what; the report covers
 showing the work meanwhile. Whether CI runs with EMBEDDINGS (claim 16).
-Waiting on digsite-1b (proposed 2026-09-23): participants on sheet rows,
-find in a rank window for full-viewport dimming, board presence, copy to
-board and download. Label-suggestion tuning waits for a board with real
-labels.
+Phase 6's last slices are built at both ends (2026-09-23): participants
+on sheet rows, find dimming every match on screen (a rank window), copy to
+another board and download (walk claim 18), presence on the board (walk
+claim 19), region-level label suggestions, and the whole web of one
+relation. Label-suggestion tuning waits for a board with real labels.
 
 ## Server roadmap (2026-09-23)
 
