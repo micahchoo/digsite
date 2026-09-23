@@ -74,6 +74,7 @@ import {
   type MenuSection,
 } from '../board/ContextMenu.tsx';
 import { Copies } from '../board/Copies.tsx';
+import { CopyToBoard } from '../board/CopyToBoard.tsx';
 import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
 import { FindPanel } from '../board/FindPanel.tsx';
@@ -238,6 +239,10 @@ function fitInitialViewState(
  * neighbourhood request each. */
 const WEB_STARTS = 40;
 
+/** The server's cap on one download, and how many ids go in its URL
+ * before the stored selection stands in for them. */
+const DOWNLOAD_MAX = 500;
+const DOWNLOAD_BY_IDS = 150;
 const NO_SECTIONS: Section[] = [];
 const NO_IMAGES: BoardImageWithRank[] = [];
 const NO_RANKS: number[] = [];
@@ -293,6 +298,8 @@ export function Board() {
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
   const [folderImport, setFolderImport] = useState(false);
+  /** The pictures being copied to another board, while its dialog is open. */
+  const [copying, setCopying] = useState<string[] | null>(null);
   const currentSortId = sort ? sortId(sort) : DEFAULT_SORT.key.toString();
   /** Every answer this page holds in ranks, under the build the map shows
    * (board/ranked-view.ts). One per board and sort. */
@@ -1542,6 +1549,7 @@ export function Board() {
     ];
     if (selection.imageIds.length) {
       matchGroup.push({ label: 'Clear selection', onSelect: clearSelection });
+      matchGroup.push(...copyItems(selection.imageIds));
     }
     const uploadGroup: MenuItem[] = [
       { label: 'Upload images', onSelect: () => fileInputRef.current?.click() },
@@ -1616,21 +1624,42 @@ export function Board() {
     const propsGroup: MenuItem[] = [
       { label: 'Properties', onSelect: () => selection.replace([img.id]) },
     ];
-    const copyGroup: MenuItem[] = [
+    // A picture that is part of the selection stands for all of it.
+    const copyGroup = copyItems(
+      selection.imageIds.includes(img.id) ? selection.imageIds : [img.id],
+    );
+    return [exploreGroup, sheetGroup, openGroup, propsGroup, copyGroup];
+  }
+
+  // -- copy to another board, and download (POST …/images/copy, GET
+  // …/images/download) ---------------------------------------------------
+  function copyItems(ids: readonly string[]): MenuItem[] {
+    const many = ids.length > 1 ? ` ${ids.length} pictures` : '';
+    return [
       {
-        label: 'Copy to another board…',
-        onSelect: () => {},
-        disabled: true,
-        disabledReason: 'Not built yet.',
+        label: `Copy${many} to another board…`,
+        testId: 'board-menu-copy',
+        onSelect: () => setCopying([...ids]),
       },
       {
-        label: 'Download',
-        onSelect: () => {},
-        disabled: true,
-        disabledReason: 'Not built yet.',
+        label: `Download${many}`,
+        testId: 'board-menu-download',
+        onSelect: () => download(ids),
+        disabled: ids.length > DOWNLOAD_MAX,
+        disabledReason: `At most ${DOWNLOAD_MAX} pictures in one download.`,
       },
     ];
-    return [exploreGroup, sheetGroup, openGroup, propsGroup, copyGroup];
+  }
+  /** A plain link, so the browser keeps its own download: the ids while
+   * they fit a URL, else the stored selection they came from. */
+  function download(ids: readonly string[]) {
+    const a = document.createElement('a');
+    a.href = api.downloadUrl(
+      boardId,
+      ids.length <= DOWNLOAD_BY_IDS ? ids : 'selection',
+    );
+    a.download = '';
+    a.click();
   }
 
   function openActionsMenu(x: number, y: number) {
@@ -2093,6 +2122,14 @@ export function Board() {
         </div>
       )}
       <UploadActivity boardId={boardId} snapshot={uploadSnapshot} />
+      {copying && (
+        <CopyToBoard
+          boardId={boardId}
+          groupId={board.groupId}
+          imageIds={copying}
+          onClose={() => setCopying(null)}
+        />
+      )}
       {folderImport && (
         <FolderImport
           boardId={boardId}

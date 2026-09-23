@@ -1578,6 +1578,73 @@ async function main(): Promise<void> {
       `17. a connection from another sheet copies here through the chooser ("${foreignEdge.row.relation}"), joined to this sheet's pictures`,
     );
 
+    // -- 18. Copy pictures to another board; download them ------------------
+    const copies = await member.post<{ id: string }>(
+      `/groups/${lab.id}/boards`,
+      {
+        name: `Copies ${Date.now()}`,
+        open: true,
+      },
+    );
+    assert(
+      copies.status === 200,
+      `create a board to copy to: ${copies.status}`,
+    );
+    const three = [0, 1, 2].map((slot) => bySlot.get(slot) ?? '');
+    await m.goto(`${WEB}/b/${field.id}`);
+    await m.getByTestId('sort-key').waitFor();
+    await m.evaluate(
+      (ids) =>
+        (
+          window as unknown as {
+            __digsiteBoard: { selectIds: (ids: string[]) => void };
+          }
+        ).__digsiteBoard.selectIds(ids),
+      three,
+    );
+    const copyThrough = async () => {
+      await m.getByTestId('board-actions-button').click();
+      await m.getByTestId('board-menu-copy').click();
+      await m.getByTestId('copy-to-board').waitFor();
+      await m.getByTestId('copy-to-board-target').selectOption(copies.json.id);
+      await m.getByTestId('copy-to-board-confirm').click();
+      const outcome = m.getByTestId('copy-to-board-outcome');
+      await outcome.waitFor({ timeout: 20_000 });
+      const said = await outcome.innerText();
+      await m.getByTestId('copy-to-board-confirm').click();
+      await m.getByTestId('copy-to-board').waitFor({ state: 'detached' });
+      return said;
+    };
+    const first = await copyThrough();
+    assert(/Copied 3 pictures/.test(first), `the first copy said "${first}"`);
+    const again = await copyThrough();
+    assert(
+      /Nothing new/.test(again) && /3 pictures were already there/.test(again),
+      `copying the same three again said "${again}"`,
+    );
+    const landed = await member.get<{ imageCount: number }>(
+      `/boards/${copies.json.id}`,
+    );
+    assert(
+      landed.json.imageCount === 3,
+      `the other board holds ${landed.json.imageCount} pictures, not 3`,
+    );
+    const downloading = m.waitForEvent('download', { timeout: 20_000 });
+    await m.getByTestId('board-actions-button').click();
+    await m.getByTestId('board-menu-download').click();
+    const zip = await downloading;
+    const zipPath = await zip.path();
+    const size = zipPath
+      ? (await Bun.file(zipPath).arrayBuffer()).byteLength
+      : 0;
+    assert(
+      zip.suggestedFilename().endsWith('.zip') && size > 0,
+      `the download was "${zip.suggestedFilename()}", ${size} bytes`,
+    );
+    pass(
+      `18. three pictures copy to another board once, a second copy skips them, and they download as a zip (${size} bytes)`,
+    );
+
     await meaningClaim(member, lab.id, m);
 
     assert(errors.length === 0, `page errors: ${errors.join(' | ')}`);

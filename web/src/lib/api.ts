@@ -15,6 +15,8 @@ import type {
   ArchiveSheetResponse,
   BoardImage,
   BoardSummary,
+  CopyImagesRequest,
+  CopyImagesResponse,
   CreateBoardRequest,
   CreateBoardResponse,
   CreateGroupRequest,
@@ -453,6 +455,18 @@ export const api = {
     request<LabelSuggestionsResponse>(
       `/boards/${boardId}/label-suggestions?${new URLSearchParams({ image: imageId, limit: String(limit) })}`,
     ),
+  /** Copies pictures from another board onto `boardId`, originals and
+   * properties, never claims; one already there is skipped. */
+  copyImages: (boardId: string, body: CopyImagesRequest) =>
+    request<CopyImagesResponse>(`/boards/${boardId}/images/copy`, post(body)),
+  /** A zip of pictures' originals, for a plain link: the ids, or the
+   * viewer's stored selection when there are too many for a URL. */
+  downloadUrl: (boardId: string, which: readonly string[] | 'selection') =>
+    `${SERVER_ORIGIN}/boards/${boardId}/images/download?${
+      which === 'selection'
+        ? 'selection=1'
+        : new URLSearchParams({ ids: which.join(',') })
+    }`,
   startFolderImport: (boardId: string, path: string) =>
     request<FolderImport>(`/boards/${boardId}/imports`, {
       method: 'POST',
