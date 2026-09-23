@@ -468,6 +468,50 @@ async function main() {
   await page.locator('[data-testid="upload-close"]').click();
   console.log('PASS: rejected upload shows its reason and failure count');
 
+  // A full disk (507) stops the queue: one request, no retry, and it says why.
+  let fullDiskPosts = 0;
+  await page.route('**/boards/b1/images*', async (route, request) => {
+    if (request.method() === 'POST') {
+      fullDiskPosts += 1;
+      await route.fulfill({
+        status: 507,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'insufficient storage' }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.setInputFiles(
+    '[data-testid="upload-input"]',
+    Array.from({ length: 30 }, (_, i) => ({
+      name: `full-${i}.png`,
+      mimeType: 'image/png',
+      buffer: Buffer.from(`full-disk-${i}`),
+    })),
+  );
+  await page.waitForFunction(() =>
+    document
+      .querySelector('[data-testid="upload-rows"]')
+      ?.textContent?.includes('disk is full'),
+  );
+  // Batches already in flight may land (two at a time); nothing after.
+  const inFlight = fullDiskPosts;
+  await page.waitForTimeout(2500);
+  assert(
+    fullDiskPosts === inFlight && fullDiskPosts <= 2,
+    `a full disk should send nothing more, but ${fullDiskPosts - inFlight} more requests followed`,
+  );
+  assert(
+    (await page.getByTestId('upload-counts').innerText()).includes(
+      '0 queued',
+    ),
+    'nothing should stay queued behind a full disk',
+  );
+  await page.unroute('**/boards/b1/images*');
+  await page.locator('[data-testid="upload-close"]').click();
+  console.log('PASS: a full disk stops the upload queue and says why');
+
   await browser.close();
   console.log('smoke-board: all assertions passed');
 }

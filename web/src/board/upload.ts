@@ -342,6 +342,16 @@ function startTus(
       endpoint: `${SERVER_ORIGIN}/boards/${sessionBoardForRow(row)}/uploads`,
       chunkSize: 4 * 1024 * 1024,
       retryDelays: [0, 1000, 3000],
+      // tus-js-client's own rule, plus one: a full disk (507) stays full,
+      // and retrying only writes more into it.
+      onShouldRetry: (error) => {
+        const status = error.originalResponse?.getStatus() ?? 0;
+        if (status === 507) return false;
+        const client = status >= 400 && status < 500;
+        return (
+          (!client || status === 409 || status === 423) && navigator.onLine
+        );
+      },
       metadata: { filename: row.name, properties: '{}' },
       onBeforeRequest: (req) => {
         const xhr = req.getUnderlyingObject();
@@ -408,6 +418,24 @@ function startTus(
   });
 }
 
+/** The server's disk is full (507). Nothing else in the queue can land, so
+ * the batch that hit it fails, everything still queued stops, and the
+ * panel says why. Retrying would only fill the disk further. */
+function stopForFullDisk(session: QueueSession, batch: readonly UploadRow[]) {
+  for (const row of batch) {
+    setStatus(session, row, 'error', "The server's disk is full.");
+    row.file = null;
+  }
+  for (const row of session.rows) {
+    if (row.status !== 'queued') continue;
+    setStatus(session, row, 'canceled');
+    row.file = null;
+  }
+  session.message =
+    "Uploads stopped: the server's disk is full. Ask whoever runs this server to free space, then add the remaining files again.";
+  publish(session, true);
+}
+
 // UploadRow doesn't carry board identity, so task-local lookup is explicit.
 const rowBoards = new WeakMap<UploadRow, string>();
 function sessionBoardForRow(row: UploadRow) {
@@ -450,6 +478,10 @@ async function uploadBatch(session: QueueSession, batch: UploadRow[]) {
         scheduleRetry(session, result.retryAfter ?? 60);
       }
       publish(session, true);
+      return;
+    }
+    if (result.status === 507) {
+      stopForFullDisk(session, [row]);
       return;
     }
     if (!result.id) {
@@ -518,6 +550,10 @@ async function uploadBatch(session: QueueSession, batch: UploadRow[]) {
         );
         publish(session, true);
         scheduleRetry(session, error.retryAfter ?? 60);
+        return;
+      }
+      if (error instanceof ApiError && error.status === 507) {
+        stopForFullDisk(session, batch);
         return;
       }
       const definiteRejection =
