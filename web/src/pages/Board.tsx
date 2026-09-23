@@ -21,7 +21,6 @@ import {
   Deck,
   type LayersList,
   OrthographicView,
-  type OrthographicViewState,
   type PickingInfo,
 } from '@deck.gl/core';
 import { TileLayer } from '@deck.gl/geo-layers';
@@ -86,11 +85,17 @@ import { UploadActivity } from '../board/UploadActivity.tsx';
 import { WebView } from '../board/WebView.tsx';
 import { ZoomControl, zoomIn, zoomOut } from '../board/ZoomControl.tsx';
 import {
-  DetailCache,
-  MAX_VIEW_ZOOM,
-  containedRect,
-  visibleRanks,
-} from '../board/detail.ts';
+  type BoardCamera,
+  MAX_TILE_ZOOM,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  type Screen,
+  centreOn,
+  fitBoard,
+  fitRanks,
+  zoomTo,
+} from '../board/camera.ts';
+import { DetailCache, containedRect, visibleRanks } from '../board/detail.ts';
 import { rankWindow, useFind } from '../board/find.ts';
 import { outlinesOf, pointedAt, useBoardPresence } from '../board/presence.ts';
 import { RankedView, identity, useRanked } from '../board/ranked-view.ts';
@@ -152,12 +157,6 @@ declare global {
   }
 }
 
-const MIN_ZOOM = -5;
-/** The tile pyramid's finest level: a cell is 128 px, as a ladder page
- * stores it. The view zooms past it (MAX_ZOOM) and board/detail.ts draws
- * each visible cell's own preview there. */
-const MAX_TILE_ZOOM = 0;
-const MAX_ZOOM = MAX_VIEW_ZOOM;
 const TILE_SIZE = 256;
 
 interface Status {
@@ -183,51 +182,6 @@ interface OpenContextMenu {
 
 function storageKey(boardId: string): string {
   return `digsite:sort:${boardId}`;
-}
-
-/**
- * `worldExtent(count)` is the shared tiling boundary the TileLayer needs.
- * Fit the used ranks rather than the full fixed row width so a smaller
- * collection opens centered on its images; the shared column count keeps
- * ranks in a stable compact grid as new images arrive.
- *
- * docs/ux/audit.md #15: the mathematically tightest fit (width-driven, for
- * any board whose one row is wider than the viewport) can render a single
- * row as a near-invisible sliver — a `zoomX` that fits a wide row into the
- * viewport width shrinks that row's on-screen HEIGHT by the exact same
- * factor. Floor zoom at a fixed minimum on-screen cell size instead of
- * deriving it from the viewport height: a floor derived from `h` (e.g.
- * "zoom until 2 real cell-rows fill the viewport") degenerates to
- * `MAX_ZOOM` for any board whose row COUNT is small — that was tried and
- * measured to force full zoom-in (cellPx=128), hiding most of a merely
- * medium-sized board's width behind an artificially tight crop. A fixed
- * pixel floor has no such degenerate case: it only ever pulls zoom UP from
- * a genuinely-too-coarse fit, by exactly enough to keep a cell legible.
- */
-const MIN_INITIAL_CELL_PX = 64; // half native size — comfortably legible, never a sliver
-function fitInitialViewState(
-  count: number,
-  worldH: number,
-  viewportW: number,
-  viewportH: number,
-  fitEverything = false,
-): OrthographicViewState {
-  const contentW = Math.min(Math.max(count, 1), COLS) * CELL;
-  const zoomX = Math.log2(viewportW / contentW);
-  const zoomY = Math.log2(viewportH / worldH);
-  let zoom = Math.min(zoomX, zoomY);
-  // Keep cells legible where possible, but never let the preferred cell
-  // floor force a compact 16-column board wider than its actual canvas.
-  const zoomFloor = Math.min(Math.log2(MIN_INITIAL_CELL_PX / CELL), zoomX);
-  if (!fitEverything) zoom = Math.max(zoom, zoomFloor);
-  // A fit shows the map, so it stops where the tiles do.
-  zoom = Math.max(MIN_ZOOM, Math.min(MAX_TILE_ZOOM, zoom));
-  return {
-    target: [contentW / 2, worldH / 2, 0],
-    zoom,
-    minZoom: MIN_ZOOM,
-    maxZoom: MAX_ZOOM,
-  };
 }
 
 /** The server's cap on one download, and how many ids go in its URL
@@ -273,7 +227,7 @@ export function Board() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const deckRef = useRef<Deck<OrthographicView> | null>(null);
-  const viewStateRef = useRef<OrthographicViewState | null>(null);
+  const viewStateRef = useRef<BoardCamera | null>(null);
   const statusRef = useRef<Status>({
     zoom: 0,
     tilesRequested: 0,
@@ -318,6 +272,40 @@ export function Board() {
   const [webRelation, setWebRelation] = useState<string | undefined>();
   const [fileDragActive, setFileDragActive] = useState(false);
   const [, forceRender] = useState(0);
+
+  // -- the camera (board/camera.ts decides where; these only write it) -----
+  /** A camera deck already shows (its own pan or zoom, or the first fit):
+   * the ref the page reads and the zoom readout. */
+  const noteView = useCallback((next: BoardCamera) => {
+    viewStateRef.current = next;
+    statusRef.current.zoom = next.zoom;
+    forceRender((n) => n + 1);
+  }, []);
+  /** Moves the map. The one place the page hands deck a camera. */
+  const setView = useCallback(
+    (next: BoardCamera) => {
+      noteView(next);
+      deckRef.current?.setProps({ viewState: next });
+    },
+    [noteView],
+  );
+  /** Moves the map from where it is; no move before deck has mounted, or
+   * when `f` has nowhere to go. */
+  const moveView = useCallback(
+    (f: (camera: BoardCamera) => BoardCamera | null) => {
+      const now = viewStateRef.current;
+      const next = deckRef.current && now ? f(now) : null;
+      if (next) setView(next);
+    },
+    [setView],
+  );
+  const screenSize = useCallback((): Screen => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    return {
+      width: rect?.width || window.innerWidth,
+      height: rect?.height || window.innerHeight - 200,
+    };
+  }, []);
 
   // -- sections --------------------------------------------------------------
   const sectionsAnswer = useRanked(view, board ? 'sections' : null, () =>
@@ -609,35 +597,18 @@ export function Board() {
   useEffect(() => {
     if (!canvasRef.current || !board) return;
     if (deckRef.current) return;
-    const [, , , h] = worldExtent(board.imageCount);
-    const canvasRect = canvasRef.current.getBoundingClientRect();
-    viewStateRef.current = fitInitialViewState(
-      board.imageCount,
-      h,
-      canvasRect.width || window.innerWidth,
-      canvasRect.height || window.innerHeight - 200,
-    );
     // deck.gl's onViewStateChange (below) only fires on a user-driven
-    // change, never for the `initialViewState` passed at construction —
-    // without this, `statusRef.current.zoom` stays at its literal `0`
-    // default until the first pan/zoom, so ZoomControl's "zoom in"
-    // disabled-when-at-max check (`zoom >= maxZoom`, maxZoom=0) reads
-    // TRUE from the moment the page loads whenever the real initial fit
-    // is negative (the common case) — the button was stuck disabled.
-    statusRef.current.zoom = viewStateRef.current.zoom as number;
-    forceRender((n) => n + 1);
+    // change, never for the `initialViewState` passed at construction, so
+    // the fit is noted here or the zoom readout starts at 0 and "zoom in"
+    // reads as already at its limit.
+    noteView(fitBoard(board.imageCount, screenSize()));
     deckRef.current = new Deck({
       canvas: canvasRef.current,
       views: new OrthographicView({ id: 'board' }),
       initialViewState: viewStateRef.current,
       controller: true,
       layers: [],
-      onViewStateChange: ({ viewState }) => {
-        viewStateRef.current = viewState as OrthographicViewState;
-        statusRef.current.zoom = (viewState as OrthographicViewState)
-          .zoom as number;
-        forceRender((n) => n + 1);
-      },
+      onViewStateChange: ({ viewState }) => noteView(viewState as BoardCamera),
       onClick: (info, event) => handleClick(info, event),
       onHover: (info) => handleHover(info),
       onDragStart: (info, event) => {
@@ -720,14 +691,7 @@ export function Board() {
       );
       const firstImg = found[0];
       if (firstImg && typeof firstImg.rank === 'number') {
-        const { col, row } = cellOf(firstImg.rank);
-        const next: OrthographicViewState = {
-          ...(viewStateRef.current ?? {}),
-          target: [col * CELL + CELL / 2, row * CELL + CELL / 2, 0],
-        };
-        viewStateRef.current = next;
-        deckRef.current.setProps({ viewState: next });
-        forceRender((n) => n + 1);
+        moveView((cam) => centreOn(cam, firstImg.rank as number));
       }
     } catch {
       // sheet unreachable this tick; nothing selected
@@ -790,13 +754,7 @@ export function Board() {
   // stale despite the empty dependency array.
   useEffect(() => {
     window.__digsiteBoard = {
-      setZoom: (z: number) => {
-        if (!deckRef.current || !viewStateRef.current) return;
-        viewStateRef.current = { ...viewStateRef.current, zoom: z };
-        deckRef.current.setProps({ viewState: viewStateRef.current });
-        statusRef.current.zoom = z;
-        forceRender((n) => n + 1);
-      },
+      setZoom: (z: number) => moveView((cam) => zoomTo(cam, z)),
       getSelection: () =>
         selectedImagesRef.current
           .map((i) => i.rank)
@@ -824,27 +782,13 @@ export function Board() {
             }
           : null;
       },
-      goToRank: (rank: number) => {
-        const { col, row } = cellOf(rank);
-        const next = {
-          ...(viewStateRef.current ?? fitInitialViewState(1, CELL, 640, 480)),
-          target: [col * CELL + CELL / 2, row * CELL + CELL / 2, 0] as [
-            number,
-            number,
-            number,
-          ],
-        };
-        viewStateRef.current = next;
-        deckRef.current?.setProps({ viewState: next });
-        statusRef.current.zoom = next.zoom as number;
-        forceRender((n) => n + 1);
-      },
+      goToRank: (rank: number) => moveView((cam) => centreOn(cam, rank)),
       selectImages: (ids: string[], mode: 'replace' | 'add' = 'replace') => {
         if (mode === 'add') selection.add(ids);
         else selection.replace(ids);
       },
     };
-  }, [resolveImageAtRank, rangeSelect, selection]);
+  }, [resolveImageAtRank, rangeSelect, selection, moveView]);
 
   // -- the order build the map shows ----------------------------------------
   // A newer build: the tiles and the rank-to-image cache were drawn under
@@ -1473,64 +1417,17 @@ export function Board() {
 
   // -- zoom control ----------------------------------------------------------
   function applyZoom(next: number) {
-    if (!deckRef.current || !viewStateRef.current) return;
-    viewStateRef.current = { ...viewStateRef.current, zoom: next };
-    deckRef.current.setProps({ viewState: viewStateRef.current });
-    statusRef.current.zoom = next;
-    forceRender((n) => n + 1);
+    moveView((cam) => zoomTo(cam, next));
   }
   function fitView() {
     if (!board) return;
-    const [, , , h] = worldExtent(board.imageCount);
-    const canvasRect = canvasRef.current?.getBoundingClientRect();
-    const next = fitInitialViewState(
-      board.imageCount,
-      h,
-      canvasRect?.width || window.innerWidth,
-      canvasRect?.height || window.innerHeight - 200,
-      true,
-    );
-    viewStateRef.current = next;
-    deckRef.current?.setProps({ viewState: next });
-    statusRef.current.zoom = next.zoom as number;
-    forceRender((n) => n + 1);
+    setView(fitBoard(board.imageCount, screenSize(), true));
   }
   function zoomToSelection() {
-    if (!deckRef.current) return;
     const ranks = selectedImages
       .map((i) => i.rank)
       .filter((r): r is number => typeof r === 'number');
-    if (!ranks.length) return;
-    const cells = ranks.map((r) => cellOf(r));
-    const minCol = Math.min(...cells.map((c) => c.col));
-    const maxCol = Math.max(...cells.map((c) => c.col));
-    const minRow = Math.min(...cells.map((c) => c.row));
-    const maxRow = Math.max(...cells.map((c) => c.row));
-    const x0 = minCol * CELL;
-    const x1 = (maxCol + 1) * CELL;
-    const y0 = minRow * CELL;
-    const y1 = (maxRow + 1) * CELL;
-    const w = Math.max(x1 - x0, CELL);
-    const h = Math.max(y1 - y0, CELL);
-    const canvasRect = canvasRef.current?.getBoundingClientRect();
-    const vw = canvasRect?.width || window.innerWidth;
-    const vh = canvasRect?.height || window.innerHeight - 200;
-    const nz = Math.max(
-      MIN_ZOOM,
-      Math.min(
-        MAX_ZOOM,
-        Math.min(Math.log2(vw / (w + CELL)), Math.log2(vh / (h + CELL))),
-      ),
-    );
-    const next: OrthographicViewState = {
-      ...(viewStateRef.current ?? {}),
-      target: [(x0 + x1) / 2, (y0 + y1) / 2, 0],
-      zoom: nz,
-    };
-    viewStateRef.current = next;
-    deckRef.current.setProps({ viewState: next });
-    statusRef.current.zoom = nz;
-    forceRender((n) => n + 1);
+    moveView((cam) => fitRanks(cam, ranks, screenSize()));
   }
   /** Walks the graph: the neighbour joins the selection, becomes the focused
    * image, and the map centres on it. */
@@ -1538,29 +1435,14 @@ export function Board() {
     selection.add([imgId]);
     setFocusedImageId(imgId);
     const rank = exploreRanks.get(imgId);
-    if (rank === undefined || !deckRef.current) return;
-    const { col, row } = cellOf(rank);
-    const next: OrthographicViewState = {
-      ...(viewStateRef.current ?? {}),
-      target: [col * CELL + CELL / 2, row * CELL + CELL / 2, 0],
-    };
-    viewStateRef.current = next;
-    deckRef.current.setProps({ viewState: next });
-    forceRender((n) => n + 1);
+    if (rank !== undefined) moveView((cam) => centreOn(cam, rank));
   }
 
   /** Centres the map on a picture and opens its details, leaving the
    * selection alone: looking is not choosing. */
   function showOnMap(imageId: string, rank: number) {
-    if (rank < 0 || !deckRef.current) return;
-    const { col, row } = cellOf(rank);
-    const next: OrthographicViewState = {
-      ...(viewStateRef.current ?? {}),
-      target: [col * CELL + CELL / 2, row * CELL + CELL / 2, 0],
-    };
-    viewStateRef.current = next;
-    deckRef.current.setProps({ viewState: next });
-    forceRender((n) => n + 1);
+    if (rank < 0) return;
+    moveView((cam) => centreOn(cam, rank));
     setFocusedImageId(imageId);
   }
 
@@ -1575,17 +1457,9 @@ export function Board() {
       );
       return;
     }
-    if (!img || typeof img.rank !== 'number' || !deckRef.current) return;
-    const { col, row } = cellOf(img.rank);
-    const cx = col * CELL + CELL / 2;
-    const cy = row * CELL + CELL / 2;
-    const next: OrthographicViewState = {
-      ...(viewStateRef.current ?? {}),
-      target: [cx, cy, 0],
-    };
-    viewStateRef.current = next;
-    deckRef.current.setProps({ viewState: next });
-    forceRender((n) => n + 1);
+    if (!img || typeof img.rank !== 'number') return;
+    const rank = img.rank;
+    moveView((cam) => centreOn(cam, rank));
     setFocusedImageId(imgId);
   }
 
