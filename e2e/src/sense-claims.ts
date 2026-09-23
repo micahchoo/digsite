@@ -749,6 +749,36 @@ async function main(): Promise<void> {
       '11. "Make a picture of this region" adds the crop beside its parent, joined "derived from" to the region',
     );
 
+    // -- 12. From a connection on a sheet, the web around it, then the board --
+    const e45w = await M.edgeBetween(4, 5);
+    assert(e45w, 'the 4 -> 5 connection is gone');
+    await m.evaluate(
+      (id) => (window as unknown as SheetWindow).__digsite.select(id),
+      e45w.id,
+    );
+    await m.getByTestId('inspector-open-web').click();
+    const sheetWeb = m.getByTestId('web-view');
+    await sheetWeb.waitFor({ timeout: 5000 });
+    const node5 = m.locator(
+      `[data-testid="web-view-node"][data-image-id="${M.id(5)}"]`,
+    );
+    await node5.waitFor({ timeout: 15_000 });
+    await node5.click();
+    await m.getByRole('button', { name: 'Show on board' }).click();
+    await m.waitForURL(/\/b\//, { timeout: 10_000 });
+    const detailName = m.locator(
+      '[data-testid="detail-panel"] .board-image-name',
+    );
+    await detailName.waitFor({ timeout: 15_000 });
+    assert(
+      (await detailName.innerText()) === 'image-5.png',
+      `"Show on board" should open image 5 there, not "${await detailName.innerText()}"`,
+    );
+    pass(
+      '12. a connection on a sheet opens the web around both ends; "Show on board" opens that picture on the board',
+    );
+    await M.open(firstPass.id);
+
     // -- 10. Discuss a claim: across two people and two sheets --------------
     // The member answers on their own 10 -> 11 "same place"; the listed user
     // reads it on Faces, where it shows as First pass's claim, and replies.

@@ -794,13 +794,35 @@ export function Board() {
   // would re-fire this on every OTHER query-param change too.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
+    if (!board) return;
     const sheetIdParam = searchParams.get('showSheet');
-    if (!sheetIdParam || !board) return;
-    void showSheetOnBoard(sheetIdParam);
+    // `?image=<id>`: a link to one picture on the board. The map flies to
+    // it and its details open; the selection is left alone.
+    const imageParam = searchParams.get('image');
+    if (!sheetIdParam && !imageParam) return;
+    if (sheetIdParam) void showSheetOnBoard(sheetIdParam);
+    if (imageParam) void showImageById(imageParam);
     const next = new URLSearchParams(searchParams);
     next.delete('showSheet');
+    next.delete('image');
     setSearchParams(next, { replace: true });
   }, [board]);
+
+  async function showImageById(imageId: string) {
+    try {
+      const { images: found } = await api.getBoardImagesByIds(
+        boardId,
+        currentSortId,
+        [imageId],
+      );
+      const img = found[0];
+      if (!img) return;
+      if (typeof img.rank === 'number') showOnMap(img.id, img.rank);
+      else setFocusedImageId(img.id);
+    } catch {
+      // not on this board, or not visible to this viewer: nothing to show
+    }
+  }
 
   async function showSheetOnBoard(sheetIdParam: string) {
     try {

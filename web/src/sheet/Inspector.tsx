@@ -65,6 +65,8 @@ export interface InspectorProps {
   sheetId: string;
   /** The signed-in person, who may remove their own replies. */
   userId: string | null;
+  /** Opens the web of claims around the given pictures. */
+  onOpenWeb?: (imageIds: string[]) => void;
   /** Makes a picture of its own from a region, beside its parent. */
   onExtract?: (regionId: string) => void;
   /** Opens the two ends of a connection side by side, to check the claim. */
@@ -122,11 +124,13 @@ function Evidence({
   imageSrc,
   direction,
   onCompare,
+  onOpenWeb,
 }: {
   ends: [EvidenceEnd, EvidenceEnd];
   imageSrc: (imageId: string) => string;
   direction: ElementDataEdge['direction'];
   onCompare?: () => void;
+  onOpenWeb?: () => void;
 }) {
   const icon =
     direction === 'forward'
@@ -152,6 +156,17 @@ function Evidence({
         >
           <Icon name="panel" size={15} />
           Compare side by side
+        </button>
+      )}
+      {onOpenWeb && (
+        <button
+          type="button"
+          className="claim-compare"
+          data-testid="inspector-open-web"
+          onClick={onOpenWeb}
+        >
+          <Icon name="connect" size={15} />
+          See the web around both
         </button>
       )}
     </div>
@@ -447,6 +462,11 @@ function OwnClaim(
               ? () => props.onCompare?.(ends, data.relation)
               : undefined
           }
+          onOpenWeb={
+            props.onOpenWeb
+              ? () => props.onOpenWeb?.([ends[0].imageId, ends[1].imageId])
+              : undefined
+          }
         />
       )}
       <section className="claim-section">
@@ -578,6 +598,11 @@ function ForeignClaim(props: InspectorProps) {
         onCompare={
           props.onCompare
             ? () => props.onCompare?.(ends, row.relation)
+            : undefined
+        }
+        onOpenWeb={
+          props.onOpenWeb
+            ? () => props.onOpenWeb?.([ends[0].imageId, ends[1].imageId])
             : undefined
         }
       />

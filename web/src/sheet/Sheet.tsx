@@ -1,7 +1,9 @@
 import {
+  DEFAULT_SORT,
   type GetSheetReachResponse,
   dataOf,
   fileId,
+  sortId,
   toFraction,
 } from '@digsite/shared';
 // Composition only: loads the sheet, owns its room and foreign poll, and
@@ -9,6 +11,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { ContextMenu, type MenuSection } from '../board/ContextMenu.tsx';
+import { WebView } from '../board/WebView.tsx';
 import { Compare, type CompareEnd } from '../components/Compare.tsx';
 import {
   ErrorState,
@@ -107,6 +110,8 @@ export function Sheet() {
     sections: MenuSection[];
   } | null>(null);
   const [help, setHelp] = useState(false);
+  /** The web view's starting pictures, while it is open. */
+  const [webRoots, setWebRoots] = useState<string[] | null>(null);
   /** A long action in progress, said where the person is looking. */
   const [working, setWorking] = useState<string | null>(null);
   const [comparing, setComparing] = useState<{
@@ -671,6 +676,17 @@ export function Sheet() {
           </svg>
           <span>Details</span>
         </button>
+        {webRoots && sheetInfo && (
+          <WebView
+            boardId={sheetInfo.boardId}
+            sort={sortId(DEFAULT_SORT)}
+            roots={webRoots}
+            onShowOnBoard={(imageId) =>
+              navigate(`/b/${sheetInfo.boardId}?image=${imageId}`)
+            }
+            onClose={() => setWebRoots(null)}
+          />
+        )}
         {working && (
           <output className="sheet-working" data-testid="sheet-working">
             {working}
@@ -754,6 +770,7 @@ export function Sheet() {
           sheetId,
           userId: session?.user.id ?? null,
           onExtract: (id) => void extractToPicture(id),
+          onOpenWeb: setWebRoots,
           onCompare: ([a, b], relation) => {
             const end = (e: typeof a): CompareEnd => ({
               src: api.originalUrl(e.imageId),
