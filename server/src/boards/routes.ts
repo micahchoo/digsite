@@ -1,5 +1,6 @@
 // Boards (CONTEXT.md "Board", "Image", "Tile"). See docs/design.md
 // "Routes / Boards" for the fixed route shapes.
+import type { ServerResponse } from 'node:http';
 import type {
   AliasesResponse,
   AllowlistRequest,
@@ -111,6 +112,7 @@ import { withPage } from './ladder.ts';
 import { originalKey, previewKey } from './paths.ts';
 import { isProperties } from './properties.ts';
 import {
+  type RankOrder,
   ensureRank,
   forceRebuildRank,
   imageIdsInRankBand,
@@ -330,6 +332,13 @@ function parseSortOrDefault(id: string | null): Sort {
   if (!id) return { key: 'uploaded_at', dir: 'desc' };
   const parsed = parseSortId(id);
   return parsed ?? { key: 'uploaded_at', dir: 'desc' };
+}
+
+/** Roadmap C3: every answer in ranks names the order build it used, as
+ * the token a tile URL carries (`?v=`). A client that sees a token change
+ * refetches what it holds in ranks; the tiles follow by URL. */
+function sayOrder(res: ServerResponse, order: RankOrder): void {
+  res.setHeader('X-Order-Version', orderToken(order.version));
 }
 
 export function registerBoardRoutes(router: Router) {
@@ -834,6 +843,7 @@ export function registerBoardRoutes(router: Router) {
         return json(ctx.res, 200, response);
       }
       const order = await rankOrder(boardId, sort);
+      sayOrder(ctx.res, order);
       const { rows } = await pool.query(
         'SELECT * FROM images WHERE board_id = $1 AND id = ANY($2::uuid[])',
         [boardId, wanted],
@@ -856,7 +866,9 @@ export function registerBoardRoutes(router: Router) {
       Number(ctx.url.searchParams.get('count') ?? '50'),
       500,
     );
-    const ranked = await imagesInRankOrder(boardId, sort, from, count);
+    const order = await rankOrder(boardId, sort);
+    sayOrder(ctx.res, order);
+    const ranked = await imagesInRankOrder(boardId, sort, from, count, order);
     const ids = ranked.map((r) => r.imageId);
     if (ids.length === 0) {
       const response: ListBoardImagesResponse = { images: [] };
@@ -1148,7 +1160,13 @@ export function registerBoardRoutes(router: Router) {
     const boardId = param(ctx, 'id');
     await boardForViewing(userId, boardId);
     const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
-    const response: GetSectionsResponse = await sectionsFor(boardId, sort);
+    const order = await rankOrder(boardId, sort);
+    sayOrder(ctx.res, order);
+    const response: GetSectionsResponse = await sectionsFor(
+      boardId,
+      sort,
+      order,
+    );
     json(ctx.res, 200, response);
   });
 
@@ -1328,6 +1346,15 @@ export function registerBoardRoutes(router: Router) {
     if (body.mode !== undefined && body.mode !== 'band') {
       return json(ctx.res, 400, { error: 'bad selection mode' });
     }
+    // C3: the ranks were read off a map showing build `v`. If the order
+    // has moved on, the same ranks are other images: refuse, and name the
+    // build the client should refetch.
+    const order = await rankOrder(boardId, sort);
+    sayOrder(ctx.res, order);
+    const v = (body as { v?: unknown }).v;
+    if (v !== undefined && v !== orderToken(order.version)) {
+      return json(ctx.res, 409, { error: 'the order has changed' });
+    }
     const imageIds =
       body.mode === 'band'
         ? await imageIdsInRankBand(
@@ -1336,6 +1363,7 @@ export function registerBoardRoutes(router: Router) {
             body.fromRank,
             body.toRank,
             SHEET_LIMIT,
+            order,
           )
         : await imageIdsInRankRange(
             boardId,
@@ -1343,6 +1371,7 @@ export function registerBoardRoutes(router: Router) {
             body.fromRank,
             body.toRank,
             SELECTION_CAP,
+            order,
           );
     const response: SelectionRangeResponse = { imageIds };
     json(ctx.res, 200, response);
@@ -1390,6 +1419,7 @@ export function registerBoardRoutes(router: Router) {
           error: 'label and relation must be at most 200 characters',
         });
       }
+      const order = await rankOrder(boardId, sort);
       const { ranks, imageIds, count } = await findRanks(
         boardId,
         sort,
@@ -1400,7 +1430,9 @@ export function registerBoardRoutes(router: Router) {
           ...(relation ? { relation } : {}),
           annotated: ctx.url.searchParams.get('annotated') === '1',
         },
+        order,
       );
+      sayOrder(ctx.res, order);
       const response: FindBoardResponse = { ranks, imageIds, count };
       json(ctx.res, 200, response);
     } catch (err) {

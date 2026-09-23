@@ -344,8 +344,9 @@ export async function imageIdsInRankRange(
   fromRank: number,
   toRank: number,
   cap: number,
+  given?: RankOrder,
 ): Promise<string[]> {
-  const order = await rankOrder(boardId, sort);
+  const order = given ?? (await rankOrder(boardId, sort));
   const lo = Math.max(0, Math.min(fromRank, toRank));
   const hi = Math.min(Math.max(fromRank, toRank), order.slotOfRank.length - 1);
   if (hi < lo) return [];
@@ -362,8 +363,9 @@ export async function imageIdsInRankBand(
   fromRank: number,
   toRank: number,
   cap: number,
+  given?: RankOrder,
 ): Promise<string[]> {
-  const order = await rankOrder(boardId, sort);
+  const order = given ?? (await rankOrder(boardId, sort));
   const fromCol = fromRank % COLS;
   const toCol = toRank % COLS;
   const loCol = Math.min(fromCol, toCol);
@@ -388,8 +390,9 @@ export async function imagesInRankOrder(
   sort: Sort,
   from: number,
   count: number,
+  given?: RankOrder,
 ): Promise<{ rank: number; imageId: string }[]> {
-  const order = await rankOrder(boardId, sort);
+  const order = given ?? (await rankOrder(boardId, sort));
   const start = Math.max(0, from);
   const slots = [
     ...order.slotOfRank.subarray(

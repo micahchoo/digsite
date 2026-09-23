@@ -37,8 +37,10 @@ const MEMO_ENTRIES = 256;
 export async function sectionsFor(
   boardId: string,
   sort: Sort,
+  /** The order to walk, when the caller names its build (C3). */
+  given?: RankOrder,
 ): Promise<Sections> {
-  const order = await rankOrder(boardId, sort);
+  const order = given ?? (await rankOrder(boardId, sort));
   const key = `${boardId}:${sortId(sort)}`;
   const hit = memo.get(key);
   if (hit && hit.version === order.version) return hit.result;

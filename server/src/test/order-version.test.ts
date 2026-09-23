@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-// Roadmap item 7 over HTTP: a tile answers with its order build's token,
-// and a URL that names that token is kept by the browser for good. A URL
-// naming another build is never kept; a URL naming none keeps the old
-// short cache.
+// Roadmap item 7 and C3 over HTTP. A tile answers with its order build's
+// token, and a URL that names that token is kept by the browser for good;
+// one naming another build is never kept; one naming none keeps the old
+// short cache. Every answer in ranks names the same token, and a
+// selection by ranks from a build that has moved on is refused.
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import sharp from 'sharp';
@@ -107,5 +108,41 @@ describe('tile cache policy', () => {
     expect(renamed.headers.get('cache-control')).toBe(
       'private, max-age=31536000, immutable',
     );
+  });
+
+  test('answers in ranks name the build; a selection from an old build is refused', async () => {
+    const boardId = await boardWithOneImage();
+    const tile = await request(
+      'GET',
+      `/boards/${boardId}/tiles/uploaded_at.desc/0/0/0.png`,
+    );
+    const token = tile.headers.get('x-order-version');
+    for (const path of [
+      `/boards/${boardId}/find?sort=uploaded_at.desc&q=a`,
+      `/boards/${boardId}/sections?sort=uploaded_at.desc`,
+      `/boards/${boardId}/images?sort=uploaded_at.desc&from=0&count=5`,
+    ]) {
+      const res = await request('GET', path);
+      expect([path, res.status, res.headers.get('x-order-version')]).toEqual([
+        path,
+        200,
+        token,
+      ]);
+    }
+
+    const range = `/boards/${boardId}/selection/range`;
+    const body = { sort: 'uploaded_at.desc', fromRank: 0, toRank: 0 };
+    const current = await request('POST', range, { ...body, v: token });
+    expect(current.status).toBe(200);
+    expect(
+      ((await current.json()) as { imageIds: string[] }).imageIds,
+    ).toHaveLength(1);
+
+    await markBoardRanksStale(boardId);
+    const stale = await request('POST', range, { ...body, v: token });
+    expect(stale.status).toBe(409);
+    expect(stale.headers.get('x-order-version')).not.toBe(token);
+    // Without `v` the old behaviour stands: resolved against the current build.
+    expect((await request('POST', range, body)).status).toBe(200);
   });
 });
