@@ -12,74 +12,10 @@
 import { boardChanged } from '../boards/change.ts';
 import { pool } from '../db/pool.ts';
 import { arrange } from './arrange.ts';
+import { boardVectors } from './embeddings.ts';
 import { MODEL } from './model.ts';
 
-const PAGE = 20_000;
 const WRITE_BATCH = 20_000;
-const DIMS = 512;
-
-// float16 bits -> float32, decoded once for every bit pattern.
-const HALF = (() => {
-  const table = new Float32Array(65536);
-  const view = new DataView(new ArrayBuffer(2));
-  for (let bits = 0; bits < 65536; bits++) {
-    view.setUint16(0, bits);
-    table[bits] = view.getFloat16(0);
-  }
-  return table;
-})();
-
-/** The board's embeddings, read in slot pages as pgvector's binary form:
- * a 16-bit dimension count, 16 unused bits, then big-endian float16s.
- * Written straight into one array sized by a count first; an image
- * embedded between the count and the last page waits for the next run. */
-async function loadEmbeddings(
-  boardId: string,
-): Promise<{ ids: string[]; data: Float32Array }> {
-  const { rows: counted } = await pool.query<{ n: number }>(
-    'SELECT count(*)::int AS n FROM image_embeddings WHERE board_id = $1 AND model = $2',
-    [boardId, MODEL],
-  );
-  const capacity = counted[0]?.n ?? 0;
-  const data = new Float32Array(capacity * DIMS);
-  const ids: string[] = [];
-  let after = -1;
-  while (ids.length < capacity) {
-    const { rows } = await pool.query<{
-      image_id: string;
-      slot: number;
-      bin: Buffer;
-    }>(
-      `SELECT image_id, slot, halfvec_send(embedding) AS bin
-       FROM image_embeddings
-       WHERE board_id = $1 AND model = $2 AND slot > $3
-       ORDER BY slot LIMIT $4`,
-      [boardId, MODEL, after, Math.min(PAGE, capacity - ids.length)],
-    );
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      const bin = row.bin;
-      if (bin.readUInt16BE(0) !== DIMS) {
-        throw new Error(`embedding of ${row.image_id} is not ${DIMS}-d`);
-      }
-      const o = ids.length * DIMS;
-      for (let k = 0; k < DIMS; k++) {
-        const at = 4 + k * 2;
-        data[o + k] = HALF[
-          ((bin[at] as number) << 8) | (bin[at + 1] as number)
-        ] as number;
-      }
-      ids.push(row.image_id);
-    }
-    after = rows[rows.length - 1]?.slot as number;
-    // Each page arrives as hex text and becomes Buffers, memory outside
-    // the JS heap that the collector does not see coming. Measured at a
-    // million images: 6.4 GB peak with no collection or a minor one per
-    // page, 2.4 GB with a full one, and the load no slower (4.6 s).
-    Bun.gc(true);
-  }
-  return { ids, data: data.subarray(0, ids.length * DIMS) };
-}
 
 /** Arranges one board and writes the positions; returns how many images
  * were placed. Only rows whose position changed are written, in batches
@@ -91,8 +27,8 @@ export async function arrangeBoard(
   boardId: string,
 ): Promise<{ placed: number; ms: number }> {
   const start = performance.now();
-  const { ids, data } = await loadEmbeddings(boardId);
-  const order = arrange({ data, count: ids.length, dims: DIMS });
+  const { ids, vectors } = await boardVectors(boardId);
+  const order = arrange(vectors);
   const placed = Array.from(order, (row) => ids[row] as string);
   for (let from = 0; from < placed.length; from += WRITE_BATCH) {
     await pool.query(

@@ -23,9 +23,17 @@ const MIN_SHARE = 0.1;
 const ITERATIONS = 4;
 
 /** Unit vectors, `dims` each, packed row after row. */
-export type Vectors = { data: Float32Array; count: number; dims: number };
+/** `data` is float32, or int8 scaled by 127 for a board too big for the
+ * budget (embeddings.ts): every comparison here is between vectors on one
+ * scale, so either gives the same kind of answer. */
+export type Vectors = {
+  data: Float32Array | Int8Array;
+  count: number;
+  dims: number;
+};
+type Row = Float32Array | Int8Array;
 
-function dotRow(v: Vectors, i: number, w: Float32Array): number {
+function dotRow(v: Vectors, i: number, w: Row): number {
   const { data, dims } = v;
   const o = i * dims;
   let sum = 0;
@@ -196,7 +204,7 @@ function chainLeaf(
   idx: Int32Array,
   from: number,
   to: number,
-  tail: Float32Array | null,
+  tail: Row | null,
 ): void {
   const left = Array.from(idx.subarray(from, to));
   const out: number[] = [];
@@ -238,7 +246,7 @@ export function arrange(v: Vectors): Int32Array {
   if (v.count <= 1) return idx;
   const work = workFor(v);
   // The tail is the last picture placed: the next block starts nearest it.
-  let tail: Float32Array | null = null;
+  let tail: Row | null = null;
   const row = (i: number) => v.data.subarray(i * v.dims, (i + 1) * v.dims);
   // Explicit stack of [from, to), taken last-in-first-out so ranges are
   // placed left to right.

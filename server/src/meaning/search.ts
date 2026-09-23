@@ -11,6 +11,7 @@
 import type { MeaningMatch } from '@digsite/shared/api';
 import { type Build, rankOf } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
+import { vectorOf } from './embeddings.ts';
 import { MODEL, toVectorText } from './model.ts';
 
 async function nearestText(
@@ -55,13 +56,9 @@ export async function similarTo(
   imageId: string,
   limit: number,
 ): Promise<MeaningMatch[] | null> {
-  const { rows } = await pool.query(
-    'SELECT embedding::text AS v FROM image_embeddings WHERE image_id = $1 AND model = $2',
-    [imageId, MODEL],
-  );
-  const v = rows[0]?.v as string | undefined;
-  if (!v) return null;
-  return nearestText(build, v, limit, imageId);
+  const vector = await vectorOf(imageId);
+  if (!vector) return null;
+  return nearestText(build, toVectorText(vector), limit, imageId);
 }
 
 /** Images that match words, best first. */

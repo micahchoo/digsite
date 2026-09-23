@@ -132,3 +132,20 @@ One transaction over a million rows held every image's row lock for
 is two index-only counts, about 50 ms at a million. The arrangement is
 deterministic, so at 0 the order does not move until a new picture is
 embedded.
+
+### Bounded by a budget, not by the board (2026-09-23, later)
+
+`meaning/embeddings.ts` packs a board's vectors as float32 while they fit
+`ARRANGE_BUDGET_MB` (1.5 GB, 750,000 images) and as int8 (x127) beyond
+it. Measured before choosing:
+
+| | float32 | int8 | Float16Array |
+| --- | ---: | ---: | ---: |
+| arrange 100,000 random vectors | 5.0 s | — | 71.7 s |
+| 20,001 photos: best match within two rows | 14.8% | 12.8% | — |
+| 20,001 photos: neighbour similarity | 0.9514 | 0.9513 | — |
+| 20,001 photos: arrange | 0.68 s | 1.53 s | — |
+
+At a million images the default budget takes int8: peak RSS 0.98 GB
+(was 2.5 GB), 108 s to re-arrange (was 81 s), 219 s the first time,
+when every position changed.

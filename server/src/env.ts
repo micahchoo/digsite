@@ -173,6 +173,10 @@ export const env = {
   // Where CLIP's weights are kept. DATA_DIR/models by default; a test run
   // that starts from a fresh DATA_DIR each time points this at one kept
   // folder, or downloads ~150 MB every run.
+  // meaning/embeddings.ts: a board's vectors are packed as float32 while
+  // they fit this (1.5 GB is 750,000 images), int8 beyond it, so the
+  // worker's arrangement stays bounded however large the board.
+  ARRANGE_BUDGET_MB: Number(process.env.ARRANGE_BUDGET_MB ?? 1536),
   MODELS_DIR: resolve(
     REPO_ROOT,
     process.env.MODELS_DIR ?? join(process.env.DATA_DIR ?? './data', 'models'),

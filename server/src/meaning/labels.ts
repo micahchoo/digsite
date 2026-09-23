@@ -9,7 +9,7 @@
 // a region's own embedding would suit better and is not built.
 import type { LabelSuggestion } from '@digsite/shared/api';
 import { vocabularyOf } from '../boards/vocabulary.ts';
-import { pool } from '../db/pool.ts';
+import { vectorOf } from './embeddings.ts';
 import { MODEL } from './model.ts';
 
 /** The most-used terms scored per request. A board with thousands of
@@ -42,10 +42,6 @@ async function termVector(term: string, embed: Embed): Promise<Float32Array> {
   return vector;
 }
 
-function parseVector(text: string): Float32Array {
-  return Float32Array.from(text.slice(1, -1).split(','), Number);
-}
-
 function dot(a: Float32Array, b: Float32Array): number {
   let sum = 0;
   for (let i = 0; i < a.length; i++) sum += (a[i] as number) * (b[i] as number);
@@ -61,14 +57,9 @@ export async function suggestLabels(
   limit: number,
   embed: Embed = async (text) => (await import('./clip.ts')).embedText(text),
 ): Promise<LabelSuggestion[] | null> {
-  const { rows } = await pool.query(
-    `SELECT embedding::text AS v FROM image_embeddings
-     WHERE board_id = $1 AND image_id = $2 AND model = $3`,
-    [boardId, imageId, MODEL],
-  );
-  const v = rows[0]?.v as string | undefined;
-  if (!v) return null;
-  const image = parseVector(v);
+  // The route has checked the image is on this board.
+  const image = await vectorOf(imageId);
+  if (!image) return null;
   const { labels } = await vocabularyOf(boardId);
   const scored: LabelSuggestion[] = [];
   for (const { term } of labels.slice(0, MAX_TERMS)) {
