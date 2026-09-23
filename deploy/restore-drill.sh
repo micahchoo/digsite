@@ -42,8 +42,17 @@ SCRATCH="$(mktemp -d)"
 psql_on() {
   docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -At -q -U "$POSTGRES_USER" -d "$1" "${@:2}"
 }
+SERVER_PID=""
+DRILL_BUCKET=""
+mc_run() {
+  # The image's entrypoint is `mc`; a shell has to be asked for.
+  docker run --rm --network host --entrypoint sh quay.io/minio/mc:latest \
+    -c "mc alias set s '$S3_ENDPOINT' '$S3_ACCESS_KEY' '$S3_SECRET_KEY' >/dev/null && $1"
+}
 cleanup() {
+  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null
   psql_on postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null 2>&1 || true
+  [ -n "$DRILL_BUCKET" ] && mc_run "mc rb --force s/$DRILL_BUCKET" >/dev/null 2>&1
   rm -rf -- "$SCRATCH"
 }
 trap cleanup EXIT
@@ -56,14 +65,24 @@ echo "drill: $SRC -> database $DB" >&2
 psql_on postgres -c "CREATE DATABASE $DB" >/dev/null
 DATA_DIR="$SCRATCH/data"
 if [ "$STORAGE" = "s3" ]; then
-  # restore.sh would mirror into a bucket; restore the database alone.
-  gunzip -c "$SRC/db.sql.gz" | psql_on "$DB" >/dev/null
-  FILES="$SRC/storage"
+  # Into a scratch bucket beside the live one, through restore.sh like a
+  # real restore; the bucket's key list is what the files are checked on.
+  : "${S3_ENDPOINT:?S3_ENDPOINT required when STORAGE=s3}"
+  : "${S3_ACCESS_KEY:?S3_ACCESS_KEY required when STORAGE=s3}"
+  : "${S3_SECRET_KEY:?S3_SECRET_KEY required when STORAGE=s3}"
+  DRILL_BUCKET="${DB//_/-}" # a bucket name takes no underscore
+  PG_CONTAINER="$PG_CONTAINER" POSTGRES_USER="$POSTGRES_USER" \
+    POSTGRES_DB="$DB" STORAGE=s3 S3_BUCKET="$DRILL_BUCKET" \
+    "$HERE/restore.sh" "$SRC" >/dev/null
+  KEYS="$SCRATCH/keys"
+  mc_run "mc ls --recursive s/$DRILL_BUCKET" | awk '{print $NF}' > "$KEYS"
+  has() { grep -qxF "$1" "$KEYS"; }
 else
   PG_CONTAINER="$PG_CONTAINER" POSTGRES_USER="$POSTGRES_USER" \
     POSTGRES_DB="$DB" STORAGE=fs DATA_DIR="$DATA_DIR" \
     "$HERE/restore.sh" "$SRC" >/dev/null
   FILES="$DATA_DIR"
+  has() { [ -f "$FILES/$1" ]; }
 fi
 
 # 1. Rows: the dump's COPY blocks against the restored tables.
@@ -86,7 +105,7 @@ checked=0
 while IFS='|' read -r board sha slot; do
   checked=$((checked + 1))
   for key in "boards/$board/originals/$sha" "boards/$board/ladder/128/page-$((slot / 16)).png"; do
-    [ -f "$FILES/$key" ] || {
+    has "$key" || {
       echo "drill: missing $key" >&2
       missing=$((missing + 1))
     }
@@ -95,4 +114,28 @@ done < <(psql_on "$DB" -c "SELECT board_id, sha256, slot FROM images
   WHERE status = 'ready' AND NOT missing ORDER BY random() LIMIT $DRILL_SAMPLE")
 [ "$missing" -eq 0 ] || fail "$missing of $((checked * 2)) sampled files are not in the backup"
 
-echo "drill passed ($SRC): $tables tables match the dump; $checked of $images images sampled, every original and ladder page present"
+# 3. The server itself, optionally: DRILL_SERVER_CMD starts it (the
+# command of this deploy, e.g. `bun run server/src/index.ts`) against the
+# restored copy with WORKER=off, and it must answer /readyz, which runs the
+# migrations' check and a query. It proves the restored schema is one this
+# release can serve.
+served=""
+if [ -n "${DRILL_SERVER_CMD:-}" ]; then
+  PORT="${DRILL_PORT:-8899}"
+  (
+    export DATABASE_URL="postgres://$POSTGRES_USER:${POSTGRES_PASSWORD:-digsite}@127.0.0.1:${PG_HOST_PORT:-5440}/$DB"
+    export PORT WORKER=off STORAGE DATA_DIR
+    [ "$STORAGE" = "s3" ] && export S3_BUCKET="$DRILL_BUCKET"
+    exec $DRILL_SERVER_CMD
+  ) >"$SCRATCH/server.log" 2>&1 &
+  SERVER_PID=$!
+  for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$PORT/readyz" >/dev/null && break
+    sleep 0.5
+  done
+  curl -sf "http://127.0.0.1:$PORT/readyz" >/dev/null ||
+    fail "the server did not come up on the restored copy (log: $(tail -3 "$SCRATCH/server.log" | tr '\n' ' '))"
+  served="; the server answers on it"
+fi
+
+echo "drill passed ($SRC): $tables tables match the dump; $checked of $images images sampled, every original and ladder page present$served"

@@ -37,10 +37,10 @@ if [ "$STORAGE" = "s3" ]; then
   : "${S3_ACCESS_KEY:?S3_ACCESS_KEY required when STORAGE=s3}"
   : "${S3_SECRET_KEY:?S3_SECRET_KEY required when STORAGE=s3}"
   echo "restore: $SRC/storage/ -> s3 bucket $S3_BUCKET" >&2
-  docker run --rm --network host \
+  docker run --rm --network host --entrypoint sh \
     -v "$SRC/storage:/backup" \
     quay.io/minio/mc:latest \
-    sh -c "mc alias set dst '$S3_ENDPOINT' '$S3_ACCESS_KEY' '$S3_SECRET_KEY' && mc mb --ignore-existing dst/$S3_BUCKET && mc mirror --quiet /backup dst/$S3_BUCKET"
+    -c "mc alias set dst '$S3_ENDPOINT' '$S3_ACCESS_KEY' '$S3_SECRET_KEY' && mc mb --ignore-existing dst/$S3_BUCKET && mc mirror --quiet /backup dst/$S3_BUCKET"
 else
   [ -f "$SRC/storage.tar.gz" ] || {
     echo "restore: $SRC/storage.tar.gz not found" >&2

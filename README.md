@@ -109,6 +109,11 @@ that every table holds the rows the dump carried, and checks that a
 sample of originals and ladder pages exists. Then it drops the scratch
 copy. It exits non-zero on a failure, so cron mails the reason.
 
+With `STORAGE=s3` (and the `S3_*` variables), the drill restores into a
+scratch bucket beside the live one and removes it afterwards. With
+`DRILL_SERVER_CMD` set to how this deploy starts its server, it also
+starts the server on the restored copy and requires `/readyz` to answer.
+
 ## Upgrading
 
 ```

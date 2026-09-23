@@ -42,10 +42,14 @@ if [ "$STORAGE" = "s3" ]; then
   # (127.0.0.1:9100 in dev, an internal or external URL in production) —
   # reusing that value here, rather than a container network trick, keeps
   # backup.sh needing to know nothing about how minio/the bucket is wired.
-  docker run --rm --network host \
+  # As the calling user, not root: files root owns in the backup could
+  # not be pruned below, nor read by a restore run as anyone else. The
+  # image's entrypoint is `mc`; a shell has to be asked for.
+  docker run --rm --network host --entrypoint sh \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$DEST/storage:/backup" \
     quay.io/minio/mc:latest \
-    sh -c "mc alias set src '$S3_ENDPOINT' '$S3_ACCESS_KEY' '$S3_SECRET_KEY' && mc mirror --quiet src/$S3_BUCKET /backup"
+    -c "mc alias set src '$S3_ENDPOINT' '$S3_ACCESS_KEY' '$S3_SECRET_KEY' && mc mirror --quiet src/$S3_BUCKET /backup"
 else
   : "${DATA_DIR:?DATA_DIR required when STORAGE=fs}"
   echo "backup: storage (fs $DATA_DIR) -> $DEST/storage.tar.gz" >&2
