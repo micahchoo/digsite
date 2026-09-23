@@ -88,6 +88,17 @@ export function Compare({ a, b, title, onClose }: Props) {
   const sideB: Side | null = natural.b
     ? { width: natural.b[0], height: natural.b[1], focus: b.focus }
     : null;
+  // Two pictures whose proportions differ by more than 2% cannot be laid
+  // one on the other point for point; the overlay then says so.
+  const shapesDiffer =
+    !!sideA &&
+    !!sideB &&
+    Math.abs(
+      (sideA.width * a.focus.fw) /
+        (sideA.height * a.focus.fh) /
+        ((sideB.width * b.focus.fw) / (sideB.height * b.focus.fh)) -
+        1,
+    ) > 0.02;
   // Stacked modes draw both in pane A's frame.
   const stacked = mode !== 'side';
 
@@ -248,6 +259,12 @@ export function Compare({ a, b, title, onClose }: Props) {
               Difference
             </label>
           </div>
+        )}
+        {mode === 'overlay' && shapesDiffer && (
+          <output className="compare-warning" data-testid="compare-shapes">
+            Different shapes: the overlay lines up their frames, not what is in
+            them.
+          </output>
         )}
         <output className="compare-zoom" data-testid="compare-zoom">
           {Math.round(view.zoom * 100)}%
