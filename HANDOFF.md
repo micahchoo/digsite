@@ -6,7 +6,7 @@ Nothing was deployed. The isolated functional preview uses ports 5292/8892.
 
 ## Interface and "making sense" in progress (2026-09-23)
 
-A second session, working beside the server-roadmap one. Not committed.
+A second session, working beside the server-roadmap one. Committed on main as it goes.
 The user narrowed the product: sense-making comes from annotation and
 connection; everything else is secondary. GeoCities is dropped.
 
