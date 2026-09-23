@@ -97,9 +97,8 @@ describe('find and typed property sorts', () => {
     expect(byDate.imageIds.slice(0, 2)).toEqual([alphaId, gammaId]);
     expect(byDate.imageIds).toHaveLength(3);
 
-    // A preinstalled extension must still get its index. Concurrent first
-    // searches must agree on substring matching, including an interior term.
-    await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+    // Concurrent searches agree on substring matching, including an interior
+    // term, and a trigram index serves it (0022_image_search_text.sql).
     const searches = await Promise.all(
       Array.from({ length: 10 }, () =>
         findRanks(boardId, requireSort('p.date.day.asc'), 'lph', []),
@@ -110,7 +109,7 @@ describe('find and typed property sorts', () => {
       expect(result.count).toBe(1);
     }
     const { rows: indexes } = await pool.query(
-      "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_images_name_trgm'",
+      "SELECT 1 FROM pg_indexes WHERE indexname = 'images_search_text_trgm'",
     );
     expect(indexes).toHaveLength(1);
 

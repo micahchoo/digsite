@@ -39,7 +39,8 @@ const MEMBER_EMAIL = 'member@example.test';
 // account predates that change and `bun run seed` never rewrites an
 // existing user's password, so it is still 'password1', not seed.ts's
 // current default for a NEW user.
-const MEMBER_PASSWORD = 'password1';
+// A database seeded by src/seed.ts today uses password1234: overridable.
+const MEMBER_PASSWORD = process.env.MEASURE_PASSWORD ?? 'password1';
 
 const SORTS = ['uploaded_at.desc', 'name.asc', 'p.number.year.asc'] as const;
 const TILE_SORT = 'uploaded_at.desc'; // the sort tiles/materialise/coarse measure

@@ -22,44 +22,11 @@ export type ClaimFilter = {
 
 const RANKS_CAP = 10_000;
 
-let trgmCheck: Promise<boolean> | undefined;
-
-/** Checked once per process. `pg_trgm` lets ILIKE '%term%' use a GIN index;
- * without it, the same ILIKE still works, just as a sequential scan — this
- * only decides whether we ALSO anchor the pattern to a prefix (`term%`,
- * which a plain btree can help with) when trigram support is absent, per
- * this task's own spec ("ILIKE with a trigram index if available, else
- * prefix"). Best-effort: `CREATE EXTENSION` needs a privilege the app's own
- * role may not have, so a failure here just means "not available" rather
- * than a request failing. */
-async function trgmAvailableCached(): Promise<boolean> {
-  // Cache the promise, not a flag set before the asynchronous probe. Find
-  // requests arriving together must use the same substring-vs-prefix rule.
-  trgmCheck ??= (async () => {
-    try {
-      const { rows } = await pool.query(
-        `SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'`,
-      );
-      if (rows.length === 0) {
-        await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
-      }
-    } catch {
-      return false;
-    }
-
-    // The extension may have been installed by a migration or another
-    // process. Ensure the index in either case; index creation is only an
-    // optimization and must not change substring-search semantics.
-    try {
-      await pool.query(
-        'CREATE INDEX IF NOT EXISTS idx_images_name_trgm ON images USING gin (name gin_trgm_ops)',
-      );
-    } catch {
-      // Keep substring matching even when this role cannot build the index.
-    }
-    return true;
-  })();
-  return trgmCheck;
+/** A find term as a LIKE pattern that matches it literally, anywhere:
+ * `%`, `_` and the escape character itself would otherwise be wildcards,
+ * so a search for "_" matched every image. */
+export function containsPattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
 export type FindResult = { ranks: number[]; imageIds: string[]; count: number };
@@ -78,15 +45,11 @@ export async function findRanks(
 
   const trimmedQ = (q ?? '').trim();
   if (trimmedQ) {
-    const useSubstring = await trgmAvailableCached();
-    const pattern = useSubstring ? `%${trimmedQ}%` : `${trimmedQ}%`;
-    params.push(pattern);
-    const qParam = params.length;
-    conditions.push(
-      `(i.name ILIKE $${qParam} OR EXISTS (
-        SELECT 1 FROM jsonb_each_text(i.properties) kv WHERE kv.value ILIKE $${qParam}
-      ))`,
-    );
+    // search_text is the name and every property value, separated so a
+    // term never matches across two (0022_image_search_text.sql); its
+    // trigram index serves the substring match.
+    params.push(containsPattern(trimmedQ));
+    conditions.push(`i.search_text ILIKE $${params.length}`);
   }
 
   if (filter.length > 0) {
