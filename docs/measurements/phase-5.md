@@ -606,3 +606,44 @@ exactly N rows, confirmed at N=5,000 (`ranks.test.ts`).
   (confirmed under both Bun and Node) was named, not filed upstream or
   worked around by a version bump — pooling below is the mitigation; a
   library fix or upgrade would let it be removed rather than extended.
+
+### Follow-up: decoded-image draws retained native memory on page reuse
+
+The OOM after the September 22 restart remains unattributed: its triggering
+request was not logged, and this probe does not reproduce that service
+crash. It did expose a separate growth path in the same native canvas
+library. Repeated `Image` decode + `drawImage` into a reused destination
+retained native RSS after forced GC; drawing from one existing Canvas or one
+static Image did not show that growth in the same probe.
+
+`server/scripts/repro-ladder-page-churn.ts` drives the real `getPage()` path
+against temporary PNGs and a local filesystem adapter, with no database or
+demo files. With `LADDER_BUDGET_MB=0`, it fixes the page LRU at one and
+recycles two page canvases while loading 250 distinct pages. Run it under a
+2 GiB `RLIMIT_DATA` cap:
+
+```sh
+prlimit --data=2147483648 -- env LADDER_BUDGET_MB=0 bun run scripts/repro-ladder-page-churn.ts 250
+```
+
+Run this command from `server/`. For 250 or more loads, the harness fails
+if final RSS growth exceeds 128 MB. It also checks pixels and the resident-page count.
+
+Before resetting the destination dimensions on each page load, the same
+command grew RSS from 105 MB to 359 MB; every sampled page pixel was
+correct. After the reset, a repeat stayed between 104 MB and 127 MB and
+ended at 124 MB, with all pixel checks passing and one page resident. The
+harness also exercises `materialise.ts`'s reused `Image`/page-canvas
+pattern. With the dimension reset, 250 decodes/draws changed RSS by 4 MB;
+with `no-reset`, the same loop grew RSS by 233 MB. Its pixel checks passed
+in both runs. The second loop isolates the native draw pattern.
+It does not call `materialiseSort`; the materialisation tests cover that function.
+
+An independent repeat after the fix used 103 MB initially and 128 MB at completion.
+The ladder growth was 25 MB, and all pixel and residency checks passed.
+
+The reset is now applied before a recycled ladder canvas is painted and
+before each materialised page is drawn. This bounds the reproduced native
+growth under page churn. It does not establish that this path caused the
+September 22 service kill; the precise tile or board request remains
+unknown.

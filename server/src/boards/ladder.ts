@@ -368,6 +368,14 @@ async function loadPageCanvas(
 ): Promise<Canvas> {
   const key = ladderPageKey(boardId, s, page);
   const canvas = acquirePageCanvas();
+  // In @napi-rs/canvas 0.1.100, repeated decoded-Image draws into a reused
+  // destination canvas retain native memory; resetting its dimensions
+  // before a new PNG keeps RSS flat in the page-churn reproduction.
+  // clearRect/fillRect alone did not. Without this, a cold pan that churns
+  // past the ladder LRU grows RSS even though every Canvas is recycled. See
+  // scripts/repro-ladder-page-churn.ts for the bounded real-cache repro.
+  canvas.width = PAGE;
+  canvas.height = PAGE;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#222';
   ctx.fillRect(0, 0, PAGE, PAGE);

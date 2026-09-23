@@ -269,10 +269,16 @@ async function scatterSize(
   budget.reserve(pageBytes, `decoded page (size ${s})`);
   try {
     const pageCanvas = createCanvas(PAGE, PAGE);
-    const pageCtx = pageCanvas.getContext('2d');
     const img = new Image();
 
     for (let page = 0; page <= maxPage; page++) {
+      // In @napi-rs/canvas 0.1.100, repeated decoded-Image draws into a
+      // reused destination canvas retain native memory. Reset the reusable
+      // surface between pages; fillRect in paintPageDirect resets pixels
+      // but did not keep RSS flat in the page-churn reproduction.
+      pageCanvas.width = PAGE;
+      pageCanvas.height = PAGE;
+      const pageCtx = pageCanvas.getContext('2d');
       await paintPageDirect(boardId, s, page, pageCtx, img);
       const base = page * capacity;
       const limit = Math.min(capacity, count - base);
