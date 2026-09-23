@@ -104,6 +104,12 @@ the user asked to commit as I go, 2026-09-23). Also done since then:
   dark mode and 390 px across the new surfaces, the tray, the side
   drawer, the keyboard panel and the sheet menu; CI uses a pgvector
   database. The sheet toolbar draws from the one `Icon` set.
+- Roadmap item 7 and C3, client (`edc9594`): `lib/order-version.ts` notes
+  each response's `X-Order-Version` per (board, sort). Tile URLs carry
+  `?v=`, and a new token clears the tiles and refetches what ranks answered.
+  `selection/range` sends `v`; a 409 selects nothing and says why. Walk
+  claim 15 counts tile requests over the network in a fresh browser: a
+  reload makes none, and a property edit brings them back once.
 
 Found and fixed on the way:
 - `smoke-sheet-surroundings.ts` hung forever on a failure (the five codex
