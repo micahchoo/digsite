@@ -16,8 +16,12 @@ import { NODE, type Placed, ringLayout } from './web-layout.ts';
 interface Props {
   boardId: string;
   sort: string;
-  /** The starting pictures: one, or a connection's two ends. */
+  /** The starting pictures: one, or a connection's two ends, or every
+   * picture a relation joins. */
   roots: string[];
+  /** Only claims of this relation (and its aliases), one step from each
+   * root: the web of one relation. */
+  relation?: string;
   onShowOnBoard: (imageId: string, rank: number) => void;
   onClose: () => void;
 }
@@ -56,13 +60,15 @@ export function WebView({
   boardId,
   sort,
   roots: startRoots,
+  relation: startRelation,
   onShowOnBoard,
   onClose,
 }: Props) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [roots, setRoots] = useState(startRoots);
-  const [hops, setHops] = useState(2);
+  const [relation, setRelation] = useState(startRelation);
+  const [hops, setHops] = useState(startRelation ? 1 : 2);
   const [graph, setGraph] = useState<GetNeighbourhoodResponse | null>(null);
   const [images, setImages] = useState<Map<string, BoardImageWithRank>>(
     new Map(),
@@ -85,7 +91,9 @@ export function WebView({
     void (async () => {
       try {
         const parts = await Promise.all(
-          rootKey.split(',').map((r) => api.getNeighbourhood(boardId, r, hops)),
+          rootKey
+            .split(',')
+            .map((r) => api.getNeighbourhood(boardId, r, hops, relation)),
         );
         const seen = new Set<string>();
         const edges: EdgeRow[] = [];
@@ -121,18 +129,31 @@ export function WebView({
     return () => {
       cancelled = true;
     };
-  }, [boardId, sort, rootKey, hops]);
+  }, [boardId, sort, rootKey, hops, relation]);
 
+  // The web of one relation is laid out around its busiest picture: every
+  // picture as a start would put them all on one crowded ring.
+  const layoutRoots = useMemo(() => {
+    if (!relation || !graph) return rootKey.split(',');
+    const degree = new Map<string, number>();
+    for (const e of graph.edges)
+      for (const id of [e.source.imageId, e.target.imageId])
+        degree.set(id, (degree.get(id) ?? 0) + 1);
+    const hub = [...degree].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    )[0]?.[0];
+    return hub ? [hub] : rootKey.split(',');
+  }, [relation, graph, rootKey]);
   const placed = useMemo(
     () =>
       graph
         ? ringLayout(
-            rootKey.split(','),
+            layoutRoots,
             graph.images.map((i) => i.id),
             graph.edges,
           )
         : [],
-    [graph, rootKey],
+    [graph, layoutRoots],
   );
   const at = useMemo(() => new Map(placed.map((p) => [p.id, p])), [placed]);
 
@@ -180,6 +201,8 @@ export function WebView({
   }, [graph]);
 
   function walkFrom(id: string) {
+    // Walking asks what else is around this picture, of any relation.
+    setRelation(undefined);
     setRoots([id]);
     setSelected(id);
     setEmphasis(null);
@@ -207,8 +230,9 @@ export function WebView({
     >
       <header className="web-view-head">
         <h2>
-          The web around{' '}
-          {roots.map((r) => images.get(r)?.name ?? 'a picture').join(' and ')}
+          {relation
+            ? `Every picture "${relation}" joins`
+            : `The web around ${roots.map((r) => images.get(r)?.name ?? 'a picture').join(' and ')}`}
         </h2>
         <div className="segmented" role="radiogroup" aria-label="Steps out">
           {[1, 2, 3].map((n) => (
@@ -361,7 +385,7 @@ export function WebView({
             })}
             {placed.map((p: Placed) => {
               const img = images.get(p.id);
-              const isRoot = roots.includes(p.id);
+              const isRoot = layoutRoots.includes(p.id);
               return (
                 <g
                   key={p.id}

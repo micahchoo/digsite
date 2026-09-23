@@ -1149,6 +1149,39 @@ async function main(): Promise<void> {
       '9b. the web around both opens as rings of pictures and lines; walking from picture 10 puts it in the middle',
     );
 
+    // -- 9c. The web of one relation, from the board's Terms ------------------
+    await m
+      .getByTestId('board-terms')
+      .getByRole('radio', { name: 'Relations' })
+      .check();
+    await m.getByTestId('board-term-web-same place').click();
+    const relationWeb = m.getByTestId('web-view');
+    await relationWeb.waitFor({ timeout: 10_000 });
+    await m.waitForFunction(
+      () =>
+        document.querySelectorAll('[data-testid="web-view-node"]').length >= 4,
+      undefined,
+      { timeout: 20_000 },
+    );
+    const webTitle = await relationWeb.locator('h2').innerText();
+    const relationsDrawn = await m
+      .locator(
+        '[data-testid="web-view-relations"] label, .web-view-relations label',
+      )
+      .allInnerTexts();
+    assert(
+      webTitle.includes('same place') &&
+        relationsDrawn.some((r) => r.startsWith('same place')) &&
+        !relationsDrawn.some((r) => r.startsWith('resembles')),
+      `the web of "same place" reads "${webTitle}" with ${JSON.stringify(relationsDrawn)}`,
+    );
+    await m.screenshot({ path: `${SHOTS}9c-relation-web.png` });
+    await m.keyboard.press('Escape');
+    await relationWeb.waitFor({ state: 'detached', timeout: 3000 });
+    pass(
+      '9c. a relation in Terms opens the web of every picture it joins, and only that relation',
+    );
+
     // -- 7. Zoom in on the board far enough to study a picture ------------------
     await m.evaluate(() =>
       (

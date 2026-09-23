@@ -14,11 +14,13 @@ interface Props {
   vocab: VocabularyApi;
   active: { kind: TermKind; term: string } | null;
   onPick: (claim: { kind: TermKind; term: string } | null) => void;
+  /** Opens the web of every picture a relation joins. */
+  onOpenWeb?: (relation: string) => void;
 }
 
 const SHOWN = 10;
 
-export function Terms({ vocab, active, onPick }: Props) {
+export function Terms({ vocab, active, onPick, onOpenWeb }: Props) {
   const [kind, setKind] = useState<TermKind>('label');
   const [all, setAll] = useState(false);
   const [merging, setMerging] = useState<string | null>(null);
@@ -78,6 +80,11 @@ export function Terms({ vocab, active, onPick }: Props) {
               key={t.term}
               term={t}
               kind={kind}
+              onOpenWeb={
+                kind === 'relation' && onOpenWeb
+                  ? () => onOpenWeb(t.term)
+                  : undefined
+              }
               active={active?.kind === kind && active.term === t.term}
               merging={merging === t.term}
               into={into}
@@ -127,6 +134,7 @@ function TermRow({
   onInto,
   onMerge,
   onSeparate,
+  onOpenWeb,
 }: {
   term: VocabularyTerm;
   kind: TermKind;
@@ -139,6 +147,7 @@ function TermRow({
   onInto: (v: string) => void;
   onMerge: (canonical: string) => void;
   onSeparate: (alias: string) => void;
+  onOpenWeb?: () => void;
 }) {
   return (
     <li className="board-term" data-active={active}>
@@ -154,6 +163,18 @@ function TermRow({
           <span className="board-term-name">{term.term}</span>
           <span className="board-term-count">{term.count}</span>
         </button>
+        {onOpenWeb && (
+          <button
+            type="button"
+            className="board-icon-button board-icon-button--small"
+            data-testid={`board-term-web-${term.term}`}
+            aria-label={`See every picture "${term.term}" joins, as a web`}
+            title="See as a web"
+            onClick={onOpenWeb}
+          >
+            <Icon name="connect" size={14} />
+          </button>
+        )}
         <button
           type="button"
           className="board-icon-button board-icon-button--small board-term-merge"

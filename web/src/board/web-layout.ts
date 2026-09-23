@@ -49,8 +49,96 @@ export function hopsFrom(
   return hops;
 }
 
-/** Positions around (0, 0). */
+/** Positions for the whole web. The part that holds the starting
+ * pictures sits at (0, 0); every part not joined to it sits to its right,
+ * each laid out around its own busiest picture, so no line crosses from
+ * one unconnected part to another (the web of one relation joins several
+ * separate pairs; on one set of rings, their lines crossed the middle). */
 export function ringLayout(
+  roots: readonly string[],
+  ids: readonly string[],
+  edges: readonly EdgeRow[],
+): Placed[] {
+  const parts = components(ids, edges);
+  const rooted = new Set(roots);
+  // The starting pictures' part first, then the rest by size.
+  parts.sort(
+    (a, b) =>
+      Number(b.some((id) => rooted.has(id))) -
+        Number(a.some((id) => rooted.has(id))) ||
+      b.length - a.length ||
+      (a[0] ?? '').localeCompare(b[0] ?? ''),
+  );
+  const out: Placed[] = [];
+  let right = Number.NEGATIVE_INFINITY;
+  for (const part of parts) {
+    const inPart = new Set(part);
+    const partEdges = edges.filter(
+      (e) => inPart.has(e.source.imageId) && inPart.has(e.target.imageId),
+    );
+    const partRoots = part.filter((id) => rooted.has(id));
+    const placed = ringsOf(
+      partRoots.length ? partRoots : [busiest(part, partEdges)],
+      part,
+      partEdges,
+    );
+    const minX = Math.min(...placed.map((p) => p.x));
+    const maxX = Math.max(...placed.map((p) => p.x));
+    const shift = Number.isFinite(right) ? right + NODE * 2 - minX : 0;
+    for (const p of placed) out.push({ ...p, x: p.x + shift });
+    right = maxX + shift;
+  }
+  return out;
+}
+
+/** The parts of the web no edge joins to each other. */
+function components(
+  ids: readonly string[],
+  edges: readonly EdgeRow[],
+): string[][] {
+  const known = new Set(ids);
+  const around = new Map<string, string[]>();
+  for (const e of edges) {
+    const a = e.source.imageId;
+    const b = e.target.imageId;
+    if (!known.has(a) || !known.has(b)) continue;
+    around.set(a, [...(around.get(a) ?? []), b]);
+    around.set(b, [...(around.get(b) ?? []), a]);
+  }
+  const seen = new Set<string>();
+  const parts: string[][] = [];
+  for (const id of [...ids].sort()) {
+    if (seen.has(id)) continue;
+    const part: string[] = [];
+    const stack = [id];
+    seen.add(id);
+    while (stack.length) {
+      const at = stack.pop() as string;
+      part.push(at);
+      for (const n of around.get(at) ?? [])
+        if (!seen.has(n)) {
+          seen.add(n);
+          stack.push(n);
+        }
+    }
+    parts.push(part.sort());
+  }
+  return parts;
+}
+
+/** The picture with the most edges; ties by id, so the layout is stable. */
+function busiest(ids: readonly string[], edges: readonly EdgeRow[]): string {
+  const degree = new Map<string, number>();
+  for (const e of edges)
+    for (const id of [e.source.imageId, e.target.imageId])
+      degree.set(id, (degree.get(id) ?? 0) + 1);
+  return [...ids].sort(
+    (a, b) => (degree.get(b) ?? 0) - (degree.get(a) ?? 0) || a.localeCompare(b),
+  )[0] as string;
+}
+
+/** One connected part, on rings around its roots, centred on (0, 0). */
+function ringsOf(
   roots: readonly string[],
   ids: readonly string[],
   edges: readonly EdgeRow[],

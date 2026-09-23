@@ -239,6 +239,10 @@ function fitInitialViewState(
 /** Per-sort cache of rank -> image (or null for an empty/failed lookup),
  * shared between hover and rank-resolving selection ops so a rank fetched
  * once is never re-fetched. */
+/** The web of one relation starts from at most this many pictures: one
+ * neighbourhood request each. */
+const WEB_STARTS = 40;
+
 /** A search by meaning asks for this many at a time. */
 const MEANING_PAGE = 24;
 /** And shows this many of them as pictures in the Find panel. */
@@ -310,8 +314,10 @@ export function Board() {
     [{ id: string; name: string }, { id: string; name: string }] | null
   >(null);
   const [pathImages, setPathImages] = useState<BoardImageWithRank[]>([]);
-  /** The web view's starting pictures, while it is open. */
+  /** The web view's starting pictures, while it is open, and the relation
+   * it shows when it is the web of one relation. */
   const [webRoots, setWebRoots] = useState<string[] | null>(null);
+  const [webRelation, setWebRelation] = useState<string | undefined>();
   const [fileDragActive, setFileDragActive] = useState(false);
   const [, forceRender] = useState(0);
 
@@ -2094,6 +2100,17 @@ export function Board() {
             setFindClaim(claim);
             if (claim) setFindOpen(true);
           }}
+          onOpenWeb={async (relation) => {
+            // Every picture the relation joins (find, alias-aware), then
+            // one step of that relation from each: at most WEB_STARTS.
+            const found = await api
+              .findBoard(boardId, currentSortId, '', [], { relation })
+              .catch(() => null);
+            const ids = found?.imageIds.slice(0, WEB_STARTS) ?? [];
+            if (!ids.length) return;
+            setWebRelation(relation);
+            setWebRoots(ids);
+          }}
         />
 
         <section className="board-panel-section">
@@ -2780,8 +2797,12 @@ export function Board() {
           boardId={boardId}
           sort={currentSortId}
           roots={webRoots}
+          relation={webRelation}
           onShowOnBoard={showOnMap}
-          onClose={() => setWebRoots(null)}
+          onClose={() => {
+            setWebRoots(null);
+            setWebRelation(undefined);
+          }}
         />
       )}
       {comparing && (
