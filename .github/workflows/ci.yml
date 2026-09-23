@@ -17,9 +17,13 @@ jobs:
     # here is CI-only. Published to 127.0.0.1:5440, matching .env.example's
     # DATABASE_URL, so every workspace's own default connection string works
     # unmodified.
+    # pgvector: migration 0020 creates the extension (image embeddings). The
+    # local digsite-db builds it on Alpine to keep an existing data
+    # directory's collation (db/Dockerfile); a throwaway CI database has no
+    # data to keep, so the official image is fine here.
     services:
       db:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: digsite
           POSTGRES_PASSWORD: digsite
@@ -70,6 +74,9 @@ jobs:
       # touches `digsite` itself.
       - name: e2e (native sheet canvas)
         run: bun run e2e:fresh
+        env:
+          # The claims walk imports a folder from the server (claim 8).
+          IMPORT_ROOTS: ${{ runner.temp }}/digsite-imports
 
       # The web/scripts/smoke*.ts definition-of-done scripts, each against
       # its own fresh stub (web/stub/server.ts) — no database involved.
