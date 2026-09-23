@@ -25,7 +25,12 @@
 // (`pointerIntent` -> 'edge-source'); a preview line follows the pointer to
 // the next press, which completes it (-> 'edge-target') through
 // `tools.connect`. Escape cancels the pending source.
-import type { VocabularyTerm } from '@digsite/shared';
+import {
+  type Fraction,
+  type VocabularyTerm,
+  dataOf,
+  toFraction,
+} from '@digsite/shared';
 import { useEffect, useRef, useState } from 'react';
 import { TermInput } from '../components/TermInput.tsx';
 import type { WheelInput } from './canvas/types.ts';
@@ -65,7 +70,8 @@ interface Props {
   labelTerms: readonly VocabularyTerm[];
   /** Labels the board already uses that fit this picture, best first
    * (CONTEXT.md "Label suggestion"); [] when there are none or it is off. */
-  suggestLabels?: (imageId: string) => Promise<string[]>;
+  /** Label terms for the region just drawn, read from the region itself. */
+  suggestLabels?: (imageId: string, region: Fraction) => Promise<string[]>;
   onPan: (dx: number, dy: number) => void;
   onWheel: (input: WheelInput, point: Point) => void;
 }
@@ -312,7 +318,14 @@ export function DrawLayer({
     // and a late answer for an earlier region is dropped.
     setSuggested([]);
     labelIdRef.current = id;
-    void suggestLabels?.(drag.imageId).then((terms) => {
+    const picture = tools.getElements().find((el) => {
+      const data = dataOf(el);
+      return data?.kind === 'image' && data.imageId === drag.imageId;
+    });
+    const region = picture
+      ? toFraction(created, picture)
+      : { fx: 0, fy: 0, fw: 1, fh: 1 };
+    void suggestLabels?.(drag.imageId, region).then((terms) => {
       if (labelIdRef.current === id) setSuggested(terms);
     });
   }

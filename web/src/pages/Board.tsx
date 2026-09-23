@@ -236,10 +236,6 @@ function fitInitialViewState(
   };
 }
 
-/** The web of one relation starts from at most this many pictures: one
- * neighbourhood request each. */
-const WEB_STARTS = 40;
-
 /** The server's cap on one download, and how many ids go in its URL
  * before the stored selection stands in for them. */
 const DOWNLOAD_MAX = 500;
@@ -1946,16 +1942,11 @@ export function Board() {
             finder.dispatch({ type: 'claim', claim });
             if (claim) setFindOpen(true);
           }}
-          onOpenWeb={async (relation) => {
-            // Every picture the relation joins (find, alias-aware), then
-            // one step of that relation from each: at most WEB_STARTS.
-            const found = await api
-              .findBoard(boardId, currentSortId, '', [], { relation })
-              .catch(() => null);
-            const ids = found?.imageIds.slice(0, WEB_STARTS) ?? [];
-            if (!ids.length) return;
+          onOpenWeb={(relation) => {
+            // The whole web of the relation, across every sheet (WebView
+            // asks relation-web when it has no starting picture).
             setWebRelation(relation);
-            setWebRoots(ids);
+            setWebRoots([]);
           }}
         />
 

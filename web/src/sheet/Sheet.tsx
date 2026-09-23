@@ -706,9 +706,9 @@ export function Sheet() {
           onDrawn={rerender}
           onEdgeDrawn={(edgeId, at) => setNaming({ edgeId, at })}
           labelTerms={labelTerms}
-          suggestLabels={(imageId) =>
+          suggestLabels={(imageId, region) =>
             api
-              .labelSuggestions(sheetInfo.boardId, imageId)
+              .labelSuggestions(sheetInfo.boardId, imageId, region)
               .then(({ suggestions }) => suggestions.map((x) => x.term))
               .catch(() => [])
           }

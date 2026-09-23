@@ -16,11 +16,11 @@ import { NODE, type Placed, ringLayout } from './web-layout.ts';
 interface Props {
   boardId: string;
   sort: string;
-  /** The starting pictures: one, or a connection's two ends, or every
-   * picture a relation joins. */
+  /** The starting pictures: one, or a connection's two ends. None, with a
+   * relation, is the web of that relation across the whole board. */
   roots: string[];
-  /** Only claims of this relation (and its aliases), one step from each
-   * root: the web of one relation. */
+  /** Only claims of this relation (and its aliases): one step from each
+   * root, or everywhere when there is no root. */
   relation?: string;
   onShowOnBoard: (imageId: string, rank: number) => void;
   onClose: () => void;
@@ -90,11 +90,17 @@ export function WebView({
     setError('');
     void (async () => {
       try {
-        const parts = await Promise.all(
-          rootKey
-            .split(',')
-            .map((r) => api.getNeighbourhood(boardId, r, hops, relation)),
-        );
+        // No starting pictures: the web of one relation, whole, in one
+        // answer. Otherwise each start's neighbourhood, of `relation` if set.
+        const parts = rootKey
+          ? await Promise.all(
+              rootKey
+                .split(',')
+                .map((r) => api.getNeighbourhood(boardId, r, hops, relation)),
+            )
+          : relation
+            ? [await api.relationWeb(boardId, relation)]
+            : [];
         const seen = new Set<string>();
         const edges: EdgeRow[] = [];
         for (const p of parts)
@@ -134,7 +140,7 @@ export function WebView({
   // The web of one relation is laid out around its busiest picture: every
   // picture as a start would put them all on one crowded ring.
   const layoutRoots = useMemo(() => {
-    if (!relation || !graph) return rootKey.split(',');
+    if (!relation || !graph) return rootKey ? rootKey.split(',') : [];
     const degree = new Map<string, number>();
     for (const e of graph.edges)
       for (const id of [e.source.imageId, e.target.imageId])
@@ -142,7 +148,7 @@ export function WebView({
     const hub = [...degree].sort(
       (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
     )[0]?.[0];
-    return hub ? [hub] : rootKey.split(',');
+    return hub ? [hub] : rootKey ? rootKey.split(',') : [];
   }, [relation, graph, rootKey]);
   const placed = useMemo(
     () =>

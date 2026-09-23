@@ -3,7 +3,7 @@
 // twice. `credentials: 'include'` on every call — the session lives in a
 // cookie (docs/design.md "web/").
 
-import type { TermKind } from '@digsite/shared';
+import type { Fraction, TermKind } from '@digsite/shared';
 import type {
   AcceptInvitationResponse,
   AddImagesToSheetRequest,
@@ -451,9 +451,27 @@ export const api = {
       `/boards/${boardId}/duplicates?${new URLSearchParams({ image: imageId, sort })}`,
     ),
   /** Labels this board already uses, scored against a picture. */
-  labelSuggestions: (boardId: string, imageId: string, limit = 5) =>
+  /** The board's label terms nearest a picture, or nearest one region of it
+   * when `region` is given (cropped and read on its own by the server). */
+  labelSuggestions: (
+    boardId: string,
+    imageId: string,
+    region?: Fraction,
+    limit = 5,
+  ) =>
     request<LabelSuggestionsResponse>(
-      `/boards/${boardId}/label-suggestions?${new URLSearchParams({ image: imageId, limit: String(limit) })}`,
+      `/boards/${boardId}/label-suggestions?${new URLSearchParams({
+        image: imageId,
+        limit: String(limit),
+        ...(region
+          ? {
+              fx: String(region.fx),
+              fy: String(region.fy),
+              fw: String(region.fw),
+              fh: String(region.fh),
+            }
+          : {}),
+      })}`,
     ),
   /** Copies pictures from another board onto `boardId`, originals and
    * properties, never claims; one already there is skipped. */
@@ -486,6 +504,12 @@ export const api = {
   getBoardImagesByIds: (boardId: string, sort: string, ids: string[]) =>
     request<ListBoardImagesByIdsResponse>(
       `/boards/${boardId}/images?sort=${encodeURIComponent(sort)}&ids=${ids.map(encodeURIComponent).join(',')}`,
+    ),
+  /** Every connection meaning `relation` (aliases too) across the board's
+   * sheets, and the pictures it joins: the web of one relation, whole. */
+  relationWeb: (boardId: string, relation: string) =>
+    request<GetNeighbourhoodResponse>(
+      `/boards/${boardId}/relation-web?${new URLSearchParams({ relation })}`,
     ),
   getNeighbourhood: (
     boardId: string,
