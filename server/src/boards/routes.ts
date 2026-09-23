@@ -87,6 +87,7 @@ import {
   toWebRequest,
 } from '../http.ts';
 import { checkLimit, tooManyRequests } from '../limits.ts';
+import { duplicatesOf } from '../meaning/duplicates.ts';
 import { searchText, similarTo } from '../meaning/search.ts';
 import { recordTileCache } from '../metrics.ts';
 import {
@@ -1411,31 +1412,48 @@ export function registerBoardRoutes(router: Router) {
       : SHEET_LIMIT;
   }
 
-  router.get('/boards/:id/similar', async (ctx) => {
-    const userId = requireAuth(ctx);
-    const boardId = param(ctx, 'id');
-    await boardForViewing(userId, boardId);
-    if (!env.EMBEDDINGS) {
-      return json(ctx.res, 503, { error: 'embeddings are off' });
-    }
-    const image = ctx.url.searchParams.get('image') ?? '';
-    // The anchor must be on this board: an image of a board the viewer
-    // cannot see must not become a query here.
-    const { rows } = await pool.query(
-      'SELECT 1 FROM images WHERE board_id = $1 AND id::text = $2',
-      [boardId, image],
-    );
-    if (rows.length === 0) {
-      return json(ctx.res, 400, { error: 'image is not on this board' });
-    }
-    const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
-    const matches = await similarTo(boardId, image, sort, meaningLimit(ctx));
-    if (matches === null) {
-      return json(ctx.res, 409, { error: 'image is not embedded yet' });
-    }
-    const response: MeaningResponse = { matches };
-    return json(ctx.res, 200, response);
-  });
+  // GET /boards/:id/duplicates?image=&sort= (CONTEXT.md "Near-duplicate")
+  // has the same shape: the images that are nearly this one, which a
+  // person may then accept or decline. `meaning/duplicates.ts` says why
+  // it takes pixels as well as meaning.
+  for (const [path, find] of [
+    [
+      '/boards/:id/similar',
+      (boardId: string, image: string, sort: Sort, ctx: { url: URL }) =>
+        similarTo(boardId, image, sort, meaningLimit(ctx)),
+    ],
+    [
+      '/boards/:id/duplicates',
+      (boardId: string, image: string, sort: Sort) =>
+        duplicatesOf(boardId, image, sort),
+    ],
+  ] as const) {
+    router.get(path, async (ctx) => {
+      const userId = requireAuth(ctx);
+      const boardId = param(ctx, 'id');
+      await boardForViewing(userId, boardId);
+      if (!env.EMBEDDINGS) {
+        return json(ctx.res, 503, { error: 'embeddings are off' });
+      }
+      const image = ctx.url.searchParams.get('image') ?? '';
+      // The anchor must be on this board: an image of a board the viewer
+      // cannot see must not become a query here.
+      const { rows } = await pool.query(
+        'SELECT 1 FROM images WHERE board_id = $1 AND id::text = $2',
+        [boardId, image],
+      );
+      if (rows.length === 0) {
+        return json(ctx.res, 400, { error: 'image is not on this board' });
+      }
+      const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
+      const matches = await find(boardId, image, sort, ctx);
+      if (matches === null) {
+        return json(ctx.res, 409, { error: 'image is not embedded yet' });
+      }
+      const response: MeaningResponse = { matches };
+      return json(ctx.res, 200, response);
+    });
+  }
 
   router.get('/boards/:id/search', async (ctx) => {
     const userId = requireAuth(ctx);

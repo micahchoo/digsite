@@ -44,3 +44,37 @@ the exact scan made the question moot:
 Search is exact (`ORDER BY distance + 0` keeps the planner off any vector
 index) and 0024 drops the index. The owner's screenshot queries returned
 identical results before and after.
+
+## Near-duplicates (item 4)
+
+`GET /boards/:id/duplicates?image=` answers with the images that are
+nearly this one (`meaning/duplicates.ts`). It needs two tests, because
+CLIP alone put them in the wrong order. On the owner's 141 screenshots,
+two states of one app screen scored 0.9857, and a true re-capture scored
+0.9763. So CLIP only picks candidates at 0.975 or more. The pixels then
+decide: what share of the picture changed by more than 24 grey levels
+between the two 128-px ladder cells. The share leaves out the letterbox
+the two cells have in common. A wide screenshot fills only 40% of its
+cell, so counting the letterbox would make every share smaller.
+
+Every labelled pair from 0.95 up, changed share on the ladder cells:
+
+| CLIP | label | changed |
+| --- | --- | ---: |
+| 0.9513–0.9695 (17 pairs) | different | 0.31–3.67% |
+| 0.9737, 0.9742, 0.9748 | different | 1.78, 0.94, 0.58% |
+| 0.9763 | re-capture | 0.02% |
+| 0.9781 | re-capture | 0.00% |
+| 0.9847 | re-capture | 0.32% |
+| 0.9857 | same screen, other text | 0.72% |
+| 0.9892 | re-capture | 0.04% |
+| 0.9926 | re-capture | 0.01% |
+| 0.9940 (burst) | re-capture | 0.00% |
+
+The rule is a gate of 0.975 and a changed share of 0.5% or less. It
+separates every labelled pair. Neither test is enough alone: below the
+gate, one different pair changed only 0.31%. Over the whole board the
+rule found 56 pairs among 32 images: every labelled re-capture, every
+byte-identical copy, and none of the labelled non-duplicates. It took
+0.8 ms per image, because the ladder already holds each cell. The
+thresholds come from screenshots only; photos have not been measured.

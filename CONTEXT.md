@@ -142,6 +142,10 @@ sheet that made it. The board never writes a claim.
   (`image_embeddings`, pgvector `halfvec`), computed by the worker when
   `EMBEDDINGS=on`. **Similar** and **search** return images by meaning, as
   ranks under the viewer's sort, the same shape as find.
+- **Near-duplicate** — an image that is nearly another: close in meaning
+  (similarity 0.975 or more) AND in pixels (0.5% or less of the picture
+  changed at 128 px). A suggestion that a person accepts or declines.
+  It never removes or merges an image.
 - **Folder import** — a board filled from a folder on the server's disk,
   under a root the operator allowed (`IMPORT_ROOTS`). Each file takes the
   upload path; the import keeps its file list and a cursor, so it resumes.
