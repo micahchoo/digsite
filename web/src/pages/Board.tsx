@@ -74,6 +74,7 @@ import {
 import { Copies } from '../board/Copies.tsx';
 import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
+import { FindPanel } from '../board/FindPanel.tsx';
 import { FolderImport } from '../board/FolderImport.tsx';
 import { PathPanel } from '../board/PathPanel.tsx';
 import { Terms } from '../board/Terms.tsx';
@@ -88,6 +89,7 @@ import {
   containedRect,
   visibleRanks,
 } from '../board/detail.ts';
+import { useFind } from '../board/find.ts';
 import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
 import { RankedView, identity, useRanked } from '../board/ranked-view.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
@@ -241,41 +243,18 @@ function fitInitialViewState(
   };
 }
 
-/** Per-sort cache of rank -> image (or null for an empty/failed lookup),
- * shared between hover and rank-resolving selection ops so a rank fetched
- * once is never re-fetched. */
 /** The web of one relation starts from at most this many pictures: one
  * neighbourhood request each. */
 const WEB_STARTS = 40;
 
-/** A search by meaning asks for this many at a time. */
-const MEANING_PAGE = 24;
 const NO_SECTIONS: Section[] = [];
 const NO_IMAGES: BoardImageWithRank[] = [];
 const NO_RANKS: number[] = [];
 const NO_IDS: ReadonlySet<string> = new Set();
 
-type FindResult = {
-  ranks: number[];
-  imageIds: string[];
-  count: number;
-  /** Best first: a search by meaning, drawn stronger at the top. */
-  ranked?: boolean;
-};
-/** And shows this many of them as pictures in the Find panel. */
-const MEANING_STRIP = 12;
-
-/** What a failed find says, in the words a person can act on. */
-function findFailure(err: unknown, byMeaning: boolean): string {
-  if (byMeaning && err instanceof ApiError) {
-    if (err.status === 503) return 'Search by meaning is off on this server.';
-    if (err.status === 409)
-      return 'This picture has not been read yet. Try again in a minute.';
-    if (err.status === 400) return 'That picture is not on this board.';
-  }
-  return err instanceof Error ? err.message : 'Search failed';
-}
-
+/** Per-sort cache of rank -> image (or null for an empty/failed lookup),
+ * shared between hover and rank-resolving selection ops so a rank fetched
+ * once is never re-fetched. */
 function sortCache(
   store: Map<string, Map<number, BoardImage | null>>,
   sort: string,
@@ -389,32 +368,11 @@ export function Board() {
   selectedImagesRef.current = selectedImages;
   const [selectionNote, setSelectionNote] = useState('');
   const [findOpen, setFindOpen] = useState(false);
-  const [findQuery, setFindQuery] = useState('');
-  const [filterKey, setFilterKey] = useState('');
-  const [filterOp, setFilterOp] = useState<'eq' | 'gte' | 'lte'>('eq');
-  const [filterValue, setFilterValue] = useState('');
-  const [findFilters, setFindFilters] = useState<FindFilterClause[]>([]);
-  /** A label or relation from the Terms index (CONTEXT.md "Making sense"). */
-  const [findClaim, setFindClaim] = useState<{
-    kind: TermKind;
-    term: string;
-  } | null>(null);
   /** The focused image's neighbourhood (board/Explore.tsx), and where its
    * images sit under the current sort, for the lines on the map. */
   const [exploreGraph, setExploreGraph] =
     useState<GetNeighbourhoodResponse | null>(null);
   const vocab = useVocabulary(boardId);
-  /** Words match names and properties; meaning matches what is in the
-   * picture (the server's embeddings). */
-  const [findMode, setFindMode] = useState<'words' | 'meaning'>('words');
-  /** How many a search by meaning asks for. Its scores sit close together,
-   * so the answer is the best few, shown as pictures, and "Show more". */
-  const [meaningLimit, setMeaningLimit] = useState(MEANING_PAGE);
-  /** "More like this": pictures that look like this one, best first. */
-  const [findLike, setFindLike] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
   const lastClickRankRef = useRef<number | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
 
@@ -1023,64 +981,10 @@ export function Board() {
     });
   }, [view]);
 
-  // Search and typed property filters use the current rank table.
-  // Keystrokes wait a moment; an alias changes what a term means, so a find
-  // by term is asked again when the aliases change.
-  const byMeaning = findLike !== null || findMode === 'meaning';
-  const findAsked = byMeaning
-    ? findLike !== null || findQuery.trim() !== ''
-    : findQuery.trim() !== '' || findFilters.length > 0 || findClaim !== null;
-  const findAnswer = useRanked(
-    view,
-    findOpen && findAsked
-      ? JSON.stringify([
-          byMeaning,
-          findQuery.trim(),
-          findFilters,
-          findClaim,
-          findLike?.id,
-          meaningLimit,
-          identity(vocab.vocabulary.aliases),
-        ])
-      : null,
-    (): Promise<MeaningResponse | FindBoardResponse> =>
-      byMeaning
-        ? findLike
-          ? api.similarImages(boardId, currentSortId, findLike.id, meaningLimit)
-          : api.searchMeaning(
-              boardId,
-              currentSortId,
-              findQuery.trim(),
-              meaningLimit,
-            )
-        : api.findBoard(boardId, currentSortId, findQuery.trim(), findFilters, {
-            ...(findClaim?.kind === 'label' ? { label: findClaim.term } : {}),
-            ...(findClaim?.kind === 'relation'
-              ? { relation: findClaim.term }
-              : {}),
-          }),
-    250,
-  );
-  const findResult = useMemo((): FindResult | null => {
-    const found = findAnswer?.value;
-    if (!found) return null;
-    if ('matches' in found)
-      return {
-        ranks: found.matches.map((m) => m.rank),
-        imageIds: found.matches.map((m) => m.imageId),
-        count: found.matches.length,
-        ranked: true,
-      };
-    return found;
-  }, [findAnswer]);
-  const findError = findAnswer?.error
-    ? findFailure(findAnswer.error, byMeaning)
-    : '';
-  // A new question starts from the first page of answers.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the question is the trigger
-  useEffect(() => {
-    setMeaningLimit(MEANING_PAGE);
-  }, [findQuery, findLike, findMode]);
+  // Find: a question in, an answer in ranks out (board/find.ts). An alias
+  // merge changes what a term matches, so it asks again.
+  const finder = useFind(view, findOpen, vocab.vocabulary.aliases);
+  const findResult = finder.result;
 
   // Where the neighbourhood's images sit on the map under this sort.
   const exploreAnswer = useRanked(
@@ -1576,24 +1480,6 @@ export function Board() {
     );
   }
 
-  function applyPropertyFilter() {
-    if (!filterKey || !filterValue.trim()) return;
-    const property = board?.sortableKeys.find(
-      (key) => typeof key.key !== 'string' && key.key.property === filterKey,
-    );
-    const isNumber =
-      property &&
-      typeof property.key !== 'string' &&
-      property.key.type === 'number';
-    const value: unknown = isNumber ? Number(filterValue) : filterValue.trim();
-    if (typeof value === 'number' && !Number.isFinite(value)) return;
-    setFindFilters((current) => [
-      ...current.filter((clause) => clause.key !== filterKey),
-      { key: filterKey, op: filterOp, value },
-    ]);
-    setFilterValue('');
-  }
-
   async function invertSelection() {
     const b = boardRef.current;
     if (!b) return;
@@ -2016,8 +1902,10 @@ export function Board() {
             onDelete={() => void deleteDetailImage()}
             onClose={() => setFocusedImageId(null)}
             onMoreLike={() => {
-              setFindLike({ id: detailImage.id, name: detailImage.name });
-              setFindQuery('');
+              finder.dispatch({
+                type: 'like',
+                image: { id: detailImage.id, name: detailImage.name },
+              });
               setFindOpen(true);
             }}
           />
@@ -2063,9 +1951,9 @@ export function Board() {
 
         <Terms
           vocab={vocab}
-          active={findClaim}
+          active={finder.question.claim}
           onPick={(claim) => {
-            setFindClaim(claim);
+            finder.dispatch({ type: 'claim', claim });
             if (claim) setFindOpen(true);
           }}
           onOpenWeb={async (relation) => {
@@ -2449,235 +2337,15 @@ export function Board() {
         </div>
       </header>
       {findOpen && (
-        <div className="board-find" data-testid="board-find">
-          <div className="row">
-            <div
-              className="segmented"
-              role="radiogroup"
-              aria-label="Search by"
-              data-testid="board-find-mode"
-            >
-              {(
-                [
-                  ['words', 'Words', 'Names and properties'],
-                  ['meaning', 'Meaning', 'What is in the picture'],
-                ] as const
-              ).map(([mode, label, title]) => (
-                <label key={mode} title={title}>
-                  <input
-                    type="radio"
-                    name="board-find-mode"
-                    value={mode}
-                    checked={findMode === mode && !findLike}
-                    data-testid={`board-find-mode-${mode}`}
-                    onChange={() => {
-                      setFindMode(mode);
-                      setFindLike(null);
-                    }}
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-            <input
-              aria-label={
-                findMode === 'meaning'
-                  ? 'Describe what is in the picture'
-                  : 'Search image names and properties'
-              }
-              data-testid="board-find-query"
-              placeholder={
-                findMode === 'meaning'
-                  ? 'Describe what is in the picture'
-                  : 'Search names and properties'
-              }
-              value={findQuery}
-              onChange={(e) => {
-                setFindQuery(e.target.value);
-                setFindLike(null);
-              }}
-            />
-            {findMode === 'words' && !findLike && (
-              <>
-                <select
-                  aria-label="Property to filter"
-                  data-testid="board-filter-key"
-                  value={filterKey}
-                  onChange={(e) => setFilterKey(e.target.value)}
-                >
-                  <option value="">Property…</option>
-                  {board.sortableKeys.flatMap((item) =>
-                    typeof item.key === 'string'
-                      ? []
-                      : [
-                          <option
-                            key={item.key.property}
-                            value={item.key.property}
-                          >
-                            {item.label}
-                          </option>,
-                        ],
-                  )}
-                </select>
-                <select
-                  aria-label="Filter comparison"
-                  data-testid="board-filter-op"
-                  value={filterOp}
-                  onChange={(e) =>
-                    setFilterOp(e.target.value as 'eq' | 'gte' | 'lte')
-                  }
-                >
-                  <option value="eq">is</option>
-                  <option value="gte">at least</option>
-                  <option value="lte">at most</option>
-                </select>
-                <input
-                  aria-label="Filter value"
-                  data-testid="board-filter-value"
-                  placeholder="Value"
-                  value={filterValue}
-                  onChange={(e) => setFilterValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') applyPropertyFilter();
-                  }}
-                />
-                <button
-                  type="button"
-                  data-testid="board-filter-add"
-                  onClick={applyPropertyFilter}
-                  disabled={!filterKey || !filterValue.trim()}
-                >
-                  Add filter
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              data-testid="board-filter-clear"
-              onClick={() => {
-                setFindQuery('');
-                setFindFilters([]);
-                setFindLike(null);
-              }}
-            >
-              Clear
-            </button>
-          </div>
-          {(findFilters.length > 0 || findClaim || findLike) && (
-            <div className="row board-find-chips">
-              {findLike && (
-                <button
-                  type="button"
-                  data-testid="board-like-chip"
-                  onClick={() => setFindLike(null)}
-                >
-                  Looks like: {findLike.name}
-                  <Icon name="close" size={14} />
-                </button>
-              )}
-              {findClaim && (
-                <button
-                  type="button"
-                  data-testid="board-claim-chip"
-                  onClick={() => setFindClaim(null)}
-                >
-                  {findClaim.kind === 'label' ? 'Label' : 'Relation'}:{' '}
-                  {findClaim.term}
-                  <Icon name="close" size={14} />
-                </button>
-              )}
-              {findFilters.map((clause) => (
-                <button
-                  type="button"
-                  key={clause.key}
-                  data-testid={`board-filter-chip-${clause.key}`}
-                  onClick={() =>
-                    setFindFilters((current) =>
-                      current.filter((item) => item.key !== clause.key),
-                    )
-                  }
-                >
-                  {clause.key} {clause.op} {String(clause.value)}
-                  <Icon name="close" size={14} />
-                </button>
-              ))}
-            </div>
-          )}
-          {(findQuery.trim() ||
-            findFilters.length > 0 ||
-            findClaim ||
-            findLike) && (
-            <div className="row board-find-result" aria-live="polite">
-              {findError ? (
-                <output>{findError}</output>
-              ) : findResult ? (
-                <>
-                  <span data-testid="board-find-count">
-                    {findResult.ranked
-                      ? `Best ${findResult.count}, closest first`
-                      : `${findResult.count} ${findResult.count === 1 ? 'match' : 'matches'}`}
-                    {findResult.ranks.length < findResult.count
-                      ? ` · showing first ${findResult.ranks.length} on map`
-                      : ''}
-                  </span>
-                  <button
-                    type="button"
-                    data-testid="board-find-select-matches"
-                    onClick={selectAllMatches}
-                    disabled={!findResult.imageIds.length}
-                  >
-                    {findResult.count > findResult.imageIds.length
-                      ? `Select first ${findResult.imageIds.length} of ${findResult.count}`
-                      : `Select ${findResult.count} ${findResult.count === 1 ? 'match' : 'matches'}`}
-                  </button>
-                  {findResult.ranked && findResult.count >= meaningLimit && (
-                    <button
-                      type="button"
-                      data-testid="board-find-more"
-                      onClick={() =>
-                        setMeaningLimit((limit) => limit + MEANING_PAGE)
-                      }
-                    >
-                      Show more
-                    </button>
-                  )}
-                  {findResult.ranked && (
-                    <ol
-                      className="board-find-strip"
-                      data-testid="board-find-strip"
-                    >
-                      {findResult.imageIds
-                        .slice(0, MEANING_STRIP)
-                        .map((imageId, order) => (
-                          <li key={imageId}>
-                            <button
-                              type="button"
-                              aria-label={`Match ${order + 1}: show it on the map`}
-                              data-testid="board-find-strip-item"
-                              onClick={() =>
-                                showOnMap(
-                                  imageId,
-                                  findResult.ranks[order] ?? -1,
-                                )
-                              }
-                            >
-                              <img
-                                src={api.previewUrl(imageId)}
-                                alt=""
-                                loading="lazy"
-                              />
-                            </button>
-                          </li>
-                        ))}
-                    </ol>
-                  )}
-                </>
-              ) : (
-                <span>Searching…</span>
-              )}
-            </div>
-          )}
-        </div>
+        <FindPanel
+          question={finder.question}
+          dispatch={finder.dispatch}
+          result={findResult}
+          error={finder.error}
+          sortableKeys={board.sortableKeys}
+          onSelectAll={selectAllMatches}
+          onShowOnMap={showOnMap}
+        />
       )}
       {hoverTooltip && (
         <div

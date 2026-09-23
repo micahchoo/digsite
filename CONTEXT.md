@@ -52,6 +52,11 @@ line here before it gets a file.
   any answer in ranks, names it in `X-Order-Version`. A tile URL that
   carries its build's token (`?v=`) is cached by the browser for good;
   the next build is a new token, so a new URL.
+- **Find** — one question asked of a board, answered in ranks under the
+  build the map shows: words (names and properties, narrowed by typed
+  filters and a label or relation), meaning (what is in the picture), or
+  more like one picture. The map dims everything else. **Clear** empties
+  the whole question.
 - **Missing** — an image whose original is gone. Kept as a row, shown as
   such, never deleted by the system.
 - **Captured properties** — properties the worker reads from an
