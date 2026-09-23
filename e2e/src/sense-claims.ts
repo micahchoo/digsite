@@ -188,12 +188,17 @@ function sheetPage(page: Page, imageBySlot: Map<number, string>) {
       if (!e) return undefined;
       return (e.customData?.imageId as string | undefined) ?? undefined;
     };
-    return els.find(
-      (e) =>
-        e.customData?.kind === 'edge' &&
-        imgOf(e.startBinding?.elementId) === id(fromSlot) &&
-        imgOf(e.endBinding?.elementId) === id(toSlot),
-    );
+    // The newest: a claim means the connection it just made, and after the
+    // other suites the same two pictures may already be joined (the hour
+    // suite connects at random). New elements are appended to the scene.
+    return [...els]
+      .reverse()
+      .find(
+        (e) =>
+          e.customData?.kind === 'edge' &&
+          imgOf(e.startBinding?.elementId) === id(fromSlot) &&
+          imgOf(e.endBinding?.elementId) === id(toSlot),
+      );
   }
   return {
     id,
