@@ -119,7 +119,33 @@ the user asked to commit as I go, 2026-09-23). Also done since then:
   forever (digsite-1b fixed it, e7b93d3). Claim 6d now reads the caption
   under a picture with room below it, since the hour suite moves pictures.
 
+Architecture pass (the user ran /improve-codebase-architecture and chose
+all four candidates; report at /tmp/architecture-review-20260923.html):
+- `board/ranked-view.ts`: every answer in ranks on the board goes through
+  one view per (board, sort), which drops a reply from another build and
+  re-asks all on a move (C3). Rule: `.claude/rules/web-ranked-view.md`.
+- `board/find.ts` + `FindPanel.tsx`: Find is a question reducer and one
+  ask. `board/BoardSheets.tsx`, `BoardAdministration.tsx`: the sheets list
+  and the board's own section left the map page (2,877 -> ~2,170 lines).
+- `sheet/actions.ts`: bring beside, extract, the report's claims, behind a
+  narrow port with an in-memory test scene. Rule:
+  `.claude/rules/web-sheet-actions.md`.
+Then: phone width for the rest of the app (`smoke-phone.ts`); storage on the
+web (quota stop in the queue, group storage bar, camera-source download,
+resume a stopped import); typed property controls that save on commit
+(`board/property-edit.ts`); other sheets' lines routed (`foreignPaths`);
+Biome's useHookAtTopLevel on; shell and group icons in `Icon`; `shell.css`
+duplicates merged where `web/scripts/css-snapshot.ts` proved nothing moved
+(35 selectors still in both layers, for a person); copy choices
+(`sheet/copy-foreign.ts`, `CopyChooser.tsx`, walk claim 17).
+
 Found and fixed on the way:
+- Copying another sheet's connection wrote nothing on the real server:
+  connect(imageId, imageId) against `el-img-` element ids.
+- A failed rename (board or sheet) was silent; so were failed delete
+  footprints. Clear in Find left a Terms claim filter on.
+- Number properties could not be typed negative; lists turned into text.
+- The hover card was never cleared on a sort change (empty deps).
 - `smoke-sheet-surroundings.ts` hung forever on a failure (the five codex
   smoke trees; digsite-1b killed them).
 - `statfs` overflowed on the 24 TB volume and every upload got 507
@@ -144,9 +170,11 @@ replies-routes extract-routes making-sense access.test routes-audit`.
 
 Open, needing the user: a read-only view for people outside the group
 (horizon 5) is a decision about who may see what; the report covers
-showing the work meanwhile. Also open: `shell.css` stacks overrides; the
-shell's and group pages' inline SVGs (drawn on 16- and 24-unit grids)
-sit outside `Icon`. Biome does not catch a hook after an early return.
+showing the work meanwhile. Whether CI runs with EMBEDDINGS (claim 16).
+Waiting on digsite-1b (proposed 2026-09-23): participants on sheet rows,
+find in a rank window for full-viewport dimming, board presence, copy to
+board and download. Label-suggestion tuning waits for a board with real
+labels.
 
 ## Server roadmap (2026-09-23)
 
