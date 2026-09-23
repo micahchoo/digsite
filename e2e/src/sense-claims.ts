@@ -904,6 +904,43 @@ async function main(): Promise<void> {
       '9. two pictures: "How are they connected?" finds resembles, same place, derived from, across two sheets, and draws it',
     );
 
+    // -- 9b. The web around both, as a full view you can walk ----------------
+    await m.getByTestId('board-path-web').click();
+    const web = m.getByTestId('web-view');
+    await web.waitFor({ timeout: 5000 });
+    await m.waitForFunction(
+      () =>
+        document.querySelectorAll('[data-testid="web-view-node"]').length >= 4,
+      undefined,
+      { timeout: 15_000 },
+    );
+    const nodes = await m.getByTestId('web-view-node').count();
+    const edgesDrawn = await m.getByTestId('web-view-edge').count();
+    assert(
+      nodes >= 4 && edgesDrawn >= 3,
+      `the web around 8 and 14 shows ${nodes} pictures and ${edgesDrawn} lines`,
+    );
+    await m.waitForTimeout(500);
+    await m.screenshot({ path: `${SHOTS}9b-web.png` });
+    // Walk: pick picture 10, then put it in the middle.
+    await m
+      .locator(`[data-testid="web-view-node"][data-image-id="${M.id(10)}"]`)
+      .click();
+    await m.getByTestId('web-view-walk').click();
+    await m.waitForFunction(
+      (id) =>
+        document
+          .querySelector(`[data-testid="web-view-node"][data-image-id="${id}"]`)
+          ?.classList.contains('is-root'),
+      M.id(10),
+      { timeout: 10_000 },
+    );
+    await m.keyboard.press('Escape');
+    await web.waitFor({ state: 'detached', timeout: 3000 });
+    pass(
+      '9b. the web around both opens as rings of pictures and lines; walking from picture 10 puts it in the middle',
+    );
+
     // -- 7. Zoom in on the board far enough to study a picture ------------------
     await m.evaluate(() =>
       (

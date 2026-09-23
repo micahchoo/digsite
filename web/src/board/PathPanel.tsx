@@ -16,6 +16,8 @@ interface Props {
   /** The chain's pictures in order, with their ranks, for the map. */
   onPath: (images: BoardImageWithRank[]) => void;
   onShowImage: (imageId: string, rank: number) => void;
+  /** Opens the web around both pictures. */
+  onOpenWeb?: () => void;
   onClose: () => void;
 }
 
@@ -38,6 +40,7 @@ export function PathPanel({
   b,
   onPath,
   onShowImage,
+  onOpenWeb,
   onClose,
 }: Props) {
   const [state, setState] = useState<State>({ kind: 'searching' });
@@ -173,6 +176,16 @@ export function PathPanel({
             ))}
           </ol>
         </>
+      )}
+      {onOpenWeb && state.kind !== 'searching' && (
+        <button
+          type="button"
+          className="board-path-web"
+          data-testid="board-path-web"
+          onClick={onOpenWeb}
+        >
+          See the web around both
+        </button>
       )}
     </section>
   );

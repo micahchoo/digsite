@@ -1868,3 +1868,188 @@
 .board-path-others {
   color: var(--text-faint);
 }
+
+/* -- the web of claims (board/WebView.tsx) -------------------------------- */
+
+.web-view {
+  width: calc(100vw - 32px);
+  max-width: none;
+  height: calc(100vh - 32px);
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+}
+.web-view[open] {
+  display: flex;
+  flex-direction: column;
+}
+.web-view::backdrop {
+  background: color-mix(in srgb, var(--surface-app) 60%, transparent);
+}
+.web-view-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+.web-view-head h2 {
+  flex: 1;
+  min-width: 10em;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.web-view-close {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+.web-view-relations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+.web-view-relations label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.web-view-relations input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.web-view-relations label:has(input:checked) {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.web-view-relations span {
+  color: var(--text-faint);
+}
+.web-view-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.web-view-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.web-view-edge path {
+  fill: none;
+  stroke: var(--claim-edge);
+  stroke-width: 2;
+}
+.web-view-edge rect {
+  fill: var(--surface-canvas);
+  stroke: color-mix(in srgb, var(--claim-edge) 35%, transparent);
+}
+.web-view-edge text {
+  fill: var(--claim-edge);
+  font-size: 12px;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.web-view-node {
+  cursor: pointer;
+}
+.web-view-node rect {
+  fill: var(--surface-raised);
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+}
+.web-view-node.is-root rect {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.web-view-node.is-selected rect,
+.web-view-node:focus-visible rect {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+.web-view-node:focus {
+  outline: none;
+}
+.web-view-node text {
+  fill: var(--text-secondary);
+  font-size: 11px;
+  text-anchor: middle;
+}
+.web-view-note {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  color: var(--text-secondary);
+}
+.web-view-note--corner {
+  top: auto;
+  bottom: var(--space-3);
+  left: var(--space-3);
+  transform: none;
+  font-size: var(--text-xs);
+}
+.web-view-pick {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: min(420px, calc(100% - 24px));
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-m);
+}
+.web-view-pick img {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-s);
+  object-fit: cover;
+}
+.web-view-pick > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 8em;
+  font-size: var(--text-sm);
+}
+.web-view-pick span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.board-path-web {
+  width: 100%;
+  margin-top: var(--space-1);
+}

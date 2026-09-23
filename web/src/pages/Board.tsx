@@ -76,6 +76,7 @@ import { Terms } from '../board/Terms.tsx';
 import { ThreadBrowser } from '../board/ThreadBrowser.tsx';
 import { Tray } from '../board/Tray.tsx';
 import { UploadActivity } from '../board/UploadActivity.tsx';
+import { WebView } from '../board/WebView.tsx';
 import { ZoomControl, zoomIn, zoomOut } from '../board/ZoomControl.tsx';
 import {
   DetailCache,
@@ -307,6 +308,8 @@ export function Board() {
     [{ id: string; name: string }, { id: string; name: string }] | null
   >(null);
   const [pathImages, setPathImages] = useState<BoardImageWithRank[]>([]);
+  /** The web view's starting pictures, while it is open. */
+  const [webRoots, setWebRoots] = useState<string[] | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [, forceRender] = useState(0);
 
@@ -2000,6 +2003,7 @@ export function Board() {
             b={pathEnds[1]}
             onPath={setPathImages}
             onShowImage={showOnMap}
+            onOpenWeb={() => setWebRoots([pathEnds[0].id, pathEnds[1].id])}
             onClose={() => setPathEnds(null)}
           />
         )}
@@ -2023,6 +2027,7 @@ export function Board() {
           <Explore
             boardId={boardId}
             imageId={detailImage.id}
+            onOpenWeb={() => setWebRoots([detailImage.id])}
             currentSelectionCount={selectedImages.length}
             onSelectImages={(ids, mode) => {
               if (mode === 'add') selection.add(ids);
@@ -2721,6 +2726,15 @@ export function Board() {
       />
 
       {selectionNote && <output className="board-note">{selectionNote}</output>}
+      {webRoots && (
+        <WebView
+          boardId={boardId}
+          sort={currentSortId}
+          roots={webRoots}
+          onShowOnBoard={showOnMap}
+          onClose={() => setWebRoots(null)}
+        />
+      )}
       {comparing && (
         <Compare
           a={comparing[0]}

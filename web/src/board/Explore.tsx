@@ -30,6 +30,8 @@ interface Props {
   onGraph: (graph: GetNeighbourhoodResponse | null) => void;
   /** Walks to a neighbour: it becomes the focused image. */
   onVisit: (imageId: string) => void;
+  /** Opens the web around this image as a full view. */
+  onOpenWeb?: () => void;
 }
 
 const HOPS = [1, 2, 3] as const;
@@ -58,6 +60,7 @@ export function Explore({
   onSelectImages,
   onGraph,
   onVisit,
+  onOpenWeb,
 }: Props) {
   const navigate = useNavigate();
   const [hops, setHops] = useState<Hops>(1);
@@ -290,6 +293,15 @@ export function Explore({
                   ? 'it'
                   : `these ${result.images.length}`}
               </button>
+              {onOpenWeb && (
+                <button
+                  type="button"
+                  data-testid="explore-open-web"
+                  onClick={onOpenWeb}
+                >
+                  Open as a web
+                </button>
+              )}
             </div>
             {pendingSelection && (
               <div
