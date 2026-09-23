@@ -128,12 +128,18 @@ describe('limits: HTTP shape', () => {
     // than actually posting env.RATE_UPLOAD_PER_MIN files first.
     checkLimit('upload', userId, env.RATE_UPLOAD_PER_MIN);
 
+    // A full batch, not one file: the bucket refills continuously (12,000
+    // a minute is a token every 5 ms), so one file sent after the drain
+    // found a token back on a slow request, 2 runs in 10. 100 tokens take
+    // 500 ms to come back.
     const form = new FormData();
-    form.append(
-      'files',
-      new Blob([onePixelPng()], { type: 'image/png' }),
-      'a.png',
-    );
+    for (let i = 0; i < 100; i++) {
+      form.append(
+        'files',
+        new Blob([onePixelPng()], { type: 'image/png' }),
+        `a${i}.png`,
+      );
+    }
     const res = await fetch(`${base}/boards/${boardId}/images?wait=0`, {
       method: 'POST',
       headers: { Origin: base, cookie },
