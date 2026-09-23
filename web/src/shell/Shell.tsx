@@ -80,6 +80,7 @@ export function Shell() {
         return;
       }
       if (e.key === 'Escape') {
+        setSwitcherOpen(false);
         setDrawerOpen(false);
         setRightOpen(false);
       }

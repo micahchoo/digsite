@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { ApiError, api } from '../lib/api.ts';
+import './groups.css';
 
 export function Groups() {
   const [groups, setGroups] = useState<
@@ -51,78 +52,154 @@ export function Groups() {
   }
 
   return (
-    <div className="page">
-      <h1>groups</h1>
-      {error && <div className="error">{error}</div>}
+    <main className="page groups-home">
+      <header className="groups-heading">
+        <div>
+          <div className="groups-eyebrow">DIGSITE / WORKSPACES</div>
+          <h1>Your groups</h1>
+          <p>Shared places for image collections and investigations.</p>
+        </div>
+        <span className="groups-total" aria-label={`${groups.length} groups`}>
+          {groups.length} <span>groups</span>
+        </span>
+      </header>
+      {error && <div className="error groups-error">{error}</div>}
 
-      <div className="card">
-        <h3>your groups</h3>
-        <table data-testid="group-list">
-          <tbody>
-            {groups.map((g) => (
-              <tr key={g.id}>
-                <td>
-                  <Link to={`/g/${g.id}`}>{g.name}</Link>
-                </td>
-                <td className="muted">{g.role}</td>
-                <td>
+      <div className="groups-layout">
+        <section
+          className="groups-section"
+          aria-labelledby="groups-list-heading"
+        >
+          <div className="groups-section-heading">
+            <div>
+              <h2 id="groups-list-heading">Workspaces</h2>
+              <p>Choose a group to pick up where your team left off.</p>
+            </div>
+          </div>
+          {groups.length ? (
+            <ul className="groups-list" data-testid="group-list">
+              {groups.map((g) => (
+                <li className="groups-item" key={g.id}>
+                  <Link className="groups-item-main" to={`/g/${g.id}`}>
+                    <span className="groups-mark" aria-hidden="true">
+                      {g.name.trim().charAt(0).toUpperCase() || '?'}
+                    </span>
+                    <span className="groups-item-copy">
+                      <span className="groups-item-name">{g.name}</span>
+                      <span className="groups-item-hint">Open workspace</span>
+                    </span>
+                    <span className="groups-role">{g.role}</span>
+                    <svg
+                      className="groups-arrow"
+                      aria-hidden="true"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                    >
+                      <path d="M4 10h11m-4-4 4 4-4 4" />
+                    </svg>
+                  </Link>
                   <button
+                    className="groups-invite-toggle"
                     type="button"
+                    aria-expanded={inviteFor === g.id}
                     onClick={() =>
                       setInviteFor(inviteFor === g.id ? null : g.id)
                     }
                   >
-                    invite
+                    {inviteFor === g.id ? 'Close' : 'Invite'}
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {inviteFor && (
-          <div className="row">
-            <input
-              placeholder="email"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-            />
-            <button type="button" onClick={() => void sendInvite(inviteFor)}>
-              send invite
-            </button>
-            {lastInvitationId && (
-              <span className="muted" data-testid="invitation-id">
-                invitation id: {lastInvitationId}
+                  {inviteFor === g.id && (
+                    <form
+                      className="groups-invite-form"
+                      id={`invite-${g.id}`}
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void sendInvite(g.id);
+                      }}
+                    >
+                      <label
+                        className="groups-label"
+                        htmlFor={`invite-email-${g.id}`}
+                      >
+                        Invite by email
+                      </label>
+                      <input
+                        id={`invite-email-${g.id}`}
+                        type="email"
+                        placeholder="name@example.com"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                      />
+                      <button type="submit">Send invitation</button>
+                      {lastInvitationId && (
+                        <span className="muted" data-testid="invitation-id">
+                          Invitation created: {lastInvitationId}
+                        </span>
+                      )}
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="groups-empty">
+              <span className="groups-empty-mark" aria-hidden="true">
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+                  <path d="m3 11 9-7 9 7M5.5 9.5v10h13v-10M9.5 19.5v-6h5v6" />
+                </svg>
               </span>
-            )}
-          </div>
-        )}
-      </div>
+              <h3>No workspaces yet</h3>
+              <p>Create one for your team, or join with an invitation.</p>
+            </div>
+          )}
+        </section>
 
-      <div className="card">
-        <h3>create a group</h3>
-        <form className="row" onSubmit={(e) => void createGroup(e)}>
-          <input
-            data-testid="group-name"
-            placeholder="name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <button type="submit">create</button>
-        </form>
+        <aside className="groups-actions" aria-label="Workspace actions">
+          <section className="groups-action-panel">
+            <span className="groups-action-index">01</span>
+            <h2>Create a group</h2>
+            <p>Start a shared space for your team.</p>
+            <form className="groups-form" onSubmit={(e) => void createGroup(e)}>
+              <label className="groups-label" htmlFor="new-group-name">
+                Group name
+              </label>
+              <div className="groups-form-row">
+                <input
+                  id="new-group-name"
+                  data-testid="group-name"
+                  placeholder="e.g. Coastal survey"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                />
+                <button type="submit">Create</button>
+              </div>
+            </form>
+          </section>
+          <section className="groups-action-panel groups-join-panel">
+            <span className="groups-action-index">02</span>
+            <h2>Join a group</h2>
+            <p>Enter the invitation code your teammate shared.</p>
+            <form
+              className="groups-form"
+              onSubmit={(e) => void acceptInvitation(e)}
+            >
+              <label className="groups-label" htmlFor="accept-invitation">
+                Invitation code
+              </label>
+              <div className="groups-form-row">
+                <input
+                  id="accept-invitation"
+                  data-testid="invitation-input"
+                  placeholder="Paste invitation code"
+                  value={acceptId}
+                  onChange={(e) => setAcceptId(e.target.value)}
+                />
+                <button type="submit">Join</button>
+              </div>
+            </form>
+          </section>
+        </aside>
       </div>
-
-      <div className="card">
-        <h3>accept an invitation</h3>
-        <form className="row" onSubmit={(e) => void acceptInvitation(e)}>
-          <input
-            data-testid="invitation-input"
-            placeholder="invitation id"
-            value={acceptId}
-            onChange={(e) => setAcceptId(e.target.value)}
-          />
-          <button type="submit">accept</button>
-        </form>
-      </div>
-    </div>
+    </main>
   );
 }

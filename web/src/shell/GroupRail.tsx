@@ -20,6 +20,19 @@ function initialsOf(name: string): string {
 export function GroupRail({ groups, activeGroupId }: Props) {
   return (
     <nav className="shell-rail" aria-label="Groups" data-testid="shell-rail">
+      <Link
+        to="/groups"
+        className="shell-rail-brand"
+        aria-label="Digsite workspaces"
+        title="Digsite workspaces"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+          <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
+          <rect x="13.5" y="3.5" width="7" height="7" rx="2" />
+          <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
+          <path d="M13.5 17h7M17 13.5v7" />
+        </svg>
+      </Link>
       <ul className="shell-rail-list">
         {groups.map((g) => (
           <li key={g.id} className="shell-rail-item">

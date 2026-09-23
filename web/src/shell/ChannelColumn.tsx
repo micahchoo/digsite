@@ -78,7 +78,9 @@ function BoardRow({
           }
           data-testid={`shell-board-toggle-${board.id}`}
         >
-          {collapsed ? '▸' : '▾'}
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none">
+            <path d="m5.5 3.5 5 4.5-5 4.5" />
+          </svg>
         </button>
         <Link
           to={`/b/${board.id}`}
@@ -91,7 +93,10 @@ function BoardRow({
         >
           {!board.open && (
             <span className="shell-lock" aria-hidden="true">
-              🔒
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none">
+                <rect x="3.2" y="6.6" width="9.6" height="7" rx="1.5" />
+                <path d="M5.4 6.6V5a2.6 2.6 0 0 1 5.2 0v1.6" />
+              </svg>
             </span>
           )}
           <span aria-hidden="true">#</span> {board.name}
@@ -132,7 +137,10 @@ function BoardRow({
               className="shell-start-sheet"
               data-testid={`shell-start-sheet-${board.id}`}
             >
-              + Start a sheet
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none">
+                <path d="M8 3.2v9.6M3.2 8h9.6" />
+              </svg>
+              Start a sheet
             </Link>
           </li>
         </ul>
@@ -160,7 +168,10 @@ export function ChannelColumn({
   return (
     <div className="shell-channel" data-testid="shell-channel">
       <div className="shell-channel-header">
-        <span className="shell-channel-title">{groupName ?? ''}</span>
+        <div className="shell-channel-identity">
+          <span className="shell-channel-kicker">GROUP WORKSPACE</span>
+          <span className="shell-channel-title">{groupName ?? ''}</span>
+        </div>
         <Link
           to={`/g/${groupId}`}
           className="shell-channel-gear"

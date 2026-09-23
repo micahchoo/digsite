@@ -9,7 +9,7 @@ import type { Role } from '@digsite/shared/api';
 // web must never decide access; it shows what the server allows and
 // handles 403 with the reason"). A row's own error, not a global banner, is
 // where that reason lands.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useOutletContext, useParams } from 'react-router';
 import {
   ErrorState,
@@ -24,6 +24,107 @@ import type { ShellRoute } from '../shell/useShellData.ts';
 import './group.css';
 
 const ROLES: Role[] = ['owner', 'admin', 'member'];
+
+function BoardImagePreview({
+  boardId,
+  imageCount,
+}: {
+  boardId: string;
+  imageCount: number;
+}) {
+  const host = useRef<HTMLSpanElement>(null);
+  const [imageIds, setImageIds] = useState<string[]>([]);
+  const [unavailableIds, setUnavailableIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [loaded, setLoaded] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const visibleImageIds = imageIds.filter((id) => !unavailableIds.has(id));
+
+  useEffect(() => {
+    if (imageCount === 0) return;
+    const node = host.current;
+    if (!node) return;
+    let cancelled = false;
+    const load = () => {
+      void api
+        .listBoardImages(boardId, 'uploaded_at.desc', 0, 6)
+        .then(({ images }) => {
+          if (cancelled) return;
+          setImageIds(
+            images
+              .filter((image) => !image.missing && image.status === 'ready')
+              .slice(0, 3)
+              .map((image) => image.id),
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setUnavailable(true);
+        })
+        .finally(() => {
+          if (!cancelled) setLoaded(true);
+        });
+    };
+
+    if (!('IntersectionObserver' in window)) {
+      load();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        load();
+      },
+      { rootMargin: '240px' },
+    );
+    observer.observe(node);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [boardId, imageCount]);
+
+  return (
+    <span
+      className="group-board-preview"
+      ref={host}
+      aria-hidden="true"
+      data-testid={`board-preview-${boardId}`}
+    >
+      {visibleImageIds.length ? (
+        <span
+          className={`group-board-preview-images group-board-preview-images--${visibleImageIds.length}`}
+        >
+          {visibleImageIds.map((id) => (
+            <img
+              key={id}
+              src={api.previewUrl(id)}
+              alt=""
+              loading="lazy"
+              onError={() =>
+                setUnavailableIds((previous) => new Set(previous).add(id))
+              }
+            />
+          ))}
+        </span>
+      ) : (
+        <span className="group-board-preview-empty">
+          {imageCount === 0
+            ? 'No images yet'
+            : unavailable || unavailableIds.size > 0
+              ? 'Image previews unavailable'
+              : loaded
+                ? 'No image previews available'
+                : 'Loading image previews'}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export function Group() {
   const { id } = useParams<{ id: string }>();
@@ -246,63 +347,65 @@ export function Group() {
                 {boards.map((b) => (
                   <li className="group-board-card" key={b.id}>
                     <Link className="group-board-link" to={`/b/${b.id}`}>
-                      <span className="group-board-mark" aria-hidden="true">
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          aria-hidden="true"
-                        >
-                          <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
-                          <rect
-                            x="13.5"
-                            y="3.5"
-                            width="7"
-                            height="7"
-                            rx="1.5"
-                          />
-                          <rect
-                            x="3.5"
-                            y="13.5"
-                            width="7"
-                            height="7"
-                            rx="1.5"
-                          />
-                          <rect
-                            x="13.5"
-                            y="13.5"
-                            width="7"
-                            height="7"
-                            rx="1.5"
-                          />
-                        </svg>
-                      </span>
-                      <span className="group-board-copy">
-                        <span className="group-board-title">{b.name}</span>
-                        <span className="group-board-meta">
-                          {plural(b.imageCount, 'image')}{' '}
-                          <span aria-hidden="true">·</span>{' '}
-                          {plural(b.sheetCount, 'sheet')}
+                      <BoardImagePreview
+                        boardId={b.id}
+                        imageCount={b.imageCount}
+                      />
+                      <span className="group-board-details">
+                        <span className="group-board-copy">
+                          <span className="group-board-title">{b.name}</span>
+                          <span className="group-board-meta">
+                            {plural(b.imageCount, 'image')}{' '}
+                            <span aria-hidden="true">·</span>{' '}
+                            {plural(b.sheetCount, 'sheet')}
+                          </span>
                         </span>
-                      </span>
-                      <span
-                        className={
-                          b.open
-                            ? 'group-access group-access--open'
-                            : 'group-access'
-                        }
-                      >
-                        <span aria-hidden="true">{b.open ? '◌' : '⌑'}</span>
-                        {b.open ? 'Open' : 'Private'}
-                      </span>
-                      <span className="group-board-activity">
-                        {b.lastActivity
-                          ? `Active ${new Date(b.lastActivity).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
-                          : 'No activity yet'}
-                      </span>
-                      <span className="group-board-arrow" aria-hidden="true">
-                        ↗
+                        <span
+                          className={
+                            b.open
+                              ? 'group-access group-access--open'
+                              : 'group-access'
+                          }
+                        >
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                          >
+                            {b.open ? (
+                              <>
+                                <circle cx="8" cy="8" r="5.25" />
+                                <path d="M5.7 8h4.6" />
+                              </>
+                            ) : (
+                              <>
+                                <rect
+                                  x="3.2"
+                                  y="6.6"
+                                  width="9.6"
+                                  height="7"
+                                  rx="1.5"
+                                />
+                                <path d="M5.4 6.6V5a2.6 2.6 0 0 1 5.2 0v1.6" />
+                              </>
+                            )}
+                          </svg>
+                          {b.open ? 'Open' : 'Private'}
+                        </span>
+                        <span className="group-board-activity">
+                          {b.lastActivity
+                            ? `Active ${new Date(b.lastActivity).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+                            : 'No activity yet'}
+                        </span>
+                        <span className="group-board-arrow" aria-hidden="true">
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                          >
+                            <path d="M4 12 12 4M5 4h7v7" />
+                          </svg>
+                        </span>
                       </span>
                     </Link>
                   </li>
@@ -329,7 +432,10 @@ export function Group() {
                   <li key={s.id}>
                     <Link to={`/s/${s.id}`}>
                       <span className="group-sheet-glyph" aria-hidden="true">
-                        ▧
+                        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                          <path d="M5 3.5h7l3 3v10H5z" />
+                          <path d="M12 3.5v3h3M7.5 10h5M7.5 13h5" />
+                        </svg>
                       </span>
                       <span className="group-recent-copy">
                         <span className="group-recent-title">{s.name}</span>

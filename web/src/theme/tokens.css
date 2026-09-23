@@ -16,6 +16,7 @@
   --surface-overlay: rgba(255, 255, 255, 0.94); /* status pills, hover card */
   --surface-navigation: #1d2a39;
   --surface-navigation-active: #293b4c;
+  --line-navigation: rgba(223, 234, 239, 0.13);
   --focus-navigation: #a6d5d8;
 
   /* text */
@@ -105,6 +106,7 @@
     --surface-overlay: rgba(38, 41, 46, 0.94);
     --surface-navigation: #171d25;
     --surface-navigation-active: #293843;
+    --line-navigation: rgba(223, 234, 239, 0.11);
     --focus-navigation: #a6d5d8;
 
     --text-primary: #edeef0;
@@ -139,6 +141,7 @@
   --surface-overlay: rgba(38, 41, 46, 0.94);
   --surface-navigation: #171d25;
   --surface-navigation-active: #293843;
+  --line-navigation: rgba(223, 234, 239, 0.11);
   --focus-navigation: #a6d5d8;
 
   --text-primary: #edeef0;

@@ -75,6 +75,109 @@ async function main() {
   });
   console.log('screenshot: shell-desktop.png');
 
+  // Group landing visual acceptance: capture both themes at desktop and
+  // narrow widths, and assert that the shell/page never create horizontal
+  // overflow. The canvas itself remains governed by its own fixed map rules.
+  await page.goto(`${WEB}/g/g1`);
+  await page.waitForSelector('#group-boards-heading');
+  await page.waitForFunction(
+    () =>
+      [
+        ...document.querySelectorAll<HTMLImageElement>(
+          '.group-board-preview img',
+        ),
+      ].length > 0 &&
+      [
+        ...document.querySelectorAll<HTMLImageElement>(
+          '.group-board-preview img',
+        ),
+      ].every((image) => image.naturalWidth > 0),
+    undefined,
+    { timeout: 10_000 },
+  );
+  const previewCounts = await page
+    .locator('.group-board-preview-images')
+    .evaluateAll((previews) =>
+      previews.map((preview) => preview.children.length),
+    );
+  assert(
+    previewCounts.length > 0 && previewCounts.every((count) => count <= 3),
+    `board cards should show at most three real previews each: ${JSON.stringify(previewCounts)}`,
+  );
+  console.log('PASS: visible board covers load real, bounded image previews');
+  for (const viewport of [
+    { width: 1440, height: 1000, label: 'desktop' },
+    { width: 390, height: 844, label: '390' },
+    { width: 320, height: 800, label: '320' },
+  ]) {
+    await page.setViewportSize({
+      width: viewport.width,
+      height: viewport.height,
+    });
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((value) => {
+        if (value === 'dark') document.documentElement.dataset.theme = value;
+        else document.documentElement.removeAttribute('data-theme');
+      }, theme);
+      await page.waitForTimeout(200);
+      await page.screenshot({
+        path: `/tmp/digsite-group-${viewport.label}-${theme}.png`,
+        fullPage: true,
+      });
+      const dimensions = await page.evaluate(() => ({
+        viewport: window.innerWidth,
+        document: document.documentElement.scrollWidth,
+        group: document.querySelector('.group-home')?.scrollWidth ?? 0,
+      }));
+      assert(
+        dimensions.document <= dimensions.viewport + 1 &&
+          dimensions.group <= dimensions.viewport + 1,
+        `group landing overflows horizontally at ${viewport.label}/${theme}: ${JSON.stringify(dimensions)}`,
+      );
+    }
+  }
+  console.log(
+    'PASS: group landing fits desktop, 390px and 320px in light and dark themes',
+  );
+  await page.goto(`${WEB}/groups`);
+  await page.waitForSelector('[data-testid="group-list"]');
+  for (const viewport of [
+    { width: 1440, height: 1000, label: 'desktop' },
+    { width: 390, height: 844, label: '390' },
+    { width: 320, height: 800, label: '320' },
+  ]) {
+    await page.setViewportSize({
+      width: viewport.width,
+      height: viewport.height,
+    });
+    for (const theme of ['light', 'dark'] as const) {
+      await page.evaluate((value) => {
+        if (value === 'dark') document.documentElement.dataset.theme = value;
+        else document.documentElement.removeAttribute('data-theme');
+      }, theme);
+      await page.waitForTimeout(200);
+      await page.screenshot({
+        path: `/tmp/digsite-groups-${viewport.label}-${theme}.png`,
+        fullPage: true,
+      });
+      const dimensions = await page.evaluate(() => ({
+        viewport: window.innerWidth,
+        document: document.documentElement.scrollWidth,
+      }));
+      assert(
+        dimensions.document <= dimensions.viewport + 1,
+        `groups index overflows horizontally at ${viewport.label}/${theme}: ${JSON.stringify(dimensions)}`,
+      );
+    }
+  }
+  console.log(
+    'PASS: groups index fits desktop, 390px and 320px in light and dark themes',
+  );
+  await page.evaluate(() =>
+    document.documentElement.removeAttribute('data-theme'),
+  );
+  await page.setViewportSize({ width: 1600, height: 900 });
+
   // -- 3. the rail switches group without a full reload ---------------------
   // Not asserted === 1: Vite's dev server runs React StrictMode, which
   // double-invokes an empty-dependency effect once on a genuine first
