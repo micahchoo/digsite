@@ -490,6 +490,22 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/sheets/${fx.sheetId}/foreign`,
     outsider: 403,
   },
+  'GET /sheets/:id/replies': {
+    method: 'GET',
+    path: (fx) => `/sheets/${fx.sheetId}/replies`,
+    outsider: 403,
+  },
+  'POST /sheets/:id/replies': {
+    method: 'POST',
+    path: (fx) => `/sheets/${fx.sheetId}/replies`,
+    outsider: 403,
+  },
+  'DELETE /sheets/:id/replies/:replyId': {
+    method: 'DELETE',
+    path: (fx) =>
+      `/sheets/${fx.sheetId}/replies/00000000-0000-0000-0000-000000000000`,
+    outsider: 403,
+  },
   'GET /sheets/:id/reach': {
     method: 'GET',
     path: (fx) => `/sheets/${fx.sheetId}/reach`,

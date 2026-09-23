@@ -31,6 +31,7 @@ import {
   ConfidenceControl,
   DirectionControl,
 } from './ClaimControls.tsx';
+import { Discussion } from './Discussion.tsx';
 import type { SceneElement } from './canvas/types.ts';
 import {
   type EvidenceEnd,
@@ -60,6 +61,10 @@ export interface InspectorProps {
   onDeleteSelected: () => void;
   /** Selects a claim listed on the same pair: an element or a foreign id. */
   onSelectClaim: (id: string) => void;
+  /** This sheet, where its own claims' replies live. */
+  sheetId: string;
+  /** The signed-in person, who may remove their own replies. */
+  userId: string | null;
   /** Opens the two ends of a connection side by side, to check the claim. */
   onCompare?: (ends: [EvidenceEnd, EvidenceEnd], relation: string) => void;
 }
@@ -393,6 +398,11 @@ function OwnClaim(
           onSetProperty={onSetProperty}
           onRemoveProperty={onRemoveProperty}
         />
+        <Discussion
+          sheetId={props.sheetId}
+          elementId={el.id}
+          userId={props.userId}
+        />
       </div>
     );
   }
@@ -475,6 +485,11 @@ function OwnClaim(
         onSetProperty={onSetProperty}
         onRemoveProperty={onRemoveProperty}
       />
+      <Discussion
+        sheetId={props.sheetId}
+        elementId={el.id}
+        userId={props.userId}
+      />
     </div>
   );
 }
@@ -522,6 +537,11 @@ function ForeignClaim(props: InspectorProps) {
           <p className="claim-readonly">{shape.row.label || 'Unlabelled'}</p>
         </section>
         {actions}
+        <Discussion
+          sheetId={shape.row.sheetId}
+          elementId={shape.row.sourceId}
+          userId={props.userId}
+        />
       </div>
     );
   }
@@ -566,6 +586,11 @@ function ForeignClaim(props: InspectorProps) {
       )}
       <PairClaims claims={claims} onSelect={props.onSelectClaim} />
       {actions}
+      <Discussion
+        sheetId={row.sheetId}
+        elementId={row.sourceId}
+        userId={props.userId}
+      />
     </div>
   );
 }

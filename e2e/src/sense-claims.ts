@@ -691,6 +691,58 @@ async function main(): Promise<void> {
     pass(
       '6e. a connection opens side by side; one wheel zooms both; swipe and difference; Esc closes',
     );
+
+    // -- 10. Discuss a claim: across two people and two sheets --------------
+    // The member answers on their own 10 -> 11 "same place"; the listed user
+    // reads it on Faces, where it shows as First pass's claim, and replies.
+    const discussed = await M.edgeBetween(10, 11);
+    assert(discussed, 'the 10 -> 11 connection is gone');
+    await m.evaluate(
+      (id) => (window as unknown as SheetWindow).__digsite.select(id),
+      discussed.id,
+    );
+    await m.getByTestId('discussion').waitFor();
+    await m
+      .getByTestId('discussion-input')
+      .fill('The chimney and the gutter line up.');
+    await m.getByTestId('discussion-send').click();
+    await m
+      .getByTestId('discussion-reply')
+      .filter({ hasText: 'The chimney and the gutter line up.' })
+      .waitFor({ timeout: 5000 });
+    const foreignRows = await listed.get<{
+      edges: { id: string; relation: string; sheetName: string }[];
+    }>(`/sheets/${faces.id}/foreign`);
+    const theirs = foreignRows.json.edges.find(
+      (e) => e.relation === 'same place' && e.sheetName === 'First pass',
+    );
+    assert(theirs, 'Faces does not see First pass\'s "same place"');
+    await L.open(faces.id);
+    await l.evaluate(
+      (id) => (window as unknown as SheetWindow).__digsite.select(id),
+      `edge-${theirs.id}`,
+    );
+    const onFaces = l
+      .getByTestId('discussion-reply')
+      .filter({ hasText: 'The chimney and the gutter line up.' });
+    await onFaces.waitFor({ timeout: 10_000 });
+    await l
+      .getByTestId('discussion-input')
+      .fill('The roofline is different; see the dormer.');
+    await l.keyboard.press('Control+Enter');
+    await l
+      .getByTestId('discussion-reply')
+      .filter({ hasText: 'see the dormer' })
+      .waitFor({ timeout: 5000 });
+    await l.screenshot({ path: `${SHOTS}10-discussion.png` });
+    // The member sees the answer without reloading (polled).
+    await m
+      .getByTestId('discussion-reply')
+      .filter({ hasText: 'see the dormer' })
+      .waitFor({ timeout: 12_000 });
+    pass(
+      "10. a reply on a claim reaches the other sheet's reader, who answers in place; the first sees it live",
+    );
     await m.keyboard.press('Escape');
     await m.waitForTimeout(3500); // let First pass save before the board reads it
 

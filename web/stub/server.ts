@@ -551,6 +551,19 @@ function claimsOnBoard(boardId: string) {
   return { regions, edges };
 }
 
+const repliesBySheet: Record<
+  string,
+  {
+    id: string;
+    elementId: string;
+    by: { id: string; name: string };
+    text: string;
+    at: string;
+    deleted: boolean;
+  }[]
+> = {};
+let replySeq = 0;
+
 /** Other sheets' edges with exactly one end on `sheetId` — GET /sheets/:id/reach. */
 function reachFor(sheetId: string) {
   const held = new Set(SHEET_IMAGES[sheetId]?.map((slot) => `img-${slot}`));
@@ -2099,6 +2112,50 @@ const httpServer = createServer(async (req, res) => {
   }
   if (/^\/sheets\/[^/]+\/foreign$/.test(url.pathname)) {
     return json(200, foreignFor(url.pathname.split('/')[2] ?? ''));
+  }
+  // CONTEXT.md "Reply": what people say about a claim, per sheet. In
+  // memory, append-only, like the real table.
+  const repliesMatch = url.pathname.match(
+    /^\/sheets\/([^/]+)\/replies(?:\/([^/]+))?$/,
+  );
+  if (repliesMatch) {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const sheetId = repliesMatch[1] ?? '';
+    const list = repliesBySheet[sheetId] ?? [];
+    repliesBySheet[sheetId] = list;
+    if (req.method === 'GET' && !repliesMatch[2]) {
+      return json(200, { replies: list.filter((r) => !r.deleted) });
+    }
+    if (req.method === 'POST' && !repliesMatch[2]) {
+      const body = await readJson<{ elementId?: string; text?: string }>();
+      const text = (body.text ?? '').trim();
+      if (!body.elementId || !text || text.length > 2000)
+        return json(400, {
+          error: 'a reply needs a claim and 1 to 2000 characters',
+        });
+      const reply = {
+        id: `reply-${++replySeq}`,
+        elementId: body.elementId,
+        by: { id: USERS[u].id, name: USERS[u].name },
+        text,
+        at: new Date().toISOString(),
+        deleted: false,
+      };
+      list.push(reply);
+      const { deleted: _deleted, ...shown } = reply;
+      return json(201, shown);
+    }
+    if (req.method === 'DELETE' && repliesMatch[2]) {
+      const reply = list.find(
+        (r) =>
+          r.id === repliesMatch[2] && !r.deleted && r.by.id === USERS[u].id,
+      );
+      if (!reply)
+        return json(403, { reason: 'only its writer removes a reply' });
+      reply.deleted = true;
+      return json(200, { ok: true });
+    }
   }
   if (/^\/sheets\/[^/]+\/reach$/.test(url.pathname)) {
     return json(200, reachFor(url.pathname.split('/')[2] ?? ''));

@@ -24,6 +24,7 @@ import {
   groupForViewing,
   imageForDeleting,
   sheetForDeleting,
+  sheetForDiscussing,
   sheetForEditing,
 } from '../access/index.ts';
 import { createHttpServer } from '../app.ts';
@@ -302,6 +303,9 @@ describe('access matrix', () => {
       // An alias changes how claims are read, never a claim: exactly the
       // viewers of the board, the same cells as boardForViewing(B-private).
       ['boardForAliasing(B-private)', boardForAliasing, bPrivateId],
+      // A reply says something about a claim, never changes one: exactly the
+      // viewers of the board, the same cells as sheetForEditing(S-private).
+      ['sheetForDiscussing(S-private)', sheetForDiscussing, sPrivateId],
     ];
 
     const expected: Record<string, boolean[]> = {
@@ -314,6 +318,7 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
         false,
         false,
         false,
@@ -332,6 +337,7 @@ describe('access matrix', () => {
         true,
         true,
         true,
+        true,
       ],
       member: [
         true,
@@ -339,6 +345,7 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
         false,
         false,
         false,
@@ -360,6 +367,7 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        true,
       ],
       outsider: [
         false,
@@ -369,6 +377,7 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
         false,
         false,
         false,

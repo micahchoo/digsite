@@ -143,6 +143,21 @@ export type FolderImport = {
   state: 'running' | 'done';
 };
 
+// CONTEXT.md "Reply": what people say about a claim. GET /sheets/:id/replies
+// returns every live reply on the sheet's claims, oldest first; POST adds
+// one; DELETE /sheets/:id/replies/:replyId removes your own.
+export type ClaimReply = {
+  id: string;
+  /** The claim's element id on its sheet. */
+  elementId: string;
+  by: { id: string; name: string };
+  text: string;
+  at: string;
+};
+export type GetRepliesResponse = { replies: ClaimReply[] };
+export type AddReplyRequest = { elementId: string; text: string };
+export type AddReplyResponse = ClaimReply;
+
 export type AllowlistRequest = { userId: string };
 export type AllowlistResponse = { userId: string }[];
 

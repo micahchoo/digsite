@@ -660,6 +660,8 @@ export function Sheet() {
           },
           onCopyForeign: (fid) => tools.copyForeign(fid),
           onDeleteSelected: () => tools.deleteSelected(),
+          sheetId,
+          userId: session?.user.id ?? null,
           onCompare: ([a, b], relation) => {
             const end = (e: typeof a): CompareEnd => ({
               src: api.originalUrl(e.imageId),

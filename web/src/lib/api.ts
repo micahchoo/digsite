@@ -8,6 +8,7 @@ import type {
   AcceptInvitationResponse,
   AddImagesToSheetRequest,
   AddImagesToSheetResponse,
+  AddReplyResponse,
   AliasesResponse,
   AllowlistRequest,
   AllowlistResponse,
@@ -28,6 +29,7 @@ import type {
   GetBoardVocabularyResponse,
   GetImageResponse,
   GetNeighbourhoodResponse,
+  GetRepliesResponse,
   GetSectionsResponse,
   GetSheetElementsResponse,
   GetSheetForeignResponse,
@@ -382,6 +384,18 @@ export const api = {
     request<MeaningResponse>(
       `/boards/${boardId}/similar?${new URLSearchParams({ image: imageId, sort, limit: String(limit) })}`,
     ),
+  // CONTEXT.md "Reply": what people say about a claim, per sheet.
+  getReplies: (sheetId: string) =>
+    request<GetRepliesResponse>(`/sheets/${sheetId}/replies`),
+  addReply: (sheetId: string, elementId: string, text: string) =>
+    request<AddReplyResponse>(`/sheets/${sheetId}/replies`, {
+      method: 'POST',
+      body: JSON.stringify({ elementId, text }),
+    }),
+  deleteReply: (sheetId: string, replyId: string) =>
+    request<{ ok: true }>(`/sheets/${sheetId}/replies/${replyId}`, {
+      method: 'DELETE',
+    }),
   startFolderImport: (boardId: string, path: string) =>
     request<FolderImport>(`/boards/${boardId}/imports`, {
       method: 'POST',

@@ -1,10 +1,13 @@
 import type {
   AddImagesToSheetRequest,
   AddImagesToSheetResponse,
+  AddReplyRequest,
+  AddReplyResponse,
   ArchiveSheetResponse,
   CreateSheetRequest,
   CreateSheetResponse,
   GetNeighbourhoodResponse,
+  GetRepliesResponse,
   GetSheetElementsResponse,
   GetSheetForeignResponse,
   GetSheetReachResponse,
@@ -30,6 +33,7 @@ import {
   boardForCreatingSheet,
   boardForViewing,
   sheetForDeleting,
+  sheetForDiscussing,
   sheetForEditing,
 } from '../access/index.ts';
 import { pool } from '../db/pool.ts';
@@ -43,6 +47,12 @@ import {
 } from '../http.ts';
 import { neighbourhoodFrom } from './neighbourhood.ts';
 import { reachOf } from './reach.ts';
+import {
+  REPLY_MAX_CHARS,
+  addReply,
+  removeReply,
+  repliesOn,
+} from './replies.ts';
 import { broadcastSheetScene, roomStats } from './room.ts';
 import { toEdgeRow, toRegionRow } from './rows.ts';
 import {
@@ -614,6 +624,50 @@ export function registerSheetRoutes(router: Router) {
       sheet.board_id,
     );
     json(ctx.res, 200, response);
+  });
+
+  // CONTEXT.md "Reply": what people say about a claim (replies.ts). Anyone
+  // who can see the board may read and add; only the writer removes.
+  router.get('/sheets/:id/replies', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForDiscussing(userId, param(ctx, 'id'));
+    const response: GetRepliesResponse = { replies: await repliesOn(sheet.id) };
+    json(ctx.res, 200, response);
+  });
+
+  router.post('/sheets/:id/replies', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForDiscussing(userId, param(ctx, 'id'));
+    const body = (await readJsonBody(ctx.req)) as Partial<AddReplyRequest>;
+    const text = typeof body?.text === 'string' ? body.text.trim() : '';
+    const elementId =
+      typeof body?.elementId === 'string' ? body.elementId.trim() : '';
+    if (!elementId || elementId.length > 200) {
+      return json(ctx.res, 400, { error: 'elementId is required' });
+    }
+    if (!text || text.length > REPLY_MAX_CHARS) {
+      return json(ctx.res, 400, {
+        error: `a reply is 1 to ${REPLY_MAX_CHARS} characters`,
+      });
+    }
+    const response: AddReplyResponse = await addReply(
+      sheet.board_id,
+      sheet.id,
+      elementId,
+      userId,
+      text,
+    );
+    json(ctx.res, 201, response);
+  });
+
+  router.del('/sheets/:id/replies/:replyId', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForDiscussing(userId, param(ctx, 'id'));
+    const removed = await removeReply(sheet.id, param(ctx, 'replyId'), userId);
+    if (!removed) {
+      return json(ctx.res, 403, { reason: 'only its writer removes a reply' });
+    }
+    json(ctx.res, 200, { ok: true });
   });
 
   router.get('/sheets/:id/rows', async (ctx) => {

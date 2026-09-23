@@ -241,6 +241,23 @@ export async function sheetForEditing(
   return sheet;
 }
 
+/** CONTEXT.md "Reply": anyone who can see the board may discuss any claim
+ * on it, on any sheet, including a sheet they would only see as foreign
+ * claims. A reply says something about a claim; it never changes one. */
+export async function sheetForDiscussing(
+  userId: string,
+  sheetId: string,
+  db: Pool = pool,
+): Promise<SheetRow> {
+  const { rows } = await db.query('SELECT * FROM sheets WHERE id = $1', [
+    sheetId,
+  ]);
+  const sheet = rows[0];
+  if (!sheet) deny('sheet not found');
+  await boardForViewing(userId, sheet.board_id, db);
+  return sheet;
+}
+
 export async function imageForViewing(
   userId: string,
   imageId: string,
