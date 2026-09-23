@@ -27,6 +27,9 @@ export function orderExpr(sort: Sort): string {
   if (sort.key === 'name') return `name ${dir} NULLS LAST, slot ASC`;
   if (sort.key === 'uploaded_at')
     return `uploaded_at ${dir} NULLS LAST, slot ASC`;
+  // Roadmap item 6: the board's arrangement by meaning; an image not yet
+  // placed goes last either way (meaning/arrangement.ts).
+  if (sort.key === 'meaning') return `meaning_pos ${dir} NULLS LAST, slot ASC`;
   // sort.key.property passed parseSortId's PROPERTY_RE (alnum/_/-) already,
   // by the only two callers that build a Sort from a URL — see boards/tiles.ts
   // and boards/routes.ts. Never build a Sort here from unvalidated input.

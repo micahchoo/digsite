@@ -326,13 +326,15 @@ const SORTABLE_KEYS = [
 function rankedImages(boardId: string, sort: Sort): Img[] {
   const dir = sort.dir === 'asc' ? 1 : -1;
   const key = sort.key;
-  const value = (img: Img): string | number =>
-    key === 'name'
-      ? img.name
-      : key === 'uploaded_at'
-        ? img.uploadedAt
-        : ((img.properties as Record<string, string | number>)[key.property] ??
-          '');
+  const value = (img: Img): string | number => {
+    if (key === 'name') return img.name;
+    if (key === 'uploaded_at') return img.uploadedAt;
+    // The stub has no embeddings: its meaning arrangement is slot order.
+    if (key === 'meaning') return img.slot;
+    return (
+      (img.properties as Record<string, string | number>)[key.property] ?? ''
+    );
+  };
   return images
     .filter((i) => i.boardId === boardId)
     .sort((a, b) => {
@@ -351,6 +353,8 @@ function sectionValue(sort: Sort, img: Img): string {
   const key = sort.key;
   if (key === 'name') return img.name.charAt(0).toUpperCase();
   if (key === 'uploaded_at') return img.uploadedAt.slice(0, 10);
+  // Every position is distinct, so the meaning arrangement has no sections.
+  if (key === 'meaning') return '';
   const raw = (img.properties as Record<string, string | number>)[key.property];
   return raw === undefined ? '' : String(raw);
 }

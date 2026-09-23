@@ -14,6 +14,12 @@ describe('sortId / parseSortId round-trip', () => {
     expect(parseSortId(sortId(s))).toEqual(s);
   });
 
+  test('a column key (meaning)', () => {
+    const s: Sort = { key: 'meaning', dir: 'asc' };
+    expect(sortId(s)).toBe('meaning.asc');
+    expect(parseSortId(sortId(s))).toEqual(s);
+  });
+
   test('a property key', () => {
     const s: Sort = { key: { property: 'year', type: 'number' }, dir: 'asc' };
     expect(sortId(s)).toBe('p.number.year.asc');

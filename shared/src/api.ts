@@ -91,6 +91,10 @@ export type GetBoardResponse = {
   defaultSort: string;
   sortableKeys: SortableKey[];
   groupId: string;
+  /** Embedded images with no place yet in the meaning arrangement; present
+   * only while embeddings are on. At 0 the meaning order will not move until
+   * a new picture is embedded (the arrangement is deterministic). */
+  meaningUnplaced?: number;
 };
 
 export type UpdateBoardRequest = { defaultSort: string };

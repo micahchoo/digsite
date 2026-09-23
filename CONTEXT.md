@@ -146,6 +146,10 @@ sheet that made it. The board never writes a claim.
   (`image_embeddings`, pgvector `halfvec`), computed by the worker when
   `EMBEDDINGS=on`. **Similar** and **search** return images by meaning, as
   ranks under the viewer's sort, the same shape as find.
+- **Arrangement** — one place per embedded image in its board's `meaning`
+  sort (`images.meaning_pos`), so that pictures near on the map, across
+  and down, are near in meaning. Recomputed whole by the worker after
+  embeddings land; an image not yet placed sorts last.
 - **Near-duplicate** — an image that is nearly another: close in meaning
   (similarity 0.975 or more) AND in pixels (0.5% or less of the picture
   changed at 128 px). A suggestion that a person accepts or declines.

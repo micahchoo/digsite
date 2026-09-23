@@ -202,6 +202,8 @@ async function runEmbedJob(payload: Record<string, unknown>): Promise<void> {
       vectors.map(toVectorText),
     ],
   );
+  const { enqueueArrangeDebounced } = await import('../meaning/arrangement.ts');
+  await enqueueArrangeDebounced(boardId);
 }
 
 async function runLadderJob(payload: Record<string, unknown>): Promise<void> {
@@ -307,6 +309,11 @@ export async function runJob(
   if (kind === 'rank-rebuild') return runRankRebuildJob(payload);
   if (kind === 'materialise') return runMaterialiseJob(payload);
   if (kind === 'embed') return runEmbedJob(payload);
+  if (kind === 'arrange') {
+    const { arrangeBoard } = await import('../meaning/arrangement.ts');
+    await arrangeBoard(payload.boardId as string);
+    return;
+  }
   if (kind === 'folder-import') {
     // Dynamic: boards/folder-import.ts enqueues through this file.
     const { runFolderImportBatch } = await import('../boards/folder-import.ts');

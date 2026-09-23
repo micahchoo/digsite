@@ -9,6 +9,9 @@ export type PropertyType = 'text' | 'number' | 'boolean' | 'date' | 'list';
 export type SortKey =
   | 'name'
   | 'uploaded_at'
+  // One arrangement of the whole board by what the pictures show; images
+  // without an embedding come last (docs/roadmap.md item 6).
+  | 'meaning'
   | { property: string; type: PropertyType };
 export type Sort = { key: SortKey; dir: 'asc' | 'desc' };
 
@@ -24,8 +27,10 @@ function isDir(v: string | undefined): v is 'asc' | 'desc' {
   return v !== undefined && DIR_RE.test(v);
 }
 
-function isColumnKey(v: string | undefined): v is 'name' | 'uploaded_at' {
-  return v === 'name' || v === 'uploaded_at';
+function isColumnKey(
+  v: string | undefined,
+): v is 'name' | 'uploaded_at' | 'meaning' {
+  return v === 'name' || v === 'uploaded_at' || v === 'meaning';
 }
 
 function isPropertyType(v: string | undefined): v is PropertyType {

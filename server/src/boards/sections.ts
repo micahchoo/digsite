@@ -19,6 +19,7 @@ export type Section = { label: string; fromRank: number; toRank: number };
 function sectionKeyExpr(sort: Sort): string {
   if (sort.key === 'name') return 'upper(left(i.name, 1))';
   if (sort.key === 'uploaded_at') return `to_char(i.uploaded_at, 'YYYY-MM-DD')`;
+  if (sort.key === 'meaning') throw new Error('meaning has no sections');
   // sort.key.property already passed parseSortId's PROPERTY_RE (alnum/_/-)
   // by the only two callers that build a Sort from a URL — same trust
   // boundary as ranks.ts#orderExpr; never build a Sort here from
@@ -40,6 +41,9 @@ export async function sectionsFor(
   /** The order to walk, when the caller names its build (C3). */
   given?: RankOrder,
 ): Promise<Sections> {
+  // Every meaning position is distinct: a section per value would be one
+  // per image. None until the arrangement's top groups become sections.
+  if (sort.key === 'meaning') return { sections: [], truncated: false };
   const order = given ?? (await rankOrder(boardId, sort));
   const key = `${boardId}:${sortId(sort)}`;
   const hit = memo.get(key);

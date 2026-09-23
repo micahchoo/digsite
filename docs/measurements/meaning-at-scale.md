@@ -78,3 +78,57 @@ rule found 56 pairs among 32 images: every labelled re-capture, every
 byte-identical copy, and none of the labelled non-duplicates. It took
 0.8 ms per image, because the ladder already holds each cell. The
 thresholds come from screenshots only; photos have not been measured.
+
+## A map arranged by meaning (item 6)
+
+The `meaning` sort reads `images.meaning_pos`. The worker's `arrange`
+job writes that column from a bisecting 2-means tree over the board's
+embeddings (`meaning/arrange.ts`). At each split, the half nearer the
+last placed picture goes first. Inside a leaf of 16, pictures follow a
+nearest-neighbour chain. Images not yet placed sort last.
+
+Quality: how often an image's single best match (exact, over the whole
+board) sits within 32 ranks, two map rows, of it. Up to 500 sampled
+images.
+
+| board | meaning | upload order | random |
+| --- | ---: | ---: | ---: |
+| owner's screenshots (142) | 88.7% | 66.2% | 38.0% |
+| bulk-import photos (20,001) | 14.4% | 0.4% | 0.6% |
+
+Mean similarity between map neighbours (right and below) moved the same
+way: 0.758 against 0.725 and 0.681 on the screenshots, and 0.952 against
+0.923 and 0.923 on the photos.
+
+Cost at 1,000,000 random 512-d vectors, the worst case for structure:
+
+| step | time |
+| --- | ---: |
+| load (float16 binary, 20,000 a page) | 4.6 s |
+| arrange | 72–86 s |
+| write positions, all new / none changed | ~50 s / ~0 s |
+| whole job, first / again | 130 s / 81 s |
+| rank rebuild `meaning.asc` | 0.26–0.40 s |
+
+Peak RSS was 2.5 GB, the vectors' own 2 GB plus working space, under
+the worker's 3,072 MB retire line. It took three fixes to get there,
+each measured, all from memory outside the JS heap:
+
+- Per-split typed arrays (centroids, scores, rotation copies), about
+  60,000 splits' worth, grew RSS from 2.5 to 6 GB while the heap stayed
+  flat. One workspace for the whole run now holds it flat.
+- Each page's hex bytea text and Buffers peaked the load at 6.4 GB,
+  with no collection or a minor one per page alike. A full `Bun.gc(true)`
+  per page: 2.4 GB, and no slower.
+- Clearing old positions with `id <> ALL($1M ids)` scanned the whole
+  array for every positioned row. It is now `NOT EXISTS` on the
+  embeddings index.
+
+Positions are written in batches of 20,000, each its own transaction.
+One transaction over a million rows held every image's row lock for
+55 s.
+
+`GET /boards/:id` gives `meaningUnplaced`, embedded minus placed. That
+is two index-only counts, about 50 ms at a million. The arrangement is
+deterministic, so at 0 the order does not move until a new picture is
+embedded.

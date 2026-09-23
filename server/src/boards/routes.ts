@@ -89,6 +89,10 @@ import {
   toWebRequest,
 } from '../http.ts';
 import { checkLimit, tooManyRequests } from '../limits.ts';
+import {
+  arrangementOf,
+  enqueueArrangeDebounced,
+} from '../meaning/arrangement.ts';
 import { duplicatesOf } from '../meaning/duplicates.ts';
 import { suggestLabels } from '../meaning/labels.ts';
 import { searchText, similarTo } from '../meaning/search.ts';
@@ -293,11 +297,20 @@ function toBoardImage(i: ImageRow): BoardImage {
   };
 }
 
-async function sortableKeysFor(boardId: string): Promise<SortableKey[]> {
+async function sortableKeysFor(
+  boardId: string,
+  arrangement: { embedded: number; placed: number } | null,
+): Promise<SortableKey[]> {
   const keys: SortableKey[] = [
     { key: 'name', label: 'Name' },
     { key: 'uploaded_at', label: 'Uploaded' },
   ];
+  // Roadmap item 6: offered once the board has embeddings. A board
+  // embedded before arrangements existed has no positions: queue one.
+  if (arrangement && arrangement.embedded > 0) {
+    keys.push({ key: 'meaning', label: 'Meaning' });
+    if (arrangement.placed === 0) await enqueueArrangeDebounced(boardId);
+  }
   const { rows } = await pool.query(
     `SELECT e.key, jsonb_typeof(e.value) AS t,
        bool_and(CASE WHEN jsonb_typeof(e.value) = 'string'
@@ -402,7 +415,8 @@ export function registerBoardRoutes(router: Router) {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
     const board = await boardForViewing(userId, boardId);
-    const sortableKeys = await sortableKeysFor(boardId);
+    const arrangement = env.EMBEDDINGS ? await arrangementOf(boardId) : null;
+    const sortableKeys = await sortableKeysFor(boardId, arrangement);
     const response: GetBoardResponse = {
       id: board.id,
       name: board.name,
@@ -411,6 +425,9 @@ export function registerBoardRoutes(router: Router) {
       defaultSort: board.default_sort,
       sortableKeys,
       groupId: board.org_id,
+      ...(arrangement
+        ? { meaningUnplaced: arrangement.embedded - arrangement.placed }
+        : {}),
     };
     json(ctx.res, 200, response);
   });
