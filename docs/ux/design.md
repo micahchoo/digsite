@@ -3,7 +3,11 @@
 Reads against `../../CONTEXT.md` (the words), `../phases/6-product.md` (the
 three metaphors, Selection, the missed features) and `audit.md` (the current
 product's friction). Every decision below is traceable to one of those three.
-Mockups: `design/*.png`, sources in `design/src/`.
+Historical mockups: `design/*.png`, sources in `design/src/`.
+The user rejected their visual direction on 2026-09-22. Use
+[the revised interface direction](interface-direction.md) and the actual
+image-graph plugin as the visual reference. Behavioral requirements below
+still apply unless a later product decision supersedes them.
 
 ## 1. Principles
 
