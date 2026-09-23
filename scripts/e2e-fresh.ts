@@ -179,6 +179,9 @@ async function main() {
         SERVER_ORIGIN: serverOrigin,
         WEB_ORIGIN: webOrigin,
         DATA_DIR: dataDir,
+        // Kept across runs: a fresh DATA_DIR would download the CLIP
+        // weights (~150 MB) again whenever EMBEDDINGS=on.
+        MODELS_DIR: process.env.MODELS_DIR ?? join(REPO_ROOT, '.cache/models'),
         STORAGE: 'fs',
       } as Record<string, string>,
       stdout: 'inherit',

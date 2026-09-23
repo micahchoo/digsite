@@ -110,6 +110,14 @@ the user asked to commit as I go, 2026-09-23). Also done since then:
   `selection/range` sends `v`; a 409 selects nothing and says why. Walk
   claim 15 counts tile requests over the network in a fresh browser: a
   reload makes none, and a property edit brings them back once.
+- Roadmap item 6, web and walk: `meaning` is a SortKey, and the control
+  lists it once the server offers it. Walk claim 16 uploads 8 families of 24
+  pictures, shuffled, waits for `meaningUnplaced === 0` and compares
+  meaning.asc with upload order (189 against 57 of 192). It SKIPs without
+  `EMBEDDINGS=on`; `e2e:fresh` keeps the CLIP weights in `.cache/models`.
+  It found a server defect: reading a board postponed its arrangement
+  forever (digsite-1b fixed it, e7b93d3). Claim 6d now reads the caption
+  under a picture with room below it, since the hour suite moves pictures.
 
 Found and fixed on the way:
 - `smoke-sheet-surroundings.ts` hung forever on a failure (the five codex
@@ -130,7 +138,7 @@ Found and fixed on the way:
 - A label chip's press reached the draw layer, which captured the click.
 
 Verify with `bun run smoke` (16 scripts), `bun run e2e:fresh` (all six
-suites pass together; `IMPORT_ROOTS=<dir>` for walk claim 8), `cd web &&
+suites pass together; `IMPORT_ROOTS=<dir>` for walk claim 8, `EMBEDDINGS=on` for claim 16), `cd web &&
 bun test`, `cd shared && bun test`, and `cd server && bun test
 replies-routes extract-routes making-sense access.test routes-audit`.
 

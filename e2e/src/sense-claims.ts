@@ -5,7 +5,8 @@
 // screenshot. Seed (server/src/seed.ts): board "Field", sheets "First pass"
 // (member, slots 0..11) and "Faces" (listed, slots 6..17).
 import { mkdirSync, writeFileSync } from 'node:fs';
-import type { EdgeRow } from '@digsite/shared';
+import type { EdgeRow, GetBoardResponse } from '@digsite/shared';
+import { createCanvas } from '@napi-rs/canvas';
 import { type BrowserContext, type Page, chromium } from 'playwright';
 import { shortestPath } from '../../web/src/board/path.ts';
 import { edgePaths, midSegment } from '../../web/src/sheet/routing.ts';
@@ -206,6 +207,167 @@ function sheetPage(page: Page, imageBySlot: Map<number, string>) {
     region,
     edgeBetween,
   };
+}
+
+// -- 16. A map arranged by meaning -------------------------------------------
+// Eight families of pictures, uploaded shuffled, so upload order mixes them
+// and only an arrangement by what they show can put a picture next to its
+// kind. The claim is relative (docs/roadmap.md item 6): a picture's best
+// /similar match sits within two rows more often under meaning.asc than
+// under uploaded_at.desc. It stays true whatever the embedding model is.
+const FAMILIES = 8;
+const PER_FAMILY = 24;
+const NEAR = 32; // two rows of 16
+
+/** A picture of family `f`: its hue and its shape, varied within the family. */
+function paintFamily(
+  ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>,
+  f: number,
+  i: number,
+): void {
+  const hue = f * (360 / FAMILIES);
+  ctx.fillStyle = `hsl(${hue}, 70%, ${45 + (i % 4) * 5}%)`;
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = `hsl(${(hue + 180) % 360}, 60%, 30%)`;
+  const r = 40 + (i % 5) * 12;
+  const x = 60 + ((i * 37) % 136);
+  const y = 60 + ((i * 53) % 136);
+  ctx.beginPath();
+  if (f % 2 === 0) ctx.arc(x, y, r, 0, Math.PI * 2);
+  else ctx.rect(x - r, y - r, r * 2, r * 2);
+  ctx.fill();
+}
+
+/** Deterministic shuffle, so a failure reproduces. */
+function shuffled<T>(xs: T[]): T[] {
+  const out = [...xs];
+  let seed = 7;
+  for (let i = out.length - 1; i > 0; i--) {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31;
+    const j = seed % (i + 1);
+    [out[i], out[j]] = [out[j] as T, out[i] as T];
+  }
+  return out;
+}
+
+async function meaningClaim(
+  member: Session,
+  labId: string,
+  page: Page,
+): Promise<void> {
+  const created = await member.post<{ id: string }>(`/groups/${labId}/boards`, {
+    name: `Arranged ${Date.now()}`,
+    open: true,
+  });
+  // The board says how many pictures wait for a place only while the
+  // server computes embeddings (EMBEDDINGS=on).
+  const probe = await member.get<GetBoardResponse>(
+    `/boards/${created.json.id}`,
+  );
+  if (probe.json.meaningUnplaced === undefined) {
+    console.log('SKIP: 16. arranged by meaning (EMBEDDINGS is not on)');
+    return;
+  }
+  assert(created.status === 200, `create board: ${created.status}`);
+  const boardId = created.json.id;
+  // One canvas, encoded every use: the encode releases what was drawn.
+  const canvas = createCanvas(256, 256);
+  const ctx = canvas.getContext('2d');
+  const order = shuffled(
+    Array.from({ length: FAMILIES * PER_FAMILY }, (_, n) => n),
+  );
+  // A batch holds at most 100 files; the upload queue sends batches too.
+  for (let start = 0; start < order.length; start += 48) {
+    const form = new FormData();
+    for (const n of order.slice(start, start + 48)) {
+      const f = Math.floor(n / PER_FAMILY);
+      paintFamily(ctx, f, n % PER_FAMILY);
+      form.append(
+        'files',
+        new Blob([new Uint8Array(canvas.encodeSync('png'))], {
+          type: 'image/png',
+        }),
+        `family-${f}-${n % PER_FAMILY}.png`,
+      );
+    }
+    const up = await member.postForm(`/boards/${boardId}/images`, form);
+    assert(up.status === 202, `upload: ${up.status}`);
+  }
+
+  const ranked = async (sort: string) =>
+    (
+      await member.get<{ images: { id: string }[] }>(
+        `/boards/${boardId}/images?sort=${sort}&from=0&count=${FAMILIES * PER_FAMILY}`,
+      )
+    ).json.images.map((i) => i.id);
+
+  // Every picture embedded: /similar answers 409 until then.
+  const ids = await ranked('uploaded_at.desc');
+  assert(ids.length === FAMILIES * PER_FAMILY, `uploaded ${ids.length}`);
+  const best = new Map<string, string>();
+  const deadline = Date.now() + 180_000;
+  while (best.size < ids.length) {
+    assert(Date.now() < deadline, `embedded ${best.size}/${ids.length}`);
+    for (const id of ids) {
+      if (best.has(id)) continue;
+      const r = await member.get<{ matches: { imageId: string }[] }>(
+        `/boards/${boardId}/similar?image=${id}&sort=uploaded_at.desc&limit=2`,
+      );
+      if (r.status !== 200) continue;
+      const top = r.json.matches.find((m) => m.imageId !== id);
+      if (top) best.set(id, top.imageId);
+    }
+    if (best.size < ids.length) await Bun.sleep(2000);
+  }
+
+  // The arrangement runs ~30 s after the last embedding lands. It is in
+  // when no embedded picture waits for a place, and it is deterministic, so
+  // the order cannot move after that.
+  const board = () =>
+    member.get<GetBoardResponse>(`/boards/${boardId}`).then((r) => r.json);
+  for (;;) {
+    const b = await board();
+    assert(
+      b.meaningUnplaced !== undefined,
+      'the board does not say how many pictures wait for a place by meaning',
+    );
+    if (b.meaningUnplaced === 0) break;
+    assert(
+      Date.now() < deadline,
+      `${b.meaningUnplaced} pictures never got a place by meaning`,
+    );
+    await Bun.sleep(3000);
+  }
+  assert(
+    (await board()).sortableKeys.some((k) => k.key === 'meaning'),
+    'the board does not offer meaning as a way to arrange it',
+  );
+  const meaning = await ranked('meaning.asc');
+
+  const near = (order: string[]) => {
+    const rank = new Map(order.map((id, i) => [id, i]));
+    let n = 0;
+    for (const [id, match] of best) {
+      const a = rank.get(id);
+      const b = rank.get(match);
+      if (a !== undefined && b !== undefined && Math.abs(a - b) <= NEAR) n++;
+    }
+    return n;
+  };
+  const byMeaning = near(meaning);
+  const byUpload = near(ids);
+  assert(
+    byMeaning > byUpload,
+    `best matches within two rows: ${byMeaning} by meaning, ${byUpload} by upload`,
+  );
+
+  await page.goto(`${WEB}/b/${boardId}`);
+  await page.getByTestId('sort-key').selectOption(JSON.stringify('meaning'));
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: `${SHOTS}16-arranged-by-meaning.png` });
+  pass(
+    `16. arranged by meaning, ${byMeaning}/${ids.length} pictures have their best match within two rows (by upload: ${byUpload})`,
+  );
 }
 
 async function main(): Promise<void> {
@@ -593,11 +755,31 @@ async function main(): Promise<void> {
       (window as unknown as SheetWindow).__digsite.zoomToFit(),
     );
     await m.waitForTimeout(300);
-    // A caption is canvas pixels, so read them: under image 2 there must be
+    // A caption is canvas pixels, so read them: under a picture there must be
     // text-coloured pixels that the empty canvas background does not have.
-    const img2 = await M.imageEl(2);
-    const under2 = await M.toClient(img2.x, img2.y + img2.height);
-    const w2 = await M.toClient(img2.x + img2.width, img2.y + img2.height);
+    // The renderer leaves out a caption whose box would cover another
+    // picture, and the other suites move pictures at random, so the claim
+    // reads under the first picture with room below it (render.ts: 8 px
+    // gap, 14 px tall).
+    const screenBoxes = await Promise.all(
+      Array.from({ length: 12 }, async (_, slot) => {
+        const el = await M.imageEl(slot);
+        const a = await M.toClient(el.x, el.y);
+        const b = await M.toClient(el.x + el.width, el.y + el.height);
+        return { slot, x0: a.x, y0: a.y, x1: b.x, y1: b.y };
+      }),
+    );
+    const roomy = screenBoxes.find((p) =>
+      screenBoxes.every(
+        (o) =>
+          o === p ||
+          !(p.x0 < o.x1 && o.x0 < p.x1 && p.y1 + 8 < o.y1 && o.y0 < p.y1 + 22),
+      ),
+    );
+    assert(roomy, 'no picture on the sheet has room for a caption below it');
+    const pic = await M.imageEl(roomy.slot);
+    const under = await M.toClient(pic.x, pic.y + pic.height);
+    const right = await M.toClient(pic.x + pic.width, pic.y + pic.height);
     const captionInk = await m.evaluate(
       ({ x0, x1, y }) => {
         const canvas = document.querySelector<HTMLCanvasElement>(
@@ -626,11 +808,11 @@ async function main(): Promise<void> {
             ink++;
         return ink;
       },
-      { x0: under2.x, x1: w2.x, y: under2.y },
+      { x0: under.x, x1: right.x, y: under.y },
     );
     assert(
       captionInk > 20,
-      `no caption drawn under image 2 (${captionInk} px)`,
+      `no caption drawn under image ${roomy.slot} (${captionInk} px)`,
     );
     await m.evaluate(
       (ids) =>
@@ -1340,6 +1522,8 @@ async function main(): Promise<void> {
     pass(
       '15. a repeat visit asks the server for no tile; a new order build brings them back once',
     );
+
+    await meaningClaim(member, lab.id, m);
 
     assert(errors.length === 0, `page errors: ${errors.join(' | ')}`);
     console.log('sense-claims: all claims passed');
