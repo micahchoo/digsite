@@ -814,6 +814,44 @@ async function main(): Promise<void> {
       '5. Terms counts and lights up "find"; merge widens it without touching Faces; separate restores; corner marks; Explore answers on focus and draws lines',
     );
 
+    // -- 9. How are two pictures connected, across sheets ----------------------
+    // 8 -> 10 resembles (First pass), 10 -> 11 same place (First pass),
+    // 11 -> 14 derived from (Faces): three steps, over both sheets.
+    await m.evaluate(
+      (ids) =>
+        (
+          window as unknown as {
+            __digsiteBoard: { selectIds: (ids: string[]) => void };
+          }
+        ).__digsiteBoard.selectIds(ids),
+      [M.id(8), M.id(14)],
+    );
+    await m.getByTestId('board-tray-path').click();
+    const pathSummary = m.getByTestId('board-path-summary');
+    await pathSummary.waitFor({ timeout: 15_000 });
+    const links = await m.getByTestId('board-path-link').allInnerTexts();
+    await m.waitForTimeout(400);
+    await m.screenshot({ path: `${SHOTS}9-path.png` });
+    assert(
+      (await pathSummary.innerText()).startsWith('3 steps') &&
+        links.length === 3 &&
+        links[0]?.includes('resembles') &&
+        links[1]?.includes('same place') &&
+        links[2]?.includes('derived from'),
+      `the chain from 8 to 14 reads ${JSON.stringify(links)}`,
+    );
+    assert(
+      (
+        await m.evaluate(() =>
+          (window as unknown as SheetWindow).__digsiteBoard?.getLayerIds(),
+        )
+      )?.includes('path-lines'),
+      'the chain is not drawn on the map',
+    );
+    pass(
+      '9. two pictures: "How are they connected?" finds resembles, same place, derived from, across two sheets, and draws it',
+    );
+
     // -- 7. Zoom in on the board far enough to study a picture ------------------
     await m.evaluate(() =>
       (

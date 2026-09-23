@@ -31,6 +31,8 @@ interface Props {
   onAddToSheet: (sheetId: string) => Promise<void> | void;
   /** Two selected: open them side by side. */
   onCompare?: () => void;
+  /** Two selected: find the chain of claims between them. */
+  onFindPath?: () => void;
   startRequested?: boolean;
   onStartRequested?: () => void;
   addRequested?: boolean;
@@ -50,6 +52,7 @@ export function Tray({
   onStartSheet,
   onAddToSheet,
   onCompare,
+  onFindPath,
   startRequested = false,
   onStartRequested,
   addRequested = false,
@@ -280,6 +283,15 @@ export function Tray({
                 onClick={onCompare}
               >
                 Compare
+              </button>
+            )}
+            {items.length === 2 && onFindPath && (
+              <button
+                type="button"
+                data-testid="board-tray-path"
+                onClick={onFindPath}
+              >
+                How are they connected?
               </button>
             )}
             <div className="board-tray-add-wrap">

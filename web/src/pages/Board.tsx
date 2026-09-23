@@ -71,6 +71,7 @@ import {
 import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
 import { FolderImport } from '../board/FolderImport.tsx';
+import { PathPanel } from '../board/PathPanel.tsx';
 import { Terms } from '../board/Terms.tsx';
 import { ThreadBrowser } from '../board/ThreadBrowser.tsx';
 import { Tray } from '../board/Tray.tsx';
@@ -128,6 +129,8 @@ declare global {
       select: (rank: number) => void;
       selectRange: (a: number, b: number) => void;
       clear: () => void;
+      /** By id, for a walk that knows which pictures it means. */
+      selectIds: (ids: string[]) => void;
       getLayerIds: () => string[];
       getCamera: () => {
         target: [number, number, number];
@@ -299,6 +302,11 @@ export function Board() {
   const [comparing, setComparing] = useState<[CompareEnd, CompareEnd] | null>(
     null,
   );
+  /** "How are these two connected?": the two ends, and the chain found. */
+  const [pathEnds, setPathEnds] = useState<
+    [{ id: string; name: string }, { id: string; name: string }] | null
+  >(null);
+  const [pathImages, setPathImages] = useState<BoardImageWithRank[]>([]);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [, forceRender] = useState(0);
 
@@ -893,6 +901,7 @@ export function Board() {
       },
       selectRange: (a: number, b: number) => void rangeSelect(a, b),
       clear: () => selection.clear(),
+      selectIds: (ids: string[]) => selection.replace(ids),
       getLayerIds: () =>
         ((deckRef.current?.props.layers ?? []) as { id?: string }[])
           .map((l) => l?.id)
@@ -1370,6 +1379,41 @@ export function Board() {
       );
     }
 
+    // The chain between two pictures, drawn over everything else it crosses.
+    const pathRanks = pathImages
+      .map((img) => img.rank)
+      .filter((rank): rank is number => typeof rank === 'number');
+    if (pathRanks.length > 1) {
+      const centre = (rank: number): [number, number] => {
+        const { col, row } = cellOf(rank);
+        return [col * CELL + CELL / 2, row * CELL + CELL / 2];
+      };
+      list.push(
+        new PolygonLayer({
+          id: 'path-cells',
+          data: pathRanks,
+          getPolygon: (rank: number) => cellPolygon(rank),
+          stroked: true,
+          filled: false,
+          getLineColor: rgba(palette.accent),
+          getLineWidth: 3,
+          lineWidthUnits: 'pixels',
+        }),
+        new LineLayer({
+          id: 'path-lines',
+          data: pathRanks.slice(1).map((rank, i) => ({
+            from: centre(pathRanks[i] as number),
+            to: centre(rank),
+          })),
+          getSourcePosition: (d: { from: [number, number] }) => d.from,
+          getTargetPosition: (d: { to: [number, number] }) => d.to,
+          getColor: rgba(palette.accent),
+          getWidth: 3,
+          widthUnits: 'pixels',
+        }),
+      );
+    }
+
     // A mark on every annotated image once cells are big enough to carry
     // one (CONTEXT.md "Making sense": the board shows where analysis is).
     if (annotatedRanks.length && zoom >= -2) {
@@ -1440,6 +1484,7 @@ export function Board() {
     detailKey,
     detailVersion,
     focusedImageId,
+    pathImages,
   ]);
 
   // -- hover: hold still 150ms, then look up the rank under the pointer -----
@@ -1947,6 +1992,17 @@ export function Board() {
   useRightColumn(
     board && (
       <div className="board-right" data-testid="board-side">
+        {pathEnds && (
+          <PathPanel
+            boardId={boardId}
+            sort={currentSortId}
+            a={pathEnds[0]}
+            b={pathEnds[1]}
+            onPath={setPathImages}
+            onShowImage={showOnMap}
+            onClose={() => setPathEnds(null)}
+          />
+        )}
         {detailImage && (
           <Detail
             image={detailImage}
@@ -2640,6 +2696,14 @@ export function Board() {
         onInvert={() => void invertSelection()}
         onStartSheet={startSheetFromTray}
         onAddToSheet={addSelectionToSheet}
+        onFindPath={() => {
+          const [first, second] = selectedImages;
+          if (first && second)
+            setPathEnds([
+              { id: first.id, name: first.name },
+              { id: second.id, name: second.name },
+            ]);
+        }}
         onCompare={() => {
           const [first, second] = selectedImages;
           if (!first || !second) return;
