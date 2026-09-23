@@ -132,6 +132,21 @@ describe('tile cache policy', () => {
       ]);
     }
 
+    // A window too wide to answer uncapped is refused.
+    const tooWide = await request(
+      'GET',
+      `/boards/${boardId}/find?sort=uploaded_at.desc&window=0-20000`,
+    );
+    expect(tooWide.status).toBe(400);
+    const windowed = await request(
+      'GET',
+      `/boards/${boardId}/find?sort=uploaded_at.desc&window=0-19999`,
+    );
+    expect([windowed.status, windowed.headers.get('x-order-version')]).toEqual([
+      200,
+      token,
+    ]);
+
     const range = `/boards/${boardId}/selection/range`;
     const body = { sort: 'uploaded_at.desc', fromRank: 0, toRank: 0 };
     const current = await request('POST', range, { ...body, v: token });

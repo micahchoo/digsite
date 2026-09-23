@@ -29,6 +29,9 @@ export function containsPattern(term: string): string {
   return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
+/** The widest rank window one find may ask for. */
+export const FIND_WINDOW_MAX = 20_000;
+
 export type FindResult = { ranks: number[]; imageIds: string[]; count: number };
 
 export async function findRanks(
@@ -36,6 +39,9 @@ export async function findRanks(
   q: string | null,
   filter: FilterClause[],
   claims: ClaimFilter = {},
+  /** Only ranks from..to, both ends in, every match inside with no cap:
+   * the map dims what it shows, wherever it is (FIND_WINDOW_MAX wide). */
+  window?: { from: number; to: number },
 ): Promise<FindResult> {
   const params: unknown[] = [boardId];
   const conditions: string[] = [];
@@ -77,6 +83,12 @@ export async function findRanks(
     );
   }
 
+  if (window) {
+    // The window's slots come straight from the order: the query then
+    // reads at most FIND_WINDOW_MAX images, not the board.
+    params.push([...order.slotOfRank.subarray(window.from, window.to + 1)]);
+    conditions.push(`i.slot = ANY($${params.length}::int[])`);
+  }
   const where = conditions.length ? `AND ${conditions.join(' AND ')}` : '';
   // Slots only, as array rows: a broad query can match most of a board,
   // and a uuid per match was most of the cost (872,133 matches: 7.6 s).
@@ -103,7 +115,7 @@ export async function findRanks(
   );
   const idOf = new Map(idRows.map((row) => [row.slot as number, row.id]));
   return {
-    ranks: [...sorted.subarray(0, RANKS_CAP)],
+    ranks: [...(window ? sorted : sorted.subarray(0, RANKS_CAP))],
     imageIds: first.map((slot) => idOf.get(slot) as string),
     count,
   };

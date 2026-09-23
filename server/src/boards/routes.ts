@@ -107,7 +107,7 @@ import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
 import { extractRegion, parseFraction } from './extract.ts';
 import type { FilterClause } from './filter.ts';
-import { findRanks } from './find.ts';
+import { FIND_WINDOW_MAX, findRanks } from './find.ts';
 import {
   ImportRefused,
   folderImport,
@@ -1475,6 +1475,22 @@ export function registerBoardRoutes(router: Router) {
       filter = parsed as FilterClause[];
     }
 
+    // `window=<fromRank>-<toRank>`: every match in those ranks, uncapped,
+    // for dimming exactly what the map shows.
+    let window: { from: number; to: number } | undefined;
+    const windowParam = ctx.url.searchParams.get('window');
+    if (windowParam !== null) {
+      const m = /^(\d+)-(\d+)$/.exec(windowParam);
+      const from = Number(m?.[1]);
+      const to = Number(m?.[2]);
+      if (!m || to < from || to - from + 1 > FIND_WINDOW_MAX) {
+        return json(ctx.res, 400, {
+          error: `window must be <fromRank>-<toRank>, at most ${FIND_WINDOW_MAX} ranks wide`,
+        });
+      }
+      window = { from, to };
+    }
+
     try {
       const label = ctx.url.searchParams.get('label');
       const relation = ctx.url.searchParams.get('relation');
@@ -1484,11 +1500,17 @@ export function registerBoardRoutes(router: Router) {
         });
       }
       const build = await buildOf(boardId, sort);
-      const { ranks, imageIds, count } = await findRanks(build, q, filter, {
-        ...(label ? { label } : {}),
-        ...(relation ? { relation } : {}),
-        annotated: ctx.url.searchParams.get('annotated') === '1',
-      });
+      const { ranks, imageIds, count } = await findRanks(
+        build,
+        q,
+        filter,
+        {
+          ...(label ? { label } : {}),
+          ...(relation ? { relation } : {}),
+          annotated: ctx.url.searchParams.get('annotated') === '1',
+        },
+        window,
+      );
       sayOrder(ctx.res, build);
       const response: FindBoardResponse = { ranks, imageIds, count };
       json(ctx.res, 200, response);
