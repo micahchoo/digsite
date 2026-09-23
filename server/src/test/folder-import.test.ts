@@ -46,8 +46,11 @@ beforeAll(async () => {
   await writeFile(join(root, 'a.png'), await png(10));
   await writeFile(join(root, 'b.png'), await png(90));
   await writeFile(join(root, 'fake.png'), 'not an image');
-  await writeFile(join(root, 'notes.txt'), 'ignored');
   await mkdir(join(root, 'trip'));
+  await writeFile(join(root, 'notes.txt'), 'ignored');
+  // Named, not decoded: the import skips camera formats by name.
+  await writeFile(join(root, 'IMG_0001.HEIC'), 'heic');
+  await writeFile(join(root, 'trip', 'DSC_0002.nef'), 'raw');
   await writeFile(join(root, 'trip', 'c.png'), await png(170));
   await mkdir(join(root, '.cache'));
   await writeFile(join(root, '.cache', 'd.png'), await png(250));
@@ -73,7 +76,7 @@ describe('folder import', () => {
     expect(await refusal(`${root}-sibling`)).toBe(400);
   });
 
-  test('imports the images, skips what is not one, and remembers the subfolder', async () => {
+  test('imports the images, explains every skip, and remembers the subfolder', async () => {
     env.IMPORT_ROOTS = [root];
     const { rows } = await pool.query(
       `INSERT INTO boards (org_id, name, open, created_by)
@@ -82,12 +85,18 @@ describe('folder import', () => {
     );
     const boardId = rows[0].id as string;
     const started = await startFolderImport(boardId, 'importer', root);
-    expect(started.total).toBe(4); // a, b, fake, trip/c — never .cache
+    // a, b, fake, the HEIC, trip/c, trip's NEF — never .cache or notes.txt
+    expect(started.total).toBe(6);
     await drain();
 
     const done = await folderImport(boardId, started.id);
-    expect(done).toMatchObject({ state: 'done', imported: 3, skipped: 1 });
-    expect(done?.skips[0]?.file).toBe('fake.png');
+    expect(done).toMatchObject({ state: 'done', imported: 3, skipped: 3 });
+    const why = Object.fromEntries(
+      (done?.skips ?? []).map((s) => [s.file, s.reason]),
+    );
+    expect(why['fake.png']).toBe('not a recognised image type');
+    expect(why['IMG_0001.HEIC']).toContain('HEIC or RAW');
+    expect(why[join('trip', 'DSC_0002.nef')]).toContain('HEIC or RAW');
 
     const { rows: images } = await pool.query(
       'SELECT name, status, properties FROM images WHERE board_id = $1 ORDER BY name',
