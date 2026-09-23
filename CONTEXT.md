@@ -107,8 +107,10 @@ sheet that made it. The board never writes a claim.
   drives both, in units of each end's region.
 - **Stamp** — who did something to a claim and when: `made` when it was
   drawn, `edited` at its last change. Written by the client of the person
-  signed in; a claim drawn before stamps has none. Not yet checked by the
-  server against the socket's user.
+  signed in; a claim drawn before stamps has none. The server vouches for
+  it: a stamp arrives signed (it passed through the server before) and is
+  kept, or unsigned and is rewritten to the socket's user and signed
+  (`server/src/sheets/stamps.ts`).
 - **Reach** — an edge from another sheet with exactly one end on this
   sheet. Drawn on the overlay as a stub leading off the image, never in
   the scene. Bringing its far image onto the sheet turns it into an

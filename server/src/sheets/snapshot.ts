@@ -6,13 +6,16 @@ import { type SceneElement, project } from '@digsite/shared/sheet/project';
 // a claim exists — the sheet remains the one writer of its claims.
 import type { PoolClient } from 'pg';
 import { pool } from '../db/pool.ts';
+import { signStored } from './stamps.ts';
 
+/** The stored scene as a client receives it, stamps signed as stored
+ * (stamps.ts#signStored), so a client echoing it keeps each claim's author. */
 export async function getSnapshotElements(sheetId: string): Promise<unknown[]> {
   const { rows } = await pool.query(
     'SELECT elements FROM sheet_snapshots WHERE sheet_id = $1',
     [sheetId],
   );
-  return rows.length ? rows[0].elements : [];
+  return rows.length ? signStored(rows[0].elements, sheetId) : [];
 }
 
 export type SaveResult = {

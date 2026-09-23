@@ -30,6 +30,7 @@ import { auth } from '../auth.ts';
 import { env } from '../env.ts';
 import { checkLimit } from '../limits.ts';
 import { getSnapshotElements, saveSnapshotAndProject } from './snapshot.ts';
+import { verifyStamps } from './stamps.ts';
 
 const DEBOUNCE_MS = 1500;
 // One for the adapter's LISTEN, two for its notifies and attachment reads.
@@ -221,14 +222,18 @@ export function mountSheetRoom(httpServer: HttpServer): SocketIOServer {
       roomStats.scenes++;
       roomStats.foreignInScene += countForeign(payload.elements);
 
-      const out: SceneServerPayload = {
-        elements: payload.elements,
-        from: userId,
-      };
+      // Stamps are the server's word (sheets/stamps.ts): what peers see and
+      // what the snapshot keeps name the sender for every stamp the server
+      // has not already signed. The one door client stamps come in by.
+      const elements = verifyStamps(payload.elements, sheetId, {
+        id: userId,
+        name: (socket.data.userName as string) || '',
+      });
+      const out: SceneServerPayload = { elements, from: userId };
       socket.to(sheetId).emit('scene', out);
       roomStats.broadcasts++;
 
-      scheduleSnapshot(sheetId, payload.elements);
+      scheduleSnapshot(sheetId, elements);
     });
 
     // Presence (docs/phases/2-sheet.md section 3): never persisted, never
