@@ -36,6 +36,9 @@ async function reachable(page: Page, testId: string, what: string) {
       const cx = r.left + r.width / 2;
       const cy = r.top + r.height / 2;
       if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return false;
+      // Its whole width on screen: a panel hanging off one side passed a
+      // centre-only check (the phone's side drawer, 25 px off the left).
+      if (r.left < -1 || r.right > innerWidth + 1) return false;
       const top = document.elementFromPoint(cx, cy);
       return !!top && (top === el || el.contains(top) || top.contains(el));
     });
@@ -148,6 +151,66 @@ async function run(mode: 'dark' | 'phone') {
   console.log(
     `PASS: ${mode}: find by meaning shows its best pictures in reach`,
   );
+
+  // -- two pictures in the tray, and how they are connected --------------------
+  await page.getByTestId('board-find-toggle').click();
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __digsiteBoard: { selectIds: (ids: string[]) => void };
+      }
+    ).__digsiteBoard.selectIds(['img-8', 'img-9']),
+  );
+  await page.getByTestId('board-tray-path').waitFor({ timeout: 10_000 });
+  await fits(page, `${mode} tray`);
+  await reachable(page, 'board-tray-path', `${mode} tray`);
+  await page.getByTestId('board-tray-path').click();
+  if (mode === 'phone') await page.getByTestId('shell-right-toggle').click();
+  await page.getByTestId('board-path').waitFor({ timeout: 10_000 });
+  await fits(page, `${mode} path`);
+  // The shot's pause also lets the phone's side drawer finish sliding in.
+  await shot(page, `${mode}-path`);
+  await reachable(page, 'board-path', `${mode} path`);
+  console.log(
+    `PASS: ${mode}: the tray and the path panel fit and are in reach`,
+  );
+
+  // -- the keys, and the sheet's menu -----------------------------------------
+  await page.goto(`${WEB}/s/s1`);
+  await page.waitForFunction(
+    () => (window.__digsite?.getElements().length ?? 0) > 0,
+  );
+  await page.waitForTimeout(800);
+  await page.keyboard.press('?');
+  await page.getByTestId('shortcuts-panel').waitFor();
+  await fits(page, `${mode} keys`);
+  await reachable(page, 'shortcuts-panel', `${mode} keys`);
+  await shot(page, `${mode}-keys`);
+  await page.keyboard.press('Escape');
+  const canvas = await page.locator('.digsite-canvas').boundingBox();
+  assert(canvas, 'no canvas');
+  await page.mouse.click(
+    canvas.x + canvas.width / 2,
+    canvas.y + canvas.height / 2,
+    {
+      button: 'right',
+    },
+  );
+  await page.getByTestId('sheet-context-menu').waitFor();
+  const menuBox = await page.getByTestId('sheet-context-menu').boundingBox();
+  const size = page.viewportSize();
+  assert(
+    menuBox &&
+      size &&
+      menuBox.x >= 0 &&
+      menuBox.y >= 0 &&
+      menuBox.x + menuBox.width <= size.width &&
+      menuBox.y + menuBox.height <= size.height,
+    `${mode}: the sheet menu leaves the screen: ${JSON.stringify(menuBox)}`,
+  );
+  await shot(page, `${mode}-menu`);
+  await page.keyboard.press('Escape');
+  console.log(`PASS: ${mode}: the keyboard panel and the sheet menu fit`);
 
   assert(errors.length === 0, `${mode}: page errors: ${errors.join(' | ')}`);
   await browser.close();

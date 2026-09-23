@@ -655,6 +655,8 @@
 .board-context-menu {
   position: fixed;
   z-index: 50;
+  /* ContextMenu.tsx places it by this width, so padding and border count. */
+  box-sizing: border-box;
   min-width: 200px;
   padding: var(--space-1);
   border: 1px solid var(--line);
