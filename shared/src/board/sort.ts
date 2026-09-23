@@ -3,8 +3,9 @@
 // property name can never smuggle SQL into an ORDER BY — see
 // ../../.claude/rules/ladder-slot-vs-rank.md.
 
-export type PropertyValue = string | number | boolean;
-export type PropertyType = 'text' | 'number' | 'boolean';
+export type PropertyScalar = string | number | boolean;
+export type PropertyValue = PropertyScalar | PropertyScalar[];
+export type PropertyType = 'text' | 'number' | 'boolean' | 'date' | 'list';
 export type SortKey =
   | 'name'
   | 'uploaded_at'
@@ -28,7 +29,13 @@ function isColumnKey(v: string | undefined): v is 'name' | 'uploaded_at' {
 }
 
 function isPropertyType(v: string | undefined): v is PropertyType {
-  return v === 'text' || v === 'number' || v === 'boolean';
+  return (
+    v === 'text' ||
+    v === 'number' ||
+    v === 'boolean' ||
+    v === 'date' ||
+    v === 'list'
+  );
 }
 
 export function parseSortId(id: string): Sort | null {

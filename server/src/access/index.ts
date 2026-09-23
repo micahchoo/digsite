@@ -7,16 +7,35 @@
 import type { Pool } from 'pg';
 import { pool } from '../db/pool.ts';
 
+// Phase 6 (docs/ux/audit.md #7, docs/ux/design.md's error copy): a board
+// denial names whom to ask ONLY when the viewer is a member of the board's
+// group — a group member may know a private board exists at all; a
+// non-member must learn nothing (this file's own "existence must not
+// leak"). `askName` is optional and carried on the error itself, decided
+// here (never in a route), so http.ts's one catch site is the only place
+// that turns it into JSON.
 export class AccessDenied extends Error {
   reason: string;
-  constructor(reason: string) {
+  askName?: string;
+  constructor(reason: string, askName?: string) {
     super(reason);
     this.reason = reason;
+    this.askName = askName;
   }
 }
 
-function deny(reason: string): never {
-  throw new AccessDenied(reason);
+function deny(reason: string, askName?: string): never {
+  throw new AccessDenied(reason, askName);
+}
+
+async function creatorNameOf(
+  db: Pool,
+  userId: string,
+): Promise<string | undefined> {
+  const { rows } = await db.query('SELECT name FROM "user" WHERE id = $1', [
+    userId,
+  ]);
+  return rows[0]?.name ?? undefined;
 }
 
 export type MemberRow = {
@@ -132,7 +151,12 @@ export async function boardForViewing(
   if (!member) deny('not a member of this group');
   if (board.open) return board;
   if (board.team_id && (await onTeam(db, userId, board.team_id))) return board;
-  deny('not on this private board');
+  // The viewer IS a member of the board's group (checked above) — they may
+  // already know this board exists (it can appear named in another
+  // member's activity, a link pasted in chat, and so on), so naming who to
+  // ask is not a new leak. `groupForViewing`'s own denial (not a member at
+  // all) never reaches this line.
+  deny('not on this private board', await creatorNameOf(db, board.created_by));
 }
 
 export async function boardForUploading(
@@ -289,4 +313,135 @@ export async function imageForDeleting(
   if (!image) deny('image not found');
   await boardForDeleting(userId, image.board_id, db);
   return image;
+}
+
+// -- Phase 6 (docs/phases/6-product.md): three new listing intents, same
+// "boardsForListing is one query" discipline (this file's own comment on
+// that function) — a private board the viewer is not on is ABSENT from
+// every one of these, never filtered client-side or looped per-board.
+
+export type GroupSheetRow = {
+  id: string;
+  board_id: string;
+  board_name: string;
+  name: string;
+  created_at: Date;
+  archived: boolean;
+  image_count: string; // numeric from COUNT(*), caller casts
+  saved_at: Date | null;
+  last_activity_at: Date;
+  seen_at: Date | null;
+  preview_image_ids: string[];
+};
+
+/** GET /groups/:id/sheets (docs/phases/6-product.md "Sheets are threads"):
+ * every sheet of every board the viewer can see in the group, one query —
+ * the open-or-allowlist predicate joined straight against `sheets`, plus
+ * this user's own `sheet_reads` row per sheet (so "unread" is computed here
+ * rather than the route re-deriving membership to ask for it separately). */
+export async function sheetsForGroupListing(
+  userId: string,
+  orgId: string,
+  includeArchived = false,
+  db: Pool = pool,
+): Promise<GroupSheetRow[]> {
+  const member = await findMember(db, userId, orgId);
+  if (!member) deny('not a member of this group');
+  const { rows } = await db.query(
+    `SELECT s.id, s.board_id, b.name AS board_name, s.name, s.created_at, s.archived,
+       (SELECT COUNT(*) FROM sheet_images si WHERE si.sheet_id = s.id) AS image_count,
+       ss.saved_at, COALESCE(ss.saved_at, s.created_at) AS last_activity_at, sr.seen_at,
+       COALESCE((
+         SELECT array_agg(t.image_id) FROM (
+           SELECT si.image_id FROM sheet_images si
+           JOIN images i ON i.id = si.image_id
+           WHERE si.sheet_id = s.id ORDER BY i.slot LIMIT 4
+         ) t
+       ), '{}') AS preview_image_ids
+     FROM sheets s
+     JOIN boards b ON b.id = s.board_id
+     LEFT JOIN sheet_snapshots ss ON ss.sheet_id = s.id
+     LEFT JOIN sheet_reads sr ON sr.sheet_id = s.id AND sr.user_id = $2
+     WHERE b.org_id = $1 AND ($3::boolean OR s.archived = false)
+       AND (b.open OR EXISTS (
+         SELECT 1 FROM "teamMember" tm WHERE tm."teamId" = b.team_id AND tm."userId" = $2
+       ))
+     ORDER BY COALESCE(ss.saved_at, s.created_at) DESC`,
+    [orgId, userId, includeArchived],
+  );
+  return rows;
+}
+
+export type ActivityRow = {
+  id: string;
+  group_id: string;
+  board_id: string | null;
+  kind: string;
+  actor_id: string;
+  actor_name: string;
+  payload: Record<string, unknown>;
+  at: Date;
+};
+
+/** GET /groups/:id/activity (docs/phases/6-product.md "Group activity
+ * feed"): the guestbook. `board_id IS NULL` rows (a member joining) are
+ * group-level and visible to every member; a board-scoped row is filtered
+ * by the same open-or-allowlist predicate as everywhere else, so a viewer
+ * never learns a private board they're not on exists via its own history. */
+export async function activityForGroupListing(
+  userId: string,
+  orgId: string,
+  limit: number,
+  db: Pool = pool,
+): Promise<ActivityRow[]> {
+  const member = await findMember(db, userId, orgId);
+  if (!member) deny('not a member of this group');
+  const { rows } = await db.query(
+    `SELECT a.id, a.group_id, a.board_id, a.kind, a.actor_id, u.name AS actor_name,
+       a.payload, a.at
+     FROM activity a
+     LEFT JOIN boards b ON b.id = a.board_id
+     JOIN "user" u ON u.id = a.actor_id
+     WHERE a.group_id = $1
+       AND (a.board_id IS NULL OR b.open OR EXISTS (
+         SELECT 1 FROM "teamMember" tm WHERE tm."teamId" = b.team_id AND tm."userId" = $2
+       ))
+     ORDER BY a.at DESC
+     LIMIT $3`,
+    [orgId, userId, limit],
+  );
+  return rows;
+}
+
+export type GroupBoardStats = { images: number; sheets: number };
+
+/** GET /groups/:id/stats (docs/phases/6-product.md "visitor counter"):
+ * images/sheets summed over visible boards only — `membersOfGroup`
+ * (access/reads.ts) supplies the member count separately, same split as
+ * every other listing route (this function decides visibility; a plain
+ * membership-table read for display is reads.ts's job). */
+export async function statsForGroupListing(
+  userId: string,
+  orgId: string,
+  db: Pool = pool,
+): Promise<GroupBoardStats> {
+  const member = await findMember(db, userId, orgId);
+  if (!member) deny('not a member of this group');
+  const { rows } = await db.query(
+    `WITH visible AS (
+       SELECT b.id, b.image_count FROM boards b
+       WHERE b.org_id = $1
+         AND (b.open OR EXISTS (
+           SELECT 1 FROM "teamMember" tm WHERE tm."teamId" = b.team_id AND tm."userId" = $2
+         ))
+     )
+     SELECT
+       (SELECT COALESCE(SUM(image_count), 0) FROM visible) AS images,
+       (SELECT COUNT(*) FROM sheets WHERE board_id IN (SELECT id FROM visible)) AS sheets`,
+    [orgId, userId],
+  );
+  return {
+    images: Number(rows[0]?.images ?? 0),
+    sheets: Number(rows[0]?.sheets ?? 0),
+  };
 }

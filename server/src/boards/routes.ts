@@ -9,20 +9,26 @@ import type {
   BoardSummary,
   CreateBoardRequest,
   CreateBoardResponse,
+  FindBoardResponse,
   GetBoardAllowlistResponse,
   GetBoardRelationsResponse,
   GetBoardResponse,
+  GetBoardSelectionResponse,
   GetImageResponse,
   GetSectionsResponse,
   ListBoardImagesByIdsResponse,
   ListBoardImagesResponse,
   ListBoardsResponse,
   ListJobsResponse,
+  PutBoardSelectionRequest,
+  PutBoardSelectionResponse,
   RebuildSortResponse,
   RenameBoardRequest,
   RenameBoardResponse,
   RetryJobResponse,
   Role,
+  SelectionRangeRequest,
+  SelectionRangeResponse,
   SortableKey,
   UpdateBoardRequest,
   UpdateBoardResponse,
@@ -55,6 +61,7 @@ import {
 import { allowlistMembersOf, allowlistOf } from '../access/reads.ts';
 import { auth } from '../auth.ts';
 import { pool } from '../db/pool.ts';
+import { recordActivity } from '../groups/activity.ts';
 import {
   type Router,
   json,
@@ -72,13 +79,26 @@ import {
 } from '../storage/index.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { enqueueMaterialiseJob } from '../worker/jobs.ts';
+import type { FilterClause } from './filter.ts';
+import { findRanks } from './find.ts';
 import { withPage } from './ladder.ts';
 import { originalKey, previewKey } from './paths.ts';
-import { ensureRank, forceRebuildRank, imagesInRankOrder } from './ranks.ts';
+import { isProperties } from './properties.ts';
+import {
+  ensureRank,
+  forceRebuildRank,
+  imageIdsInRankRange,
+  imagesInRankOrder,
+  markBoardRanksStale,
+} from './ranks.ts';
 import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
 import { uploadOne } from './upload.ts';
 import { validateUpload } from './validate.ts';
+
+const SELECTION_CAP = 5000;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const PREVIEW_MAX_SIDE = 1024;
 const PREVIEW_LADDER_SIZE = 128;
@@ -262,27 +282,29 @@ async function sortableKeysFor(boardId: string): Promise<SortableKey[]> {
     { key: 'uploaded_at', label: 'Uploaded' },
   ];
   const { rows } = await pool.query(
-    `SELECT e.key, jsonb_typeof(e.value) AS t
+    `SELECT e.key, jsonb_typeof(e.value) AS t,
+       bool_and(CASE WHEN jsonb_typeof(e.value) = 'string'
+         THEN e.value #>> '{}' ~ '^\\d{4}-\\d{2}-\\d{2}$' ELSE false END) AS dates
      FROM images i, jsonb_each(i.properties) e
-     WHERE i.board_id = $1`,
+     WHERE i.board_id = $1
+     GROUP BY e.key, jsonb_typeof(e.value)`,
     [boardId],
   );
-  const typesByKey = new Map<string, Set<string>>();
+  const typesByKey = new Map<string, Map<string, boolean>>();
   for (const r of rows) {
-    if (!typesByKey.has(r.key)) typesByKey.set(r.key, new Set());
-    typesByKey.get(r.key)?.add(r.t);
+    const entry = typesByKey.get(r.key) ?? new Map<string, boolean>();
+    entry.set(r.t, r.dates === true);
+    typesByKey.set(r.key, entry);
   }
   for (const [propKey, types] of typesByKey) {
-    if (types.size !== 1) continue; // mixed types: not sortable
-    const jsonType = [...types][0];
-    const type: PropertyType | null =
-      jsonType === 'string'
-        ? 'text'
-        : jsonType === 'number'
-          ? 'number'
-          : jsonType === 'boolean'
-            ? 'boolean'
-            : null;
+    if (types.size !== 1) continue; // mixed JSON types: not sortable
+    const jsonType = [...types.keys()][0];
+    let type: PropertyType | null = null;
+    if (jsonType === 'string') {
+      type = types.get(jsonType) ? 'date' : 'text';
+    } else if (jsonType === 'number') type = 'number';
+    else if (jsonType === 'boolean') type = 'boolean';
+    else if (jsonType === 'array') type = 'list';
     if (!type) continue;
     keys.push({ key: { property: propKey, type }, label: propKey });
   }
@@ -336,7 +358,19 @@ export function registerBoardRoutes(router: Router) {
        VALUES ($1,$2,$3,$4,$5) RETURNING id`,
       [orgId, body.name, !!body.open, teamId, userId],
     );
-    const response: CreateBoardResponse = { id: rows[0].id };
+    const boardId: string = rows[0].id;
+
+    // docs/phases/6-product.md "Group activity feed": "board created" —
+    // best-effort, never fails board creation itself.
+    try {
+      await recordActivity(orgId, boardId, 'board_created', userId, {
+        boardName: body.name,
+      });
+    } catch {
+      // best-effort — the board is already committed regardless.
+    }
+
+    const response: CreateBoardResponse = { id: boardId };
     json(ctx.res, 200, response);
   });
 
@@ -421,6 +455,10 @@ export function registerBoardRoutes(router: Router) {
         [boardId],
       );
       await client.query(
+        'DELETE FROM sheet_reads WHERE sheet_id IN (SELECT id FROM sheets WHERE board_id = $1)',
+        [boardId],
+      );
+      await client.query(
         'DELETE FROM sheet_images WHERE sheet_id IN (SELECT id FROM sheets WHERE board_id = $1)',
         [boardId],
       );
@@ -431,6 +469,14 @@ export function registerBoardRoutes(router: Router) {
       await client.query('DELETE FROM board_rank_state WHERE board_id = $1', [
         boardId,
       ]);
+      await client.query('DELETE FROM board_selections WHERE board_id = $1', [
+        boardId,
+      ]);
+      await client.query(
+        'DELETE FROM board_property_indexes WHERE board_id = $1',
+        [boardId],
+      );
+      await client.query('DELETE FROM activity WHERE board_id = $1', [boardId]);
       await client.query(`DELETE FROM jobs WHERE payload->>'boardId' = $1`, [
         boardId,
       ]);
@@ -583,7 +629,7 @@ export function registerBoardRoutes(router: Router) {
   router.post('/boards/:id/images', async (ctx) => {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
-    await boardForUploading(userId, boardId);
+    const board = await boardForUploading(userId, boardId);
 
     const webReq = await toWebRequest(ctx.req);
     const form = await webReq.formData();
@@ -614,9 +660,18 @@ export function registerBoardRoutes(router: Router) {
     if (typeof propsField === 'string') {
       try {
         const parsed = JSON.parse(propsField);
-        if (Array.isArray(parsed)) propsArray = parsed;
+        if (
+          !Array.isArray(parsed) ||
+          parsed.length !== files.length ||
+          !parsed.every(isProperties)
+        ) {
+          return json(ctx.res, 400, {
+            error: 'properties must be one valid object per file',
+          });
+        }
+        propsArray = parsed;
       } catch {
-        // ignored — properties stay empty for every file
+        return json(ctx.res, 400, { error: 'properties must be valid JSON' });
       }
     }
 
@@ -653,6 +708,19 @@ export function registerBoardRoutes(router: Router) {
       );
       ids.push(uploaded.id);
       out.push(uploaded);
+    }
+
+    // docs/phases/6-product.md "Group activity feed": "images uploaded" —
+    // ONE row per request (batched: "Micah uploaded 40 images", never one
+    // row per file — design.md §4.3's own guestbook copy), best-effort.
+    if (ids.length > 0) {
+      try {
+        await recordActivity(board.org_id, boardId, 'images_uploaded', userId, {
+          count: ids.length,
+        });
+      } catch {
+        // best-effort — the images are already committed regardless.
+      }
     }
 
     // docs/phases/1-map.md: the multipart route waits (up to 10s) for the
@@ -846,12 +914,34 @@ export function registerBoardRoutes(router: Router) {
     const userId = requireAuth(ctx);
     const image = await imageForViewing(userId, param(ctx, 'id'));
     const body = (await readJsonBody(ctx.req)) as UpdateImagePropertiesRequest;
-    const { rows } = await pool.query(
-      'UPDATE images SET properties = $1 WHERE id = $2 RETURNING properties',
-      [JSON.stringify(body.properties), image.id],
-    );
+    if (!isProperties(body.properties)) {
+      return json(ctx.res, 400, {
+        error: 'properties must be a valid property map',
+      });
+    }
+    const client = await pool.connect();
+    let properties: unknown;
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(
+        'UPDATE images SET properties = $1 WHERE id = $2 RETURNING properties',
+        [JSON.stringify(body.properties), image.id],
+      );
+      properties = updated.rows[0].properties;
+      await client.query(
+        'UPDATE board_rank_state SET stale = true WHERE board_id = $1',
+        [image.board_id],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+    await markBoardRanksStale(image.board_id);
     const response: UpdateImagePropertiesResponse = {
-      properties: rows[0].properties,
+      properties: properties as UpdateImagePropertiesResponse['properties'],
     };
     json(ctx.res, 200, response);
   });
@@ -1013,5 +1103,162 @@ export function registerBoardRoutes(router: Router) {
     );
     const response: RetryJobResponse = { ok: true };
     json(ctx.res, 200, response);
+  });
+
+  // GET/PUT /boards/:id/selection (docs/phases/6-product.md "Selection"):
+  // a set of image ids owned by the viewer, per board — never ranks (a
+  // rank changes with the sort; ../../.claude/rules/ladder-slot-vs-rank.md
+  // "a pin or a selection on the map is a client overlay"). boardForViewing
+  // is the one access function; the selection is the viewer's OWN, so
+  // nothing stronger is needed to read or write it.
+  router.get('/boards/:id/selection', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    const { rows } = await pool.query(
+      'SELECT image_ids FROM board_selections WHERE user_id = $1 AND board_id = $2',
+      [userId, boardId],
+    );
+    const response: GetBoardSelectionResponse = {
+      imageIds: rows[0]?.image_ids ?? [],
+    };
+    json(ctx.res, 200, response);
+  });
+
+  router.put('/boards/:id/selection', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    const body = (await readJsonBody(ctx.req)) as PutBoardSelectionRequest;
+    if (
+      !Array.isArray(body.imageIds) ||
+      !body.imageIds.every((id) => typeof id === 'string' && UUID_RE.test(id))
+    ) {
+      return json(ctx.res, 400, {
+        error: 'imageIds must be an array of valid image ids',
+      });
+    }
+    const requested = body.imageIds;
+
+    // Dedupe, preserving first-seen (tray) order, then cap.
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const id of requested) {
+      if (typeof id !== 'string' || seen.has(id)) continue;
+      seen.add(id);
+      deduped.push(id);
+    }
+    const capped = deduped.slice(0, SELECTION_CAP);
+
+    // Every id must belong to this board — a stale id from a sort change
+    // or a different board is dropped rather than stored, order preserved.
+    let imageIds = capped;
+    if (capped.length > 0) {
+      const { rows } = await pool.query(
+        'SELECT id FROM images WHERE board_id = $1 AND id = ANY($2::uuid[])',
+        [boardId, capped],
+      );
+      const onBoard = new Set(rows.map((r) => r.id as string));
+      imageIds = capped.filter((id) => onBoard.has(id));
+    }
+
+    await pool.query(
+      `INSERT INTO board_selections (user_id, board_id, image_ids, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (user_id, board_id)
+       DO UPDATE SET image_ids = $3, updated_at = now()`,
+      [userId, boardId, imageIds],
+    );
+    const response: PutBoardSelectionResponse = { imageIds };
+    json(ctx.res, 200, response);
+  });
+
+  // POST /boards/:id/selection/range {sort, fromRank, toRank} — resolves a
+  // rank range to ids server-side (design.md §5.1) so a band/range select
+  // over a million-cell board never pages ranks to the client.
+  router.post('/boards/:id/selection/range', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    const body = (await readJsonBody(ctx.req)) as SelectionRangeRequest;
+    const sort = parseSortId(body.sort);
+    if (!sort) return json(ctx.res, 400, { error: 'bad sort id' });
+    if (
+      !Number.isSafeInteger(body.fromRank) ||
+      !Number.isSafeInteger(body.toRank) ||
+      body.fromRank > 2_147_483_647 ||
+      body.toRank > 2_147_483_647 ||
+      body.fromRank < 0 ||
+      body.toRank < 0
+    ) {
+      return json(ctx.res, 400, {
+        error: 'fromRank/toRank must be integers >= 0',
+      });
+    }
+    const imageIds = await imageIdsInRankRange(
+      boardId,
+      sort,
+      body.fromRank,
+      body.toRank,
+      SELECTION_CAP,
+    );
+    const response: SelectionRangeResponse = { imageIds };
+    json(ctx.res, 200, response);
+  });
+
+  // GET /boards/:id/find?sort=&q=&filter= (docs/phases/6-product.md "Find
+  // and filter"): matches under the given sort as ranks, capped at 10,000,
+  // ascending — never rebuilds board_ranks (find.ts joins the same table
+  // every other rank reader does).
+  router.get('/boards/:id/find', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
+    const q = ctx.url.searchParams.get('q');
+    if (q !== null && q.length > 200) {
+      return json(ctx.res, 400, { error: 'q must be at most 200 characters' });
+    }
+
+    let filter: FilterClause[] = [];
+    const filterParam = ctx.url.searchParams.get('filter');
+    if (filterParam) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(filterParam);
+      } catch {
+        return json(ctx.res, 400, { error: 'filter must be JSON' });
+      }
+      if (!Array.isArray(parsed)) {
+        return json(ctx.res, 400, { error: 'filter must be an array' });
+      }
+      if (parsed.length > 32) {
+        return json(ctx.res, 400, {
+          error: 'filter supports at most 32 clauses',
+        });
+      }
+      filter = parsed as FilterClause[];
+    }
+
+    try {
+      const { ranks, imageIds, count } = await findRanks(
+        boardId,
+        sort,
+        q,
+        filter,
+      );
+      const response: FindBoardResponse = { ranks, imageIds, count };
+      json(ctx.res, 200, response);
+    } catch (err) {
+      // filter.ts#buildFilterSql throws a plain Error for anything the
+      // grammar rejects (bad op for the property's type, wrong value
+      // shape, and so on) — the one place that becomes a 400 instead of a
+      // 500, same "strict on write" posture as image-graph's shard
+      // validation.
+      if (err instanceof Error) {
+        return json(ctx.res, 400, { error: err.message });
+      }
+      throw err;
+    }
   });
 }

@@ -1,4 +1,7 @@
 import type {
+  AddImagesToSheetRequest,
+  AddImagesToSheetResponse,
+  ArchiveSheetResponse,
   CreateSheetRequest,
   CreateSheetResponse,
   GetNeighbourhoodResponse,
@@ -8,6 +11,7 @@ import type {
   GetSheetRowsResponse,
   GetStatsResponse,
   ListSheetsResponse,
+  MarkSheetSeenResponse,
   SheetFootprint,
   SheetImage,
   UpdateSheetRequest,
@@ -28,6 +32,7 @@ import {
   sheetForEditing,
 } from '../access/index.ts';
 import { pool } from '../db/pool.ts';
+import { recordActivity } from '../groups/activity.ts';
 import {
   type Router,
   json,
@@ -38,7 +43,11 @@ import {
 import { neighbourhoodFrom } from './neighbourhood.ts';
 import { roomStats } from './room.ts';
 import { toEdgeRow, toRegionRow } from './rows.ts';
-import { getSnapshotElements } from './snapshot.ts';
+import {
+  getSnapshotElements,
+  saveSnapshotAndProject,
+  saveSnapshotAndProjectInTransaction,
+} from './snapshot.ts';
 
 const CELL = 320;
 const FIT = 256;
@@ -93,14 +102,19 @@ export function registerSheetRoutes(router: Router) {
     // no snapshot yet (never through the socket room, never `POST .../sheets`
     // by hand) has no sheet_snapshots row, hence the LEFT JOIN and a null
     // savedAt rather than a missing one.
+    //
+    // docs/phases/6-product.md "Sheets are threads": archived sheets are
+    // excluded unless `?archived=1` — the thread browser's own "Show"
+    // toggle (docs/ux/design.md §4.8).
+    const includeArchived = ctx.url.searchParams.get('archived') === '1';
     const { rows } = await pool.query(
-      `SELECT s.id, s.name, s.created_at, ss.saved_at,
+      `SELECT s.id, s.name, s.created_at, s.archived, ss.saved_at,
          (SELECT COUNT(*) FROM sheet_images si WHERE si.sheet_id = s.id) AS image_count
        FROM sheets s
        LEFT JOIN sheet_snapshots ss ON ss.sheet_id = s.id
-       WHERE s.board_id = $1
+       WHERE s.board_id = $1 AND ($2::boolean OR s.archived = false)
        ORDER BY s.created_at`,
-      [boardId],
+      [boardId, includeArchived],
     );
     const response: ListSheetsResponse = rows.map((r) => ({
       id: r.id,
@@ -108,6 +122,7 @@ export function registerSheetRoutes(router: Router) {
       createdAt: r.created_at.toISOString(),
       imageCount: Number(r.image_count),
       savedAt: r.saved_at ? r.saved_at.toISOString() : null,
+      archived: r.archived,
     }));
     json(ctx.res, 200, response);
   });
@@ -150,7 +165,7 @@ export function registerSheetRoutes(router: Router) {
   router.post('/boards/:id/sheets', async (ctx) => {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
-    await boardForCreatingSheet(userId, boardId);
+    const board = await boardForCreatingSheet(userId, boardId);
     const body = (await readJsonBody(ctx.req)) as CreateSheetRequest;
 
     const imageIds = body.imageIds.slice(0, SHEET_LIMIT);
@@ -221,6 +236,16 @@ export function registerSheetRoutes(router: Router) {
       client.release();
     }
 
+    // docs/phases/6-product.md "Group activity feed": "sheet started" —
+    // best-effort, never fails sheet creation itself.
+    try {
+      await recordActivity(board.org_id, boardId, 'sheet_started', userId, {
+        sheetName: body.name,
+      });
+    } catch {
+      // best-effort — the sheet is already committed regardless.
+    }
+
     const response: CreateSheetResponse = { id: sheetId };
     json(ctx.res, 200, response);
   });
@@ -274,6 +299,196 @@ export function registerSheetRoutes(router: Router) {
     json(ctx.res, 200, response);
   });
 
+  // POST /sheets/:id/seen (docs/phases/6-product.md "Sheets are threads"):
+  // last-seen per user per sheet, server-side so unread survives devices.
+  // sheetForEditing, same intent as opening the sheet at all — marking it
+  // seen needs no stronger permission than that.
+  router.post('/sheets/:id/seen', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForEditing(userId, param(ctx, 'id'));
+    const { rows } = await pool.query(
+      `INSERT INTO sheet_reads (user_id, sheet_id, seen_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_id, sheet_id) DO UPDATE SET seen_at = now()
+       RETURNING seen_at`,
+      [userId, sheet.id],
+    );
+    const response: MarkSheetSeenResponse = {
+      seenAt: rows[0].seen_at.toISOString(),
+    };
+    json(ctx.res, 200, response);
+  });
+
+  // POST /sheets/:id/archive, POST /sheets/:id/unarchive
+  // (docs/phases/6-product.md "Sheets are threads"): hidden from
+  // GET /boards/:id/sheets by default, kept, reopenable — never a delete.
+  // Any viewer of the parent board may archive or reopen it, as specified;
+  // this is discoverability state, not deletion.
+  router.post('/sheets/:id/archive', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForEditing(userId, param(ctx, 'id'));
+    await pool.query('UPDATE sheets SET archived = true WHERE id = $1', [
+      sheet.id,
+    ]);
+    const response: ArchiveSheetResponse = { archived: true };
+    json(ctx.res, 200, response);
+  });
+  router.post('/sheets/:id/unarchive', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForEditing(userId, param(ctx, 'id'));
+    await pool.query('UPDATE sheets SET archived = false WHERE id = $1', [
+      sheet.id,
+    ]);
+    const response: ArchiveSheetResponse = { archived: false };
+    json(ctx.res, 200, response);
+  });
+
+  // POST /boards/:id/sheets/:sheetId/images (docs/phases/6-product.md
+  // "Selection... Add to sheet…"): adds only images not already on the
+  // sheet, placed to the right of the existing content's bounding box,
+  // grid-wrapped, then snapshot + projection as usual
+  // (snapshot.ts#saveSnapshotAndProject — the same merge-by-version path a
+  // live socket save goes through). sheetForEditing is the one access
+  // function; the boardId in the path is checked against the sheet's own
+  // board_id for a 404 (not a second access decision) rather than trusted.
+  router.post('/boards/:id/sheets/:sheetId/images', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    const sheetId = param(ctx, 'sheetId');
+    const sheet = await sheetForEditing(userId, sheetId);
+    if (sheet.board_id !== boardId) {
+      return json(ctx.res, 404, { reason: 'sheet not found on this board' });
+    }
+    const body = (await readJsonBody(ctx.req)) as AddImagesToSheetRequest;
+    if (
+      !Array.isArray(body.imageIds) ||
+      !body.imageIds.every(
+        (imageId) =>
+          typeof imageId === 'string' &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            imageId,
+          ),
+      )
+    ) {
+      return json(ctx.res, 400, { error: 'imageIds must be an array of ids' });
+    }
+    const requested = body.imageIds;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const lockedSheet = await client.query(
+        'SELECT id FROM sheets WHERE id = $1 FOR UPDATE',
+        [sheet.id],
+      );
+      if (lockedSheet.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return json(ctx.res, 404, { reason: 'sheet not found' });
+      }
+      const { rows: existingRows } = await client.query(
+        'SELECT image_id FROM sheet_images WHERE sheet_id = $1',
+        [sheet.id],
+      );
+      const already = new Set(existingRows.map((r) => r.image_id as string));
+      const existingCount = already.size;
+
+      // Dedupe the request itself, preserving first-seen order; anything
+      // already on the sheet is skipped (reported once even if repeated in
+      // the request).
+      const seen = new Set<string>();
+      const wanted: string[] = [];
+      const skipped: string[] = [];
+      for (const id of requested) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (already.has(id)) skipped.push(id);
+        else wanted.push(id);
+      }
+
+      let ordered: { id: string; width: number; height: number }[] = [];
+      if (wanted.length > 0) {
+        const { rows: imageRows } = await client.query(
+          'SELECT id, width, height FROM images WHERE board_id = $1 AND id = ANY($2::uuid[])',
+          [boardId, wanted],
+        );
+        const byId = new Map(imageRows.map((r) => [r.id, r]));
+        ordered = wanted
+          .map((id) => byId.get(id))
+          .filter((r): r is NonNullable<typeof r> => !!r);
+        const notOnBoard = wanted.filter((id) => !byId.has(id));
+        skipped.push(...notOnBoard);
+      }
+
+      // Cap at SHEET_LIMIT total, same cap sheet creation itself uses
+      // (shared/sheet/elements.ts) — the over-cap ones are skipped, not
+      // refused outright (docs/ux/design.md §5.1 "no action is ever refused
+      // outright").
+      const room = Math.max(0, SHEET_LIMIT - existingCount);
+      const toAdd = ordered.slice(0, room);
+      skipped.push(...ordered.slice(room).map((r) => r.id));
+
+      if (toAdd.length === 0) {
+        await client.query('COMMIT');
+        const response: AddImagesToSheetResponse = { added: [], skipped };
+        return json(ctx.res, 200, response);
+      }
+
+      // Bounding box of the existing content, from the CURRENT snapshot
+      // (foreign-never-in-scene.md's own discipline, applied here: act on
+      // polled/stored state, rebased at write time, never a stale cache) —
+      // own image elements only (customData.kind === 'image'); a sheet
+      // holding no images yet starts the grid at the origin.
+      const { rows: snapshotRows } = await client.query(
+        'SELECT elements FROM sheet_snapshots WHERE sheet_id = $1',
+        [sheet.id],
+      );
+      const stored = (snapshotRows.length ? snapshotRows[0].elements : []) as {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        customData?: { kind?: string };
+      }[];
+      const ownImages = stored.filter((e) => e.customData?.kind === 'image');
+      const maxX = ownImages.reduce((m, e) => Math.max(m, e.x + e.width), 0);
+      const minY = ownImages.length
+        ? Math.min(...ownImages.map((e) => e.y))
+        : 0;
+      const startX = ownImages.length ? maxX + CELL : 0;
+
+      const cols = Math.max(1, Math.ceil(Math.sqrt(toAdd.length)));
+      const newElements = toAdd.map((img, i) => {
+        const scale = Math.min(FIT / img.width, FIT / img.height, 1);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = startX + col * CELL + (CELL - w) / 2;
+        const y = minY + row * CELL + (CELL - h) / 2;
+        return makeImageElement(img.id, x, y, w, h, i + 1);
+      });
+
+      for (const img of toAdd) {
+        await client.query(
+          'INSERT INTO sheet_images (sheet_id, image_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+          [sheet.id, img.id],
+        );
+      }
+      await saveSnapshotAndProjectInTransaction(client, sheet.id, newElements);
+      await client.query('COMMIT');
+
+      const response: AddImagesToSheetResponse = {
+        added: toAdd.map((img) => img.id),
+        skipped,
+      };
+      json(ctx.res, 200, response);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  });
+
   // GET /sheets/:id/footprint (docs/phases/3-groups.md section 4): how many
   // OTHER sheets hold an image carrying a claim (region or edge) this sheet
   // made — the delete confirmation's count. A claim counts as held the same
@@ -314,6 +529,9 @@ export function registerSheetRoutes(router: Router) {
       await client.query('DELETE FROM edges WHERE sheet_id = $1', [sheet.id]);
       await client.query('DELETE FROM regions WHERE sheet_id = $1', [sheet.id]);
       await client.query('DELETE FROM sheet_snapshots WHERE sheet_id = $1', [
+        sheet.id,
+      ]);
+      await client.query('DELETE FROM sheet_reads WHERE sheet_id = $1', [
         sheet.id,
       ]);
       await client.query('DELETE FROM sheet_images WHERE sheet_id = $1', [

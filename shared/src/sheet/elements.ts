@@ -64,7 +64,16 @@ function isProperties(v: unknown): v is Properties {
   if (!isRecord(v)) return false;
   return Object.values(v).every(
     (x) =>
-      typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean',
+      typeof x === 'string' ||
+      typeof x === 'number' ||
+      typeof x === 'boolean' ||
+      (Array.isArray(x) &&
+        x.every(
+          (item) =>
+            typeof item === 'string' ||
+            typeof item === 'number' ||
+            typeof item === 'boolean',
+        )),
   );
 }
 

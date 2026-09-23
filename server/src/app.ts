@@ -103,7 +103,7 @@ export function createHttpServer(opts: HttpServerOptions = {}): Server {
     'Access-Control-Allow-Origin': env.WEB_ORIGIN,
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
   };
 
   const httpServer = createServer(async (req, res) => {

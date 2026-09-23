@@ -95,6 +95,29 @@ export type GetBoardResponse = {
 export type UpdateBoardRequest = { defaultSort: string };
 export type UpdateBoardResponse = { defaultSort: string };
 
+// GET /boards/:id/find?sort=&q=&filter=; ranks drive map dimming, while
+// the first SHEET_LIMIT matching ids can be added directly to selection.
+export type FindFilterOp =
+  | 'eq'
+  | 'neq'
+  | 'lt'
+  | 'lte'
+  | 'gt'
+  | 'gte'
+  | 'between'
+  | 'in'
+  | 'has';
+export type FindFilterClause = {
+  key: string;
+  op: FindFilterOp;
+  value: unknown;
+};
+export type FindBoardResponse = {
+  ranks: number[];
+  imageIds: string[];
+  count: number;
+};
+
 export type AllowlistRequest = { userId: string };
 export type AllowlistResponse = { userId: string }[];
 
@@ -172,6 +195,30 @@ export type GetImageResponse = BoardImage & { boardId: string };
 export type UpdateImagePropertiesRequest = { properties: Properties };
 export type UpdateImagePropertiesResponse = { properties: Properties };
 
+// Slice 2 (docs/ux/design.md §7 "Slice 2 — Board + selection" /
+// docs/phases/6-product.md "Selection — the verb that moves pictures from
+// the board to a sheet"): a selection is a set of IMAGE IDS, owned by the
+// viewer, per board — never ranks, so a sort change never silently selects
+// different pictures (`../../.claude/rules/ladder-slot-vs-rank.md`: "a
+// selection on the map is a client overlay", the rank is only ever a lookup
+// key into it). `imageIds` order is tray order (design.md §5.1 "the tray...
+// order is selection order").
+export type GetBoardSelectionResponse = { imageIds: string[] };
+export type PutBoardSelectionRequest = { imageIds: string[] };
+export type PutBoardSelectionResponse = { imageIds: string[] };
+
+// POST /boards/:id/selection/range {sort, fromRank, toRank} — resolves a
+// rank range to ids SERVER-SIDE (design.md §5.1: "Range and band selects
+// resolve server-side... so a million-cell board never pages ranks to the
+// client"). Capped at 5,000; `fromRank`/`toRank` may arrive in either
+// order (a drag can run either direction).
+export type SelectionRangeRequest = {
+  sort: string;
+  fromRank: number;
+  toRank: number;
+};
+export type SelectionRangeResponse = { imageIds: string[] };
+
 // -- Sheets ------------------------------------------------------------
 
 // Phase 2 (docs/phases/2-sheet.md section 6): `imageCount`/`savedAt` are
@@ -183,12 +230,52 @@ export type SheetSummary = {
   createdAt: string;
   imageCount: number;
   savedAt: string | null;
+  archived: boolean;
 };
 export type ListSheetsResponse = SheetSummary[];
+
+// Slice 2 (docs/ux/design.md §7 "Slice 2 — Board + selection", follow-up b):
+// GET /groups/:id/sheets — every sheet of every board the viewer can see in
+// the group, one request. Replaces the shell's per-board `listSheets` loop
+// (web/src/shell/useShellData.ts).
+export type GroupSheetSummary = SheetSummary & {
+  boardId: string;
+  boardName: string;
+};
+export type ListGroupSheetsResponse = GroupSheetSummary[];
+
+// Phase 6 thread browser: fuller group-wide sheet listing, including unread,
+// archive state and the preview strip.
+export type GroupThreadSummary = GroupSheetSummary & {
+  lastActivityAt: string | null;
+  unread: boolean;
+  archived: boolean;
+  previewImageIds: string[];
+};
+export type ListGroupThreadsResponse = GroupThreadSummary[];
+
+// Group homepage guestbook activity and visible-board counters.
+export type GroupActivityItem = {
+  id: string;
+  boardId: string | null;
+  kind: string;
+  actorId: string;
+  actorName: string;
+  payload: Record<string, unknown>;
+  at: string;
+};
+export type ListGroupActivityResponse = GroupActivityItem[];
+export type GroupStatsResponse = {
+  images: number;
+  sheets: number;
+  members: number;
+};
 
 // PATCH /sheets/:id, under sheetForEditing (docs/phases/2-sheet.md section 6).
 export type UpdateSheetRequest = { name: string };
 export type UpdateSheetResponse = { name: string };
+export type ArchiveSheetResponse = { archived: boolean };
+export type MarkSheetSeenResponse = { seenAt: string };
 
 export type CreateSheetRequest = {
   name: string;
@@ -199,6 +286,13 @@ export type CreateSheetRequest = {
   positions?: Record<string, { x: number; y: number }>;
 };
 export type CreateSheetResponse = { id: string };
+
+// Slice 2 (docs/ux/design.md §7, §5.1 "What a selection can become"):
+// POST /boards/:id/sheets/:sheetId/images — "Add to sheet…". Skips ids
+// already on the sheet; the rest are placed to the right of the sheet's
+// existing content (its own layout order, not the tray's).
+export type AddImagesToSheetRequest = { imageIds: string[] };
+export type AddImagesToSheetResponse = { added: string[]; skipped: string[] };
 
 // Phase 2 section 6 / docs/phases/3-groups.md section 4: `name`/`missing`
 // are additive, so the sheet can show a name and skip fetching a deleted

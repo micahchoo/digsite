@@ -3,8 +3,13 @@ import type {
   CreateGroupRequest,
   CreateGroupResponse,
   GetInvitationResponse,
+  GroupActivityItem,
+  GroupStatsResponse,
+  GroupThreadSummary,
   InviteRequest,
   InviteResponse,
+  ListGroupActivityResponse,
+  ListGroupThreadsResponse,
   ListGroupsResponse,
   ListMembersResponse,
   ListPendingInvitationsResponse,
@@ -20,10 +25,13 @@ import type {
 import { APIError } from 'better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import {
+  activityForGroupListing,
   boardsForListing,
   groupForInviting,
   groupForManagingMembers,
   groupForViewing,
+  sheetsForGroupListing,
+  statsForGroupListing,
 } from '../access/index.ts';
 import { groupsOfUser, memberIdOf, membersOfGroup } from '../access/reads.ts';
 import { auth } from '../auth.ts';
@@ -36,6 +44,19 @@ import {
   readJsonBody,
   requireAuth,
 } from '../http.ts';
+import { recordActivity } from './activity.ts';
+
+// docs/ux/audit.md #7: an empty or malformed email currently reaches
+// better-auth's own `z.email()` check inside `auth.api.createInvitation`
+// uninspected — its refusal is a genuine APIError, but nothing here used
+// to catch it, so it fell through to http.ts's generic 500. Checked here,
+// before the plugin ever sees it, so both cases are an honest 400 with a
+// reason a client can show beside the field (docs/ux/design.md §6).
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidEmail(email: string): boolean {
+  return email.length > 0 && email.length <= 320 && EMAIL_RE.test(email);
+}
 
 function slugify(name: string): string {
   return `${name
@@ -55,6 +76,7 @@ function authApiErrorResponse(
   err: unknown,
 ): { status: number; reason: string } | null {
   if (!(err instanceof APIError)) return null;
+  if (err.statusCode < 400 || err.statusCode >= 500) return null;
   const body = err.body as { message?: string; code?: string } | undefined;
   return {
     status: err.statusCode,
@@ -104,24 +126,47 @@ export function registerGroupRoutes(router: Router) {
     const orgId = param(ctx, 'id');
     await groupForInviting(userId, orgId);
     const body = (await readJsonBody(ctx.req)) as InviteRequest;
-    const invitation = await auth.api.createInvitation({
-      body: { email: body.email, role: 'member', organizationId: orgId },
-      headers: fromNodeHeaders(ctx.req.headers),
-    });
-    // docs/phases/3-groups.md section 1: the join page's URL, so the caller
-    // never has to build `/join/<id>` itself. Stub-vs-doc: the doc spells
-    // the request body `{email?}` (invite by link, no named recipient); kept
-    // required here (matches the pre-existing InviteRequest shape and
-    // seed.ts/access.test.ts's own calls) because better-auth's own
-    // accept-invitation endpoint refuses when the invitation's email
-    // doesn't match the accepting session's email
-    // (YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION) — an emailless invite
-    // could never be accepted through this plugin. See this task's report.
-    const response: InviteResponse = {
-      invitationId: invitation?.id,
-      url: `${env.WEB_ORIGIN}/join/${invitation?.id}`,
-    };
-    json(ctx.res, 200, response);
+    const email = (body.email ?? '').trim();
+    // docs/ux/audit.md #7 (blocker): a blank or malformed email used to
+    // reach better-auth's own `z.email()` check uncaught and 500. 400
+    // {reason} here, before the plugin is ever called.
+    if (!isValidEmail(email)) {
+      return json(ctx.res, 400, { reason: 'enter a valid email address' });
+    }
+    try {
+      // docs/ux/audit.md #7: re-inviting an address with a pending
+      // invitation used to hit the plugin's own
+      // USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION refusal uncaught and
+      // 500. `resend: true` makes the plugin's own endpoint idempotent
+      // instead (crud-invites.mjs: refreshes the existing invitation's
+      // expiry and returns it, 200) — the honest fix, not a second
+      // lookup-then-return built here.
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email,
+          role: 'member',
+          organizationId: orgId,
+          resend: true,
+        },
+        headers: fromNodeHeaders(ctx.req.headers),
+      });
+      // docs/phases/3-groups.md section 1: the join page's URL, so the
+      // caller never has to build `/join/<id>` itself.
+      const response: InviteResponse = {
+        invitationId: invitation?.id,
+        url: `${env.WEB_ORIGIN}/join/${invitation?.id}`,
+      };
+      json(ctx.res, 200, response);
+    } catch (err) {
+      // Every other plugin refusal this endpoint can throw (already a
+      // member, invitation limit reached, and so on) is a legitimate 4xx a
+      // client should show, same translation as every other auth.api.*
+      // call in this file.
+      const mapped = authApiErrorResponse(err);
+      if (mapped)
+        return json(ctx.res, mapped.status, { reason: mapped.reason });
+      throw err;
+    }
   });
 
   // GET /invitations/:id — public, no session (docs/phases/3-groups.md
@@ -204,16 +249,24 @@ export function registerGroupRoutes(router: Router) {
   });
 
   router.post('/invitations/:id/accept', async (ctx) => {
-    requireAuth(ctx);
+    const userId = requireAuth(ctx);
     const invitationId = param(ctx, 'id');
     try {
       const result = await auth.api.acceptInvitation({
         body: { invitationId },
         headers: fromNodeHeaders(ctx.req.headers),
       });
-      const response: AcceptInvitationResponse = {
-        groupId: result?.invitation.organizationId,
-      };
+      const groupId = result?.invitation.organizationId;
+      if (groupId) {
+        // docs/phases/6-product.md "Group activity feed": "member joined" —
+        // best-effort, never fails the accept itself.
+        try {
+          await recordActivity(groupId, null, 'member_joined', userId);
+        } catch {
+          // best-effort — the membership row is already committed regardless.
+        }
+      }
+      const response: AcceptInvitationResponse = { groupId };
       json(ctx.res, 200, response);
     } catch (err) {
       // docs/phases/3-groups.md section 1: one message for both an expired
@@ -329,7 +382,7 @@ export function registerGroupRoutes(router: Router) {
     const { rows } = await pool.query(
       `SELECT s.id, s.name, s.board_id, ss.saved_at FROM sheets s
        LEFT JOIN sheet_snapshots ss ON ss.sheet_id = s.id
-       WHERE s.board_id = ANY($1::uuid[])
+       WHERE s.board_id = ANY($1::uuid[]) AND s.archived = false
        ORDER BY ss.saved_at DESC NULLS LAST
        LIMIT 10`,
       [ids],
@@ -341,6 +394,79 @@ export function registerGroupRoutes(router: Router) {
       boardName: nameById.get(r.board_id) ?? '',
       savedAt: r.saved_at ? r.saved_at.toISOString() : null,
     }));
+    json(ctx.res, 200, response);
+  });
+
+  // GET /groups/:id/sheets (docs/phases/6-product.md "Sheets are threads"):
+  // every sheet on every board the viewer can see in the group, one query
+  // (access/index.ts#sheetsForGroupListing) — the thread browser and the
+  // channel column's nested sheet list both read this instead of the
+  // shell's old per-board GET /boards/:id/sheets loop.
+  router.get('/groups/:id/sheets', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const orgId = param(ctx, 'id');
+    const includeArchived = ctx.url.searchParams.get('archived') === '1';
+    const rows = await sheetsForGroupListing(userId, orgId, includeArchived);
+    const response: ListGroupThreadsResponse = rows.map(
+      (r): GroupThreadSummary => ({
+        id: r.id,
+        boardId: r.board_id,
+        boardName: r.board_name,
+        name: r.name,
+        createdAt: r.created_at.toISOString(),
+        imageCount: Number(r.image_count),
+        savedAt: r.saved_at ? r.saved_at.toISOString() : null,
+        lastActivityAt: r.last_activity_at.toISOString(),
+        unread: !r.seen_at || r.last_activity_at > r.seen_at,
+        archived: r.archived,
+        previewImageIds: r.preview_image_ids,
+      }),
+    );
+    json(ctx.res, 200, response);
+  });
+
+  // GET /groups/:id/activity?limit= (docs/phases/6-product.md "Group
+  // activity feed"): the homepage guestbook — access/index.ts's own
+  // function decides visibility (board-scoped rows filtered by the
+  // open-or-allowlist predicate); this route only shapes the JSON.
+  router.get('/groups/:id/activity', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const orgId = param(ctx, 'id');
+    const requestedLimit = Number(ctx.url.searchParams.get('limit') ?? '20');
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+      return json(ctx.res, 400, { error: 'limit must be a positive integer' });
+    }
+    const limit = Math.min(requestedLimit, 100);
+    const rows = await activityForGroupListing(userId, orgId, limit);
+    const response: ListGroupActivityResponse = rows.map(
+      (r): GroupActivityItem => ({
+        id: String(r.id),
+        boardId: r.board_id,
+        kind: r.kind,
+        actorId: r.actor_id,
+        actorName: r.actor_name,
+        payload: r.payload,
+        at: r.at.toISOString(),
+      }),
+    );
+    json(ctx.res, 200, response);
+  });
+
+  // GET /groups/:id/stats (docs/phases/6-product.md, docs/ux/design.md
+  // §4.3's visitor-counter strip): images/sheets over visible boards only
+  // (access/index.ts#statsForGroupListing); members is the group's own
+  // membership count (access/reads.ts#membersOfGroup) — no board
+  // visibility question for that one, every member of the group counts.
+  router.get('/groups/:id/stats', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const orgId = param(ctx, 'id');
+    const boardStats = await statsForGroupListing(userId, orgId);
+    const members = await membersOfGroup(orgId);
+    const response: GroupStatsResponse = {
+      images: boardStats.images,
+      sheets: boardStats.sheets,
+      members: members.length,
+    };
     json(ctx.res, 200, response);
   });
 }

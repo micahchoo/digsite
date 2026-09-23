@@ -64,6 +64,9 @@ class Session {
   post(path: string, json?: unknown) {
     return this.raw('POST', path, { json });
   }
+  put(path: string, json?: unknown) {
+    return this.raw('PUT', path, { json });
+  }
   patch(path: string, json?: unknown) {
     return this.raw('PATCH', path, { json });
   }
@@ -238,6 +241,21 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/groups/${fx.labId}/sheets/recent`,
     outsider: 403,
   },
+  'GET /groups/:id/sheets': {
+    method: 'GET',
+    path: (fx) => `/groups/${fx.labId}/sheets`,
+    outsider: 403,
+  },
+  'GET /groups/:id/activity': {
+    method: 'GET',
+    path: (fx) => `/groups/${fx.labId}/activity`,
+    outsider: 403,
+  },
+  'GET /groups/:id/stats': {
+    method: 'GET',
+    path: (fx) => `/groups/${fx.labId}/stats`,
+    outsider: 403,
+  },
 
   'GET /groups/:id/boards': {
     method: 'GET',
@@ -349,6 +367,26 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/jobs/${fx.jobId}/retry`,
     outsider: 403,
   },
+  'GET /boards/:id/selection': {
+    method: 'GET',
+    path: (fx) => `/boards/${fx.bPrivateId}/selection`,
+    outsider: 403,
+  },
+  'PUT /boards/:id/selection': {
+    method: 'PUT',
+    path: (fx) => `/boards/${fx.bPrivateId}/selection`,
+    outsider: 403,
+  },
+  'POST /boards/:id/selection/range': {
+    method: 'POST',
+    path: (fx) => `/boards/${fx.bPrivateId}/selection/range`,
+    outsider: 403,
+  },
+  'GET /boards/:id/find': {
+    method: 'GET',
+    path: (fx) => `/boards/${fx.bPrivateId}/find`,
+    outsider: 403,
+  },
 
   'GET /boards/:id/sheets': {
     method: 'GET',
@@ -374,6 +412,26 @@ const EXPECTATIONS: Record<string, Expectation> = {
   'PATCH /sheets/:id': {
     method: 'PATCH',
     path: (fx) => `/sheets/${fx.sheetId}`,
+    outsider: 403,
+  },
+  'POST /sheets/:id/seen': {
+    method: 'POST',
+    path: (fx) => `/sheets/${fx.sheetId}/seen`,
+    outsider: 403,
+  },
+  'POST /sheets/:id/archive': {
+    method: 'POST',
+    path: (fx) => `/sheets/${fx.sheetId}/archive`,
+    outsider: 403,
+  },
+  'POST /sheets/:id/unarchive': {
+    method: 'POST',
+    path: (fx) => `/sheets/${fx.sheetId}/unarchive`,
+    outsider: 403,
+  },
+  'POST /boards/:id/sheets/:sheetId/images': {
+    method: 'POST',
+    path: (fx) => `/boards/${fx.bPrivateId}/sheets/${fx.sheetId}/images`,
     outsider: 403,
   },
   'GET /sheets/:id/footprint': {
@@ -575,9 +633,11 @@ describe('routes audit', () => {
           ? await outsider.get(path)
           : exp.method === 'POST'
             ? await outsider.post(path, {})
-            : exp.method === 'PATCH'
-              ? await outsider.patch(path, {})
-              : await outsider.del(path);
+            : exp.method === 'PUT'
+              ? await outsider.put(path, {})
+              : exp.method === 'PATCH'
+                ? await outsider.patch(path, {})
+                : await outsider.del(path);
       const ok =
         typeof exp.outsider === 'number'
           ? res.status === exp.outsider
@@ -589,5 +649,13 @@ describe('routes audit', () => {
       }
     }
     if (failures.length > 0) throw new Error(failures.join('\n'));
+  });
+
+  test('activity limit rejects non-integers before reaching SQL', async () => {
+    const res = await outsider.get(
+      `/groups/${fixture.labId}/activity?limit=abc`,
+    );
+    expect(res.status).toBe(400);
+    expect(res.json).toEqual({ error: 'limit must be a positive integer' });
   });
 });

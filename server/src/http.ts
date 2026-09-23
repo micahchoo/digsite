@@ -69,6 +69,9 @@ export class Router {
   post(pattern: string, handler: Handler) {
     this.add('POST', pattern, handler);
   }
+  put(pattern: string, handler: Handler) {
+    this.add('PUT', pattern, handler);
+  }
   patch(pattern: string, handler: Handler) {
     this.add('PATCH', pattern, handler);
   }
@@ -120,7 +123,18 @@ export class Router {
           return true;
         }
         if (err instanceof AccessDenied) {
-          json(res, 403, { reason: err.reason });
+          // docs/ux/audit.md #7 / docs/ux/design.md: {reason, askName} on a
+          // board denial when the access function decided the viewer may be
+          // told whom to ask (access/index.ts#boardForViewing); every other
+          // denial stays a plain {reason} — this is the one place that
+          // shape difference becomes JSON, so no route hand-writes it.
+          json(
+            res,
+            403,
+            err.askName
+              ? { reason: err.reason, askName: err.askName }
+              : { reason: err.reason },
+          );
           finish();
           return true;
         }

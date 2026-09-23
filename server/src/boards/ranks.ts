@@ -8,6 +8,7 @@ import { type Zoom, tileRanks } from '@digsite/shared/board/grid';
 import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { pool } from '../db/pool.ts';
 import { invalidateResidentSort } from './coarse-cache.ts';
+import { ensurePropertyIndex } from './property-index.ts';
 import { invalidateComposedTiles } from './tiles-cache.ts';
 
 // board_ranks.board_id has no FK to boards(id) as of 0004_ranks_no_fk.sql —
@@ -37,9 +38,18 @@ function orderExpr(sort: Sort): string {
   // by the only two callers that build a Sort from a URL — see boards/tiles.ts
   // and boards/routes.ts. Never build a Sort here from unvalidated input.
   const { property, type } = sort.key;
-  const cast =
-    type === 'number' ? '::numeric' : type === 'boolean' ? '::boolean' : '';
-  return `(properties->>'${property}')${cast} ${dir} NULLS LAST, slot ASC`;
+  // ISO dates sort chronologically as fixed-width YYYY-MM-DD strings.
+  // Lists sort by their first scalar member; empty lists are NULLS LAST.
+  if (type === 'list') {
+    return `(CASE WHEN jsonb_typeof(properties->'${property}') = 'array' THEN properties->'${property}'->>0 END) ${dir} NULLS LAST, slot ASC`;
+  }
+  if (type === 'number') {
+    return `(CASE WHEN jsonb_typeof(properties->'${property}') = 'number' THEN (properties->>'${property}')::numeric END) ${dir} NULLS LAST, slot ASC`;
+  }
+  if (type === 'boolean') {
+    return `(CASE WHEN jsonb_typeof(properties->'${property}') = 'boolean' THEN (properties->>'${property}')::boolean END) ${dir} NULLS LAST, slot ASC`;
+  }
+  return `(CASE WHEN jsonb_typeof(properties->'${property}') = 'string' THEN properties->>'${property}' END) ${dir} NULLS LAST, slot ASC`;
 }
 
 // docs/measurements/phase-5.md "After the leftovers", problem 3: a sort
@@ -153,6 +163,17 @@ export async function forceRebuildRank(
 async function rebuildRank(boardId: string, sort: Sort): Promise<void> {
   const sid = sortId(sort);
   const requestedAt = new Date();
+  // docs/phases/6-product.md "Typed properties complete": an expression
+  // index on this property, built once per board — best-effort, never
+  // blocks a rebuild if it fails (a missing index costs planner time on
+  // the NEXT sort/filter, not correctness).
+  if (typeof sort.key !== 'string') {
+    try {
+      await ensurePropertyIndex(boardId, sort.key.property, sort.key.type);
+    } catch {
+      // best-effort, see above.
+    }
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -250,6 +271,35 @@ export async function slotsForTile(
   for (const row of rows) found.set(row.rank, row.slot);
   for (const w of wanted) out[w.idx] = found.get(w.rank) ?? null;
   return out;
+}
+
+/** Image ids for a contiguous rank RANGE, for `POST /boards/:id/selection/
+ * range` (docs/phases/6-product.md "Selection on a million cells" — range
+ * and band selects resolve server-side so a million-cell board never pages
+ * ranks to the client). `fromRank`/`toRank` may arrive in either order (a
+ * drag can run either direction) — normalised here. A contiguous BETWEEN on
+ * `(board_id, sort_id, rank)` uses a btree range scan. For discrete rank
+ * sets, use the unnest join in `slotsForTile` above, as required by
+ * `.claude/rules/ladder-slot-vs-rank.md`. */
+export async function imageIdsInRankRange(
+  boardId: string,
+  sort: Sort,
+  fromRank: number,
+  toRank: number,
+  cap: number,
+): Promise<string[]> {
+  await ensureRank(boardId, sort);
+  const lo = Math.max(0, Math.min(fromRank, toRank));
+  const hi = Math.max(fromRank, toRank);
+  const sid = sortId(sort);
+  const { rows } = await pool.query(
+    `SELECT i.id FROM board_ranks br
+     JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
+     WHERE br.board_id = $1 AND br.sort_id = $2 AND br.rank BETWEEN $3 AND $4
+     ORDER BY br.rank ASC LIMIT $5`,
+    [boardId, sid, lo, hi, cap],
+  );
+  return rows.map((r) => r.id);
 }
 
 /** Images in rank order, for `GET /boards/:id/images` — the click-to-image
