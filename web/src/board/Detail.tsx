@@ -8,6 +8,8 @@
 import type { GetImageResponse, PropertyValue } from '@digsite/shared';
 import { useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
+import { api } from '../lib/api.ts';
+import { bytesLabel } from '../lib/bytes.ts';
 import { captured, isCaptured } from './captured.ts';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -130,6 +132,17 @@ export function Detail({
             >
               The original file is no longer available.
             </span>
+          )}
+          {image.source && (
+            <a
+              className="board-image-facts"
+              data-testid="detail-source"
+              href={api.sourceUrl(image.id)}
+              download
+            >
+              Download the {image.source.format} (
+              {bytesLabel(image.source.bytes)})
+            </a>
           )}
         </div>
         <button

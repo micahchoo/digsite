@@ -38,6 +38,9 @@
 
 .group-heading-meta {
   display: flex;
+  /* Each fact stays whole; the line wraps between them on a phone. */
+  flex-wrap: wrap;
+  white-space: nowrap;
   gap: 8px;
   align-items: center;
   margin: 9px 0 0;
@@ -54,7 +57,7 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
-.group-heading-meta span {
+.group-heading-meta span[aria-hidden="true"] {
   color: var(--text-faint);
 }
 
@@ -741,4 +744,29 @@
   .group-create-shortcut {
     transition: none;
   }
+}
+
+/* How full the group's storage is (Group.tsx#StorageBar). */
+.group-storage {
+  margin-top: 10px;
+  max-width: 320px;
+}
+.group-storage-bar {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.group-storage-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.group-storage-bar[data-full="true"] > span {
+  background: var(--danger);
+}
+.group-storage-note {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: var(--text-xs);
 }

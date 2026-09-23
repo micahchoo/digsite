@@ -100,6 +100,19 @@ export function FolderImport({ boardId, onClose, onProgress }: Props) {
     }
   }
 
+  async function resume() {
+    if (!job) return;
+    setStarting(true);
+    setError('');
+    try {
+      setJob(await api.resumeFolderImport(boardId, job.id));
+    } catch (err) {
+      setError(importFailure(err));
+    } finally {
+      setStarting(false);
+    }
+  }
+
   if (!job) {
     return (
       <dialog
@@ -155,7 +168,7 @@ export function FolderImport({ boardId, onClose, onProgress }: Props) {
     );
   }
 
-  const handled = job.imported + job.skipped;
+  const handled = job.imported + job.skipped + job.unchanged;
   const percent = job.total ? Math.round((handled / job.total) * 100) : 100;
   return (
     <section
@@ -186,9 +199,30 @@ export function FolderImport({ boardId, onClose, onProgress }: Props) {
       <output data-testid="folder-import-counts">
         {job.state === 'done' ? 'Done: ' : ''}
         {job.imported} of {job.total} imported
+        {job.unchanged ? `, ${job.unchanged} unchanged` : ''}
         {job.skipped ? `, ${job.skipped} skipped` : ''}
         {job.state === 'running' ? ` · ${percent}%` : ''}
       </output>
+      {job.state === 'stopped' && (
+        <div
+          className="board-folder-stopped"
+          data-testid="folder-import-stopped"
+        >
+          <p role="alert">
+            Stopped: {job.stopReason ?? 'the import could not go on'}. The files
+            not yet imported wait; resume once there is room.
+          </p>
+          {error && <p className="board-folder-error">{error}</p>}
+          <button
+            type="button"
+            data-testid="folder-import-resume"
+            onClick={() => void resume()}
+            disabled={starting}
+          >
+            {starting ? 'Resuming…' : 'Resume'}
+          </button>
+        </div>
+      )}
       {job.skips.length > 0 && (
         <details>
           <summary>Why files were skipped</summary>

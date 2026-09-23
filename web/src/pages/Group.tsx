@@ -1,4 +1,4 @@
-import type { Role } from '@digsite/shared/api';
+import type { GetGroupResponse, Role } from '@digsite/shared/api';
 // The group home (docs/phases/3-groups.md sections 2 and 5). Boards with
 // stats, recent sheets, invitations, and members with role management and
 // leave. Allowlist management moved to Board.tsx (section 3) — a private
@@ -18,6 +18,7 @@ import {
 } from '../components/ErrorState.tsx';
 import { ApiError, api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
+import { bytesLabel } from '../lib/bytes.ts';
 import { isValidEmail } from '../lib/email.ts';
 import { plural } from '../lib/plural.ts';
 import type { ShellRoute } from '../shell/useShellData.ts';
@@ -162,6 +163,9 @@ export function Group() {
   const [inviteCopied, setInviteCopied] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
+  const [storage, setStorage] = useState<GetGroupResponse['storage'] | null>(
+    null,
+  );
   const [rowError, setRowError] = useState<Record<string, string>>({});
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -177,6 +181,10 @@ export function Group() {
     if (b.status === 'fulfilled') setBoards(b.value);
     if (m.status === 'fulfilled') setMembers(m.value);
     setRecentSheets(s.status === 'fulfilled' ? s.value : []);
+    // Optional: a server without the route shows no storage line.
+    setStorage(
+      (await api.getGroup(groupId).catch(() => null))?.storage ?? null,
+    );
     const failed = [b, m].find((r) => r.status === 'rejected');
     setError(
       failed?.status === 'rejected'
@@ -316,7 +324,21 @@ export function Group() {
           <p className="group-heading-meta">
             {plural(boards.length, 'board')} <span aria-hidden="true">·</span>{' '}
             {plural(members.length, 'member')}
+            {storage && (
+              <>
+                {' '}
+                <span aria-hidden="true">·</span>{' '}
+                <span data-testid="group-storage">
+                  {storage.quotaBytes === null
+                    ? `${bytesLabel(storage.usedBytes)} stored`
+                    : `${bytesLabel(storage.usedBytes)} of ${bytesLabel(storage.quotaBytes)} stored`}
+                </span>
+              </>
+            )}
           </p>
+          {storage?.quotaBytes ? (
+            <StorageBar used={storage.usedBytes} quota={storage.quotaBytes} />
+          ) : null}
         </div>
         <a className="group-create-shortcut" href="#group-create-board">
           <span aria-hidden="true">＋</span> Create a board
@@ -672,6 +694,38 @@ export function Group() {
           </section>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** How full a group's storage is. Past nine tenths it warns, because the
+ * next upload may be refused (board/upload.ts stops the queue on a full
+ * group). */
+function StorageBar({ used, quota }: { used: number; quota: number }) {
+  const share = Math.min(1, used / quota);
+  const nearlyFull = share >= 0.9;
+  return (
+    <div className="group-storage">
+      <div
+        className="group-storage-bar"
+        role="meter"
+        aria-label="Storage used"
+        aria-valuemin={0}
+        aria-valuemax={quota}
+        aria-valuenow={used}
+        data-full={nearlyFull}
+      >
+        <span style={{ width: `${(share * 100).toFixed(1)}%` }} />
+      </div>
+      {nearlyFull && (
+        <p className="group-storage-note" data-testid="group-storage-warning">
+          {share >= 1
+            ? 'Storage is full: new pictures will be refused.'
+            : 'Storage is nearly full.'}{' '}
+          Delete pictures the group no longer needs, or ask whoever runs this
+          server for more space.
+        </p>
+      )}
     </div>
   );
 }

@@ -27,6 +27,7 @@ import type {
   GetBoardResponse,
   GetBoardSelectionResponse,
   GetBoardVocabularyResponse,
+  GetGroupResponse,
   GetImageResponse,
   GetNeighbourhoodResponse,
   GetRepliesResponse,
@@ -192,6 +193,9 @@ export class ApiError extends Error {
      * about the failure. */
     public readonly requestId: string | null = null,
     public readonly retryAfter: number | null = null,
+    /** The refusal's JSON body, for a caller that reads more than the
+     * reason: a full group's `usedBytes` and `quotaBytes`, say. */
+    public readonly body: unknown = null,
   ) {
     super(reason);
     this.name = 'ApiError';
@@ -222,8 +226,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let reason = res.statusText;
     let requestId = res.headers.get('X-Request-Id');
     let retryAfter = Number(res.headers.get('Retry-After') ?? Number.NaN);
+    let parsed: unknown = null;
     try {
-      const body = (await res.json()) as {
+      parsed = await res.json();
+      const body = parsed as {
         reason?: string;
         error?: string;
         requestId?: string;
@@ -241,6 +247,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       reason,
       requestId,
       Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter : null,
+      parsed,
     );
   }
 
@@ -274,6 +281,9 @@ export const api = {
   createGroup: (body: CreateGroupRequest) =>
     request<CreateGroupResponse>('/groups', post(body)),
   listGroups: () => request<ListGroupsResponse>('/groups'),
+  /** One group and how much of its storage it uses. */
+  getGroup: (groupId: string) =>
+    request<GetGroupResponse>(`/groups/${groupId}`),
   // `Partial<InviteRequest>` rather than the shared type's required
   // `email: string`: docs/ux/audit.md #7's fix is to omit the key
   // entirely for a link-only invite, not send `email: ''` — the field the
@@ -442,6 +452,13 @@ export const api = {
     }),
   getFolderImport: (boardId: string, importId: string) =>
     request<FolderImport>(`/boards/${boardId}/imports/${importId}`),
+  /** Goes on with an import the group's storage stopped; 409 if it is not
+   * stopped. */
+  resumeFolderImport: (boardId: string, importId: string) =>
+    request<FolderImport>(
+      `/boards/${boardId}/imports/${importId}/resume`,
+      post({}),
+    ),
   // Phase 2 section 4: see ListBoardImagesByIdsResponse's header comment —
   // `ids`/per-image `rank` are not in the real server's contract yet.
   getBoardImagesByIds: (boardId: string, sort: string, ids: string[]) =>
@@ -473,6 +490,9 @@ export const api = {
     request<GetImageResponse>(`/images/${imageId}`),
   originalUrl: (imageId: string) =>
     `${SERVER_ORIGIN}/images/${imageId}/original`,
+  /** The camera file a picture was made from (HEIC, RAW), when it kept one:
+   * `BoardImage.source` says whether. Downloads as `<name>.<format>`. */
+  sourceUrl: (imageId: string) => `${SERVER_ORIGIN}/images/${imageId}/source`,
   // Phase 2 section 7 (docs/phases/2-sheet.md): the sheet canvas loads a
   // preview, not the original — not in the real server's contract yet (the
   // stub serves the same painted PNG for both); see this file's report back

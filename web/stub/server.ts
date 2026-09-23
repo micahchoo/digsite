@@ -842,6 +842,26 @@ const httpServer = createServer(async (req, res) => {
   if (url.pathname === '/groups' && req.method === 'POST')
     return json(201, { id: 'g1' });
 
+  // GET /groups/:id — the group and its storage. Lab carries a quota nearly
+  // used, so the group page's storage line shows its bar; Annex has none.
+  const groupOne = url.pathname.match(/^\/groups\/([^/]+)$/);
+  if (groupOne && req.method === 'GET') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const group = groupOf(groupOne[1] ?? '');
+    if (!group) return json(404, { reason: 'not found' });
+    const denied = groupForViewing(u, group.id);
+    if (denied) return json(403, denied);
+    return json(200, {
+      ...group,
+      role: roleOf(u, group.id),
+      storage:
+        group.id === 'g1'
+          ? { usedBytes: 4_600_000_000, quotaBytes: 5_000_000_000 }
+          : { usedBytes: 12_000_000, quotaBytes: null },
+    });
+  }
+
   const groupInvite = url.pathname.match(/^\/groups\/([^/]+)\/invite$/);
   if (groupInvite && req.method === 'POST') {
     const u = sessionUser(req.headers.cookie);

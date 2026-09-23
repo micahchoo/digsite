@@ -2,6 +2,7 @@
 // route changes do not orphan accepted IDs or start duplicate transfers.
 import * as tus from 'tus-js-client';
 import { ApiError, type ImageStatus, SERVER_ORIGIN, api } from '../lib/api.ts';
+import { bytesLabel } from '../lib/bytes.ts';
 
 export const TUS_THRESHOLD_BYTES = 8 * 1024 * 1024;
 export const MULTIPART_BATCH_SIZE = 10;
@@ -333,6 +334,7 @@ function startTus(
   status?: number;
   retryAfter?: number;
   fallback?: boolean;
+  body?: unknown;
 }> {
   if (!row.file)
     return Promise.resolve({ id: null, error: 'File is unavailable.' });
@@ -346,7 +348,7 @@ function startTus(
       // and retrying only writes more into it.
       onShouldRetry: (error) => {
         const status = error.originalResponse?.getStatus() ?? 0;
-        if (status === 507) return false;
+        if (status === 507 || status === 413) return false;
         const client = status >= 400 && status < 500;
         return (
           (!client || status === 409 || status === 423) && navigator.onLine
@@ -375,6 +377,7 @@ function startTus(
       status?: number;
       retryAfter?: number;
       fallback?: boolean;
+      body?: unknown;
     }) => {
       session.activeTus.delete(upload);
       resolve(result);
@@ -389,19 +392,15 @@ function startTus(
       let retryAfter = Number(
         detailed.originalResponse?.getHeader('Retry-After') ?? Number.NaN,
       );
-      if (!Number.isFinite(retryAfter)) {
-        try {
-          const body = JSON.parse(
-            detailed.originalResponse?.getBody() ?? 'null',
-          ) as {
-            retryAfter?: unknown;
-          } | null;
-          if (typeof body?.retryAfter === 'number')
-            retryAfter = body.retryAfter;
-        } catch {
-          // The server may return an HTML or empty error body.
-        }
+      let body: unknown = null;
+      try {
+        body = JSON.parse(detailed.originalResponse?.getBody() ?? 'null');
+      } catch {
+        // The server may return an HTML or empty error body.
       }
+      const bodyRetry = (body as { retryAfter?: unknown } | null)?.retryAfter;
+      if (!Number.isFinite(retryAfter) && typeof bodyRetry === 'number')
+        retryAfter = bodyRetry;
       const fallback =
         status === 404 &&
         detailed.originalRequest?.getMethod() === 'POST' &&
@@ -412,6 +411,7 @@ function startTus(
         status,
         retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined,
         fallback,
+        body,
       });
     };
     upload.start();
@@ -434,6 +434,76 @@ function stopForFullDisk(session: QueueSession, batch: readonly UploadRow[]) {
   session.message =
     "Uploads stopped: the server's disk is full. Ask whoever runs this server to free space, then add the remaining files again.";
   publish(session, true);
+}
+
+/** A 413 from a group whose storage is full, read from its body; null for
+ * any other refusal. */
+export function quotaOf(body: unknown): {
+  usedBytes: number;
+  quotaBytes: number;
+  accepted?: { name: string; id: string }[];
+} | null {
+  const b = body as {
+    reason?: unknown;
+    usedBytes?: unknown;
+    quotaBytes?: unknown;
+    accepted?: unknown;
+  } | null;
+  if (b?.reason !== 'quota') return null;
+  if (typeof b.usedBytes !== 'number' || typeof b.quotaBytes !== 'number')
+    return null;
+  const accepted = Array.isArray(b.accepted)
+    ? b.accepted.filter(
+        (a): a is { name: string; id: string } =>
+          typeof a?.name === 'string' && typeof a?.id === 'string',
+      )
+    : undefined;
+  return {
+    usedBytes: b.usedBytes,
+    quotaBytes: b.quotaBytes,
+    ...(accepted ? { accepted } : {}),
+  };
+}
+
+/** The group's storage is full (413, reason quota). Like a full disk,
+ * nothing else in the queue can land. In a batch, the files before the one
+ * that crossed the line were kept: those the server names are pending, the
+ * rest failed; when it names none, which landed is unknown. */
+function stopForFullStorage(
+  session: QueueSession,
+  batch: readonly UploadRow[],
+  quota: NonNullable<ReturnType<typeof quotaOf>>,
+) {
+  const kept = [...(quota.accepted ?? [])];
+  for (const row of batch) {
+    // Names repeat in a batch, so each accepted file matches one row, in
+    // order.
+    const at = kept.findIndex((a) => a.name === row.name);
+    if (at >= 0) {
+      row.imageId = kept.splice(at, 1)[0]?.id;
+      setStatus(session, row, 'pending');
+      row.file = null;
+      continue;
+    }
+    if (quota.accepted || batch.length === 1)
+      setStatus(session, row, 'error', "The group's storage is full.");
+    else
+      setStatus(
+        session,
+        row,
+        'unknown',
+        "The group's storage filled during this batch. Refresh the board to see whether this file was added.",
+      );
+    row.file = null;
+  }
+  for (const row of session.rows) {
+    if (row.status !== 'queued') continue;
+    setStatus(session, row, 'canceled');
+    row.file = null;
+  }
+  session.message = `Uploads stopped: this group's storage is full (${bytesLabel(quota.usedBytes)} of ${bytesLabel(quota.quotaBytes)}). Delete pictures the group no longer needs, or ask whoever runs this server for more space, then add the remaining files again.`;
+  publish(session, true);
+  if (kept.length < (quota.accepted?.length ?? 0)) scheduleStatusPoll(session);
 }
 
 // UploadRow doesn't carry board identity, so task-local lookup is explicit.
@@ -482,6 +552,11 @@ async function uploadBatch(session: QueueSession, batch: UploadRow[]) {
     }
     if (result.status === 507) {
       stopForFullDisk(session, [row]);
+      return;
+    }
+    const tusQuota = result.status === 413 ? quotaOf(result.body) : null;
+    if (tusQuota) {
+      stopForFullStorage(session, [row], tusQuota);
       return;
     }
     if (!result.id) {
@@ -554,6 +629,14 @@ async function uploadBatch(session: QueueSession, batch: UploadRow[]) {
       }
       if (error instanceof ApiError && error.status === 507) {
         stopForFullDisk(session, batch);
+        return;
+      }
+      const quota =
+        error instanceof ApiError && error.status === 413
+          ? quotaOf(error.body)
+          : null;
+      if (quota) {
+        stopForFullStorage(session, batch, quota);
         return;
       }
       const definiteRejection =
