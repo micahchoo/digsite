@@ -342,6 +342,11 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/images/${fx.imageId}/original`,
     outsider: 403,
   },
+  'GET /images/:id/source': {
+    method: 'GET',
+    path: (fx) => `/images/${fx.imageId}/source`,
+    outsider: 403,
+  },
   'GET /images/:id/preview': {
     method: 'GET',
     path: (fx) => `/images/${fx.imageId}/preview`,

@@ -183,7 +183,8 @@ sheet that made it. The board never writes a claim.
 - **Camera file** — a phone or camera format (HEIC, RAW) that intake
   turns into a JPEG original once, where it enters. HEIC is decoded; a
   RAW gives up the full-size JPEG the camera embedded. The image's
-  `format` property keeps what the file was.
+  `format` property keeps what the file was, and the file itself is kept
+  as the image's **source**, downloadable as it came in.
 - **Invalidation** — a message that one process's cached copy of a board
   (ladder pages, composed tiles, coarse tiles) is old. Published on one
   Postgres channel; every other process drops its copy.

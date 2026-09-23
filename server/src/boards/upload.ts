@@ -16,9 +16,12 @@ import { storageFromEnv } from '../storage/index.ts';
 import { ensureRoomFor } from '../storage/room.ts';
 import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
-import { originalKey } from './paths.ts';
+import { originalKey, sourceKey } from './paths.ts';
 
 export type UploadedImage = { id: string; slot: number; status: 'pending' };
+
+/** A camera file kept beside its JPEG (intake.ts). */
+export type Source = { bytes: Uint8Array; format: string };
 
 export async function uploadOne(
   boardId: string,
@@ -27,9 +30,13 @@ export async function uploadOne(
   bytes: Uint8Array,
   properties: Record<string, unknown> = {},
   contentType = 'application/octet-stream',
+  source?: Source,
 ): Promise<UploadedImage> {
-  await ensureRoomFor(bytes.length);
+  await ensureRoomFor(bytes.length + (source?.bytes.length ?? 0));
   const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const sourceSha = source
+    ? createHash('sha256').update(source.bytes).digest('hex')
+    : null;
 
   const storage = storageFromEnv();
   const key = originalKey(boardId, sha256);
@@ -38,6 +45,12 @@ export async function uploadOne(
   // share one object, so a second upload never overwrites the first.
   if (!(await storage.exists(key))) {
     await storage.put(key, bytes, contentType);
+  }
+  if (source && sourceSha) {
+    const kept = sourceKey(boardId, sourceSha);
+    if (!(await storage.exists(kept))) {
+      await storage.put(kept, source.bytes, 'application/octet-stream');
+    }
   }
 
   const client = await pool.connect();
@@ -51,9 +64,21 @@ export async function uploadOne(
     );
     slot = slotRes.rows[0].slot;
     const insRes = await client.query(
-      `INSERT INTO images (board_id, slot, sha256, name, width, height, uploaded_by, properties, status)
-       VALUES ($1,$2,$3,$4,0,0,$5,$6,'pending') RETURNING id`,
-      [boardId, slot, sha256, filename, userId, JSON.stringify(properties)],
+      `INSERT INTO images (board_id, slot, sha256, name, width, height, uploaded_by, properties, status,
+                           bytes, source_sha256, source_format, source_bytes)
+       VALUES ($1,$2,$3,$4,0,0,$5,$6,'pending',$7,$8,$9,$10) RETURNING id`,
+      [
+        boardId,
+        slot,
+        sha256,
+        filename,
+        userId,
+        JSON.stringify(properties),
+        bytes.length,
+        sourceSha,
+        source?.format ?? null,
+        source ? source.bytes.length : null,
+      ],
     );
     imageId = insRes.rows[0].id;
     await client.query('COMMIT');

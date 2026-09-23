@@ -250,6 +250,9 @@ export type BoardImage = {
   // existing type. width/height are 0 while status is 'pending'.
   status: 'ready' | 'pending' | 'failed';
   error: string | null;
+  /** The phone or camera file this image's JPEG was made from, kept at
+   * intake; GET /images/:id/source downloads it. Absent for any other. */
+  source?: { format: string; bytes: number };
 };
 export type ListBoardImagesResponse = { images: BoardImage[] };
 

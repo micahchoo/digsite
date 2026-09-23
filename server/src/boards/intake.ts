@@ -21,7 +21,7 @@
 import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.ts';
 import { fromCamera, isCameraFile } from './camera.ts';
-import { type UploadedImage, uploadOne } from './upload.ts';
+import { type Source, type UploadedImage, uploadOne } from './upload.ts';
 import { validateUpload } from './validate.ts';
 
 export type Offered = {
@@ -37,6 +37,8 @@ export type Examined = {
   properties: Record<string, unknown>;
   /** From the bytes, never from the client. */
   contentType: string;
+  /** The phone or camera file, kept beside the JPEG made from it. */
+  source?: Source;
 };
 
 export type Refused = { ok: false; status: number; reason: string };
@@ -49,10 +51,12 @@ export async function examine(
 ): Promise<Examined | Refused> {
   const properties = { ...(offered.properties ?? {}) };
   let bytes = offered.bytes;
+  let source: Source | undefined;
   if (isCameraFile(offered.name)) {
     const converted = await fromCamera(offered.name, bytes);
     if (!converted.ok)
       return { ok: false, status: 415, reason: converted.reason };
+    source = { bytes: offered.bytes, format: converted.format };
     bytes = converted.bytes;
     properties.format = converted.format;
   }
@@ -79,6 +83,7 @@ export async function examine(
     bytes,
     properties,
     contentType: `image/${valid.type}`,
+    ...(source ? { source } : {}),
   };
 }
 
@@ -96,5 +101,6 @@ export function store(
     examined.bytes,
     examined.properties,
     examined.contentType,
+    examined.source,
   );
 }

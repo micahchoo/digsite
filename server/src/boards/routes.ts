@@ -112,7 +112,7 @@ import {
 } from './folder-import.ts';
 import { type Examined, examine, store } from './intake.ts';
 import { withPage } from './ladder.ts';
-import { originalKey, previewKey } from './paths.ts';
+import { originalKey, previewKey, sourceKey } from './paths.ts';
 import { isProperties } from './properties.ts';
 import {
   type Build,
@@ -127,6 +127,7 @@ import {
 } from './ranks.ts';
 import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
+import { detectImageType } from './validate.ts';
 import {
   aliasesOf,
   deleteAlias,
@@ -290,6 +291,14 @@ function toBoardImage(i: ImageRow): BoardImage {
     missing: i.missing,
     status: i.status,
     error: i.error,
+    ...(i.source_sha256 && i.source_format
+      ? {
+          source: {
+            format: i.source_format,
+            bytes: Number(i.source_bytes ?? 0),
+          },
+        }
+      : {}),
   };
 }
 
@@ -978,8 +987,33 @@ export function registerBoardRoutes(router: Router) {
 
     const buf = await storageFromEnv().get(key);
     if (!buf) return json(ctx.res, 404, { error: 'original missing' });
+    // The type the bytes are; this said image/png for every original.
+    const type = detectImageType(buf) ?? 'png';
     ctx.res.writeHead(200, {
-      'Content-Type': 'image/png',
+      'Content-Type': `image/${type}`,
+      'Cache-Control': 'private, max-age=300',
+    });
+    ctx.res.end(Buffer.from(buf));
+  });
+
+  // GET /images/:id/source: the phone or camera file intake made this
+  // image's JPEG from (CONTEXT.md "Camera file"), as it came in. 404 for
+  // an image that has none.
+  router.get('/images/:id/source', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const image = await imageForViewing(userId, param(ctx, 'id'));
+    if (!image.source_sha256 || !image.source_format) {
+      return json(ctx.res, 404, { error: 'this image has no source file' });
+    }
+    const buf = await storageFromEnv().get(
+      sourceKey(image.board_id, image.source_sha256),
+    );
+    if (!buf) return json(ctx.res, 404, { error: 'source missing' });
+    const base = image.name.replace(/\.[^.]*$/, '') || 'source';
+    const file = `${base}.${image.source_format.toLowerCase()}`;
+    ctx.res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file)}`,
       'Cache-Control': 'private, max-age=300',
     });
     ctx.res.end(Buffer.from(buf));
@@ -1101,6 +1135,21 @@ export function registerBoardRoutes(router: Router) {
         await storageFromEnv().delete(
           originalKey(image.board_id, image.sha256),
         );
+      }
+      // A kept camera source goes the same way, unless another image
+      // still on the board came from the same file.
+      if (image.source_sha256) {
+        const { rows: sharing } = await pool.query(
+          `SELECT 1 FROM images
+           WHERE board_id = $1 AND source_sha256 = $2 AND id != $3 AND missing = false
+           LIMIT 1`,
+          [image.board_id, image.source_sha256, image.id],
+        );
+        if (sharing.length === 0) {
+          await storageFromEnv().delete(
+            sourceKey(image.board_id, image.source_sha256),
+          );
+        }
       }
     }
     await pool.query('UPDATE images SET missing = true WHERE id = $1', [

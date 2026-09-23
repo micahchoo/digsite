@@ -19,6 +19,11 @@ export function originalKey(boardId: string, sha256: string): string {
 /** `GET /images/:id/preview`'s encode-once cache — a PNG of the original
  * scaled to at most 1024px on its longer side, keyed by the same sha256 as
  * the original (so two images sharing one original share one preview too). */
+/** A camera file kept beside the JPEG intake made from it (intake.ts). */
+export function sourceKey(boardId: string, sha256: string): string {
+  return `boards/${boardId}/sources/${sha256}`;
+}
+
 export function previewKey(boardId: string, sha256: string): string {
   return `boards/${boardId}/previews/${sha256}.png`;
 }

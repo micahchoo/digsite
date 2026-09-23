@@ -144,5 +144,35 @@ describe('the browser upload goes through intake', () => {
     expect(rows.map((r) => [r.name, r.properties.format])).toEqual([
       ['IMG_0002.HEIC', 'HEIC'],
     ]);
+
+    // The phone's file is kept, and comes back byte for byte.
+    const { rows: ids } = await pool.query(
+      'SELECT id FROM images WHERE board_id = $1',
+      [created.id],
+    );
+    const imageId = ids[0].id as string;
+    const source = await request('GET', `/images/${imageId}/source`);
+    expect(source.status).toBe(200);
+    expect(source.headers.get('content-disposition')).toContain(
+      'IMG_0002.heic',
+    );
+    const heic = Buffer.from(await Bun.file(HEIC).arrayBuffer());
+    expect(Buffer.from(await source.arrayBuffer()).equals(heic)).toBe(true);
+    const listed = (await (
+      await request(
+        'GET',
+        `/boards/${created.id}/images?sort=name.asc&ids=${imageId}`,
+      )
+    ).json()) as { images: { source?: unknown }[] };
+    expect(listed.images[0]?.source).toEqual({
+      format: 'HEIC',
+      bytes: heic.length,
+    });
+
+    // Deleting the image removes the kept file with the original.
+    expect((await request('DELETE', `/images/${imageId}`)).status).toBe(200);
+    expect((await request('GET', `/images/${imageId}/source`)).status).toBe(
+      404,
+    );
   });
 });

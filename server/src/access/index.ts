@@ -81,6 +81,10 @@ export type ImageRow = {
   // until worker/jobs.ts#runLadderJob decodes the original and sets these.
   status: 'ready' | 'pending' | 'failed';
   error: string | null;
+  /** The phone or camera file this JPEG came from (0026_image_sources). */
+  source_sha256: string | null;
+  source_format: string | null;
+  source_bytes: string | null;
 };
 
 async function findMember(
