@@ -34,6 +34,8 @@ export interface SheetMenuActions {
   undo: () => void;
   redo: () => void;
   help: () => void;
+  /** Downloads the sheet's claims as one document. */
+  report: () => void;
 }
 
 const HOW_SURE: [Confidence | null, string][] = [
@@ -133,6 +135,11 @@ export function sheetMenu(
       keys: '?',
       testId: 'sheet-menu-help',
       onSelect: act.help,
+    },
+    {
+      label: 'Export a report',
+      testId: 'sheet-menu-report',
+      onSelect: act.report,
     },
   ];
   const history: MenuSection = [

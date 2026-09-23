@@ -32,6 +32,7 @@ import {
   DirectionControl,
 } from './ClaimControls.tsx';
 import { Discussion } from './Discussion.tsx';
+import { LooksLike } from './LooksLike.tsx';
 import type { SceneElement } from './canvas/types.ts';
 import {
   type EvidenceEnd,
@@ -65,6 +66,18 @@ export interface InspectorProps {
   sheetId: string;
   /** The signed-in person, who may remove their own replies. */
   userId: string | null;
+  /** "Looks like" under a picture: suggestions, chosen by a person. */
+  looksLike?: {
+    boardId: string;
+    sort: string;
+    onSheet: ReadonlySet<string>;
+    onBring: (parentImageId: string, imageId: string) => Promise<string | null>;
+    onConnect: (
+      parentImageId: string,
+      elementId: string,
+      relation: string,
+    ) => void;
+  };
   /** Opens the web of claims around the given pictures. */
   onOpenWeb?: (imageIds: string[]) => void;
   /** Makes a picture of its own from a region, beside its parent. */
@@ -91,7 +104,10 @@ export function Inspector(props: InspectorProps) {
   const el = selected.elements[0];
   const data = el ? dataOf(el) : null;
   if (!el || !data) return <div data-testid="inspector" />;
-  if (data.kind === 'image') return <ImageInspector imageId={data.imageId} />;
+  if (data.kind === 'image')
+    return (
+      <ImageInspector imageId={data.imageId} looksLike={props.looksLike} />
+    );
   return <OwnClaim {...props} element={el} data={data} />;
 }
 
@@ -696,7 +712,13 @@ function Several(props: InspectorProps) {
 /** Board-owned data, not scene data: fetched by imageId on selection and
  * saved through `PATCH /images/:id`, same as Board.tsx's Detail panel
  * (docs/phases/2-sheet.md section 2). */
-function ImageInspector({ imageId }: { imageId: string }) {
+function ImageInspector({
+  imageId,
+  looksLike,
+}: {
+  imageId: string;
+  looksLike?: InspectorProps['looksLike'];
+}) {
   const [image, setImage] = useState<GetImageResponse | null>(null);
   const [saveState, setSaveState] = useState<
     'idle' | 'saving' | 'saved' | 'error'
@@ -779,6 +801,18 @@ function ImageInspector({ imageId }: { imageId: string }) {
         onDelete={() => void deleteImage()}
         onClose={() => {}}
       />
+      {looksLike && !image.missing && (
+        <LooksLike
+          boardId={looksLike.boardId}
+          sort={looksLike.sort}
+          imageId={imageId}
+          onSheet={looksLike.onSheet}
+          onBring={(id) => looksLike.onBring(imageId, id)}
+          onConnect={(elementId, relation) =>
+            looksLike.onConnect(imageId, elementId, relation)
+          }
+        />
+      )}
     </div>
   );
 }

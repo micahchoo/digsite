@@ -1794,3 +1794,49 @@
   font-size: var(--text-xs);
   transform: translateX(-50%);
 }
+
+/* The machine suggests; a person decides (LooksLike.tsx). */
+.looks-like-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.looks-like-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.looks-like-list img {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-s);
+  background: var(--surface-sunken);
+  object-fit: cover;
+}
+.looks-like-list button {
+  min-height: 26px;
+  padding: 0 4px;
+  font-size: var(--text-2xs);
+}
+.looks-like-done {
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  text-align: center;
+}
+
+.sheet-header-action {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 550;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

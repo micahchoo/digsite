@@ -80,10 +80,10 @@ image-graph are mapped per horizon in `ux/image-graph-patterns.md`.
 
 | # | horizon | done when | status |
 | --- | --- | --- | --- |
-| 1 | The loop without friction | details docked, lines route around pictures, focus dims the rest, labels and captions on the canvas, confidence visible on the line, `?` shortcuts, mode bar, context menu | in progress |
-| 2 | Claims you can trust | compare two pictures side by side; who said what and when; replies on a claim; extract a region as its own picture | open |
-| 3 | A web you can walk | explore a connection or a relation; "how are A and B connected"; a graph view with hop rings | open |
-| 4 | The machine suggests, never decides | suggested connections, labels and near-duplicates from embeddings, each accepted by a person | open; needs the embedding routes (digsite-1b) |
+| 1 | The loop without friction | details docked, lines route around pictures, focus dims the rest, labels and captions on the canvas, confidence visible on the line, `?` shortcuts, mode bar, context menu | DONE 2026-09-23: walked on the real server (`e2e/src/sense-claims.ts` 2b, 6b-6d) |
+| 2 | Claims you can trust | compare two pictures side by side; who said what and when; replies on a claim; extract a region as its own picture | DONE 2026-09-23: Compare, stamps (signed in the room), replies (0023), extract (`POST /images/:id/extract`); walked 6e, 10, 11 |
+| 3 | A web you can walk | explore a connection or a relation; "how are A and B connected"; a graph view with hop rings | mostly done 2026-09-23: path up to six steps (9), the web view with hop rings, from a picture or a connection (9b, 12). Open: the web of one relation |
+| 4 | The machine suggests, never decides | suggested connections, labels and near-duplicates from embeddings, each accepted by a person | in progress: Find by meaning, More like this, and "Looks like" on a sheet picture (Bring here, then connect). Open: near-duplicates (digsite-1b's route), label suggestions |
 | 5 | Show the work | stable links to a claim or a view, a read-only view, a citable export | open |
 | 6 | The quality floor | dark mode, phone width, arrow keys and an announcer, screenshots and the claims walk in CI | open |
 

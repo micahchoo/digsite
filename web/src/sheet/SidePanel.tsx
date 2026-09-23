@@ -42,6 +42,8 @@ interface HeaderProps {
   relations: { relation: string; count: number }[];
   connectionRelation: string | null;
   onConnectionRelationChange: (relation: string | null) => void;
+  /** Downloads the sheet's claims as one self-contained document. */
+  onExportReport?: () => void;
 }
 
 function Header({
@@ -62,6 +64,7 @@ function Header({
   relations,
   connectionRelation,
   onConnectionRelationChange,
+  onExportReport,
 }: HeaderProps) {
   const relationGroup = useId();
   const lastSyncAt = Math.max(status.lastEmitAt ?? 0, status.lastRecvAt ?? 0);
@@ -128,6 +131,16 @@ function Header({
       >
         Show on board
       </Link>
+      {onExportReport && (
+        <button
+          type="button"
+          className="sheet-header-action"
+          data-testid="export-report"
+          onClick={onExportReport}
+        >
+          Export a report
+        </button>
+      )}
       {peers.length > 0 && (
         <div className="sheet-presence" data-testid="presence-strip">
           {/* docs/ux/audit.md #11: a peer with no name yet is skipped

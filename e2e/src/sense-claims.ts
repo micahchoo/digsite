@@ -5,7 +5,9 @@
 // screenshot. Seed (server/src/seed.ts): board "Field", sheets "First pass"
 // (member, slots 0..11) and "Faces" (listed, slots 6..17).
 import { mkdirSync, writeFileSync } from 'node:fs';
+import type { EdgeRow } from '@digsite/shared';
 import { type BrowserContext, type Page, chromium } from 'playwright';
+import { shortestPath } from '../../web/src/board/path.ts';
 import { edgePaths, midSegment } from '../../web/src/sheet/routing.ts';
 import { SERVER, type Session, WEB, signIn } from './session.ts';
 
@@ -424,11 +426,25 @@ async function main(): Promise<void> {
     );
 
     // -- 4. Follow connections off the sheet, and bring one in ------------------
+    // Exact against what the server holds now, so a suite that ran before
+    // on the same database cannot make it wrong: every other sheet's claim
+    // with one end on image 11 and the other off this sheet.
+    const reachRows = await member.get<{
+      edges: {
+        near: 'source' | 'target';
+        source: { imageId: string };
+        target: { imageId: string };
+      }[];
+    }>(`/sheets/${firstPass.id}/reach`);
+    const leaving = reachRows.json.edges.filter(
+      (e) => (e.near === 'source' ? e.source : e.target).imageId === M.id(11),
+    ).length;
     const badge = m.getByTestId(`reach-badge-${M.id(11)}`);
     await badge.waitFor({ timeout: 15_000 });
     assert(
-      (await badge.innerText()).includes('1 elsewhere'),
-      `badge reads "${await badge.innerText()}"`,
+      leaving >= 1 &&
+        (await badge.innerText()).includes(`${leaving} elsewhere`),
+      `badge reads "${await badge.innerText()}", the server has ${leaving}`,
     );
     await badge.click();
     const card = m.getByTestId(`reach-card-${M.id(14)}`);
@@ -779,6 +795,40 @@ async function main(): Promise<void> {
     );
     await M.open(firstPass.id);
 
+    // -- 13. Show the work: a report that carries its own pictures ----------
+    const [download] = await Promise.all([
+      m.waitForEvent('download'),
+      m.getByTestId('export-report').click(),
+    ]);
+    const reportPath = `${SHOTS}13-report.html`;
+    await download.saveAs(reportPath);
+    const report = await Bun.file(reportPath).text();
+    const e45r = await M.edgeBetween(4, 5);
+    assert(e45r, 'the 4 -> 5 connection is gone');
+    assert(
+      report.includes('First pass') &&
+        report.includes('same place') &&
+        report.includes('same chimney line') &&
+        report.includes('Added') &&
+        (report.match(/data:image\/jpeg;base64,/g)?.length ?? 0) >= 4 &&
+        report.includes(`?claim=${e45r.id}`),
+      'the report lacks the claim, its reason, its author or its pictures',
+    );
+    // The report's link to a claim opens the sheet on that claim.
+    await m.goto(`${WEB}/s/${firstPass.id}?claim=${e45r.id}`);
+    await m.getByTestId('inspector-evidence').waitFor({ timeout: 20_000 });
+    const reportPage = await m.context().newPage();
+    await reportPage.goto(`file://${reportPath}`);
+    await reportPage.screenshot({
+      path: `${SHOTS}13-report.png`,
+      fullPage: false,
+    });
+    await reportPage.close();
+    pass(
+      '13. "Export a report" downloads one file with every claim, its reasons, authors and pictures; a claim link opens the sheet on it',
+    );
+    await M.open(firstPass.id);
+
     // -- 10. Discuss a claim: across two people and two sheets --------------
     // The member answers on their own 10 -> 11 "same place"; the listed user
     // reads it on Faces, where it shows as First pass's claim, and replies.
@@ -843,19 +893,34 @@ async function main(): Promise<void> {
     const findTerm = m.getByTestId('board-term-find');
     await findTerm.waitFor({ timeout: 15_000 });
     await seen(m, 'board-term-find');
+    // Counts against the server's vocabulary now, not the seed's.
+    const vocab = await member.get<{
+      labels: { term: string; count: number }[];
+    }>(`/boards/${field.id}/vocabulary`);
+    const findCount =
+      vocab.json.labels.find((t) => t.term === 'find')?.count ?? 0;
     assert(
-      (await findTerm.innerText()).includes('3'),
-      `"find" should count 3 regions: "${await findTerm.innerText()}"`,
+      findCount >= 3 &&
+        (await findTerm.innerText()).includes(String(findCount)),
+      `"find" should count ${findCount} regions: "${await findTerm.innerText()}"`,
     );
     await findTerm.click();
     await m.waitForFunction(
       () =>
-        document
-          .querySelector('[data-testid="board-find-count"]')
-          ?.textContent?.startsWith('3 matches'),
+        /^\d+ match/.test(
+          document.querySelector('[data-testid="board-find-count"]')
+            ?.textContent ?? '',
+        ),
       undefined,
       { timeout: 10_000 },
     );
+    const matchesOf = async () =>
+      Number.parseInt(
+        (await m.getByTestId('board-find-count').innerText()) || '0',
+        10,
+      );
+    const findMatches = await matchesOf();
+    assert(findMatches >= 3, `find by "find" matched ${findMatches} images`);
     const layers = await m.evaluate(
       () =>
         (window as unknown as SheetWindow).__digsiteBoard?.getLayerIds() ?? [],
@@ -881,11 +946,13 @@ async function main(): Promise<void> {
     await m.getByTestId('board-term-merge-input').fill('find');
     await m.keyboard.press('Enter');
     await m.waitForFunction(
-      () =>
-        document
-          .querySelector('[data-testid="board-find-count"]')
-          ?.textContent?.startsWith('4 matches'),
-      undefined,
+      (before) =>
+        Number.parseInt(
+          document.querySelector('[data-testid="board-find-count"]')
+            ?.textContent ?? '0',
+          10,
+        ) > before,
+      findMatches,
       { timeout: 10_000 },
     );
     await m.screenshot({ path: `${SHOTS}5-merged.png` });
@@ -901,11 +968,13 @@ async function main(): Promise<void> {
       .getByRole('button', { name: 'Stop treating "fragment" as "find"' })
       .click();
     await m.waitForFunction(
-      () =>
-        document
-          .querySelector('[data-testid="board-find-count"]')
-          ?.textContent?.startsWith('3 matches'),
-      undefined,
+      (before) =>
+        Number.parseInt(
+          document.querySelector('[data-testid="board-find-count"]')
+            ?.textContent ?? '0',
+          10,
+        ) === before,
+      findMatches,
       { timeout: 10_000 },
     );
 
@@ -971,13 +1040,31 @@ async function main(): Promise<void> {
     const links = await m.getByTestId('board-path-link').allInnerTexts();
     await m.waitForTimeout(400);
     await m.screenshot({ path: `${SHOTS}9-path.png` });
+    // The chain the server's rows imply, through the same search: on the
+    // seed alone it is resembles, same place, derived from.
+    const [around8, around14] = await Promise.all(
+      [M.id(8), M.id(14)].map(
+        async (id) =>
+          (
+            await member.get<{ edges: EdgeRow[] }>(
+              `/boards/${field.id}/neighbourhood?from=${id}&hops=3`,
+            )
+          ).json.edges,
+      ),
+    );
+    const expected = shortestPath(
+      [...(around8 ?? []), ...(around14 ?? [])],
+      M.id(8),
+      M.id(14),
+    );
+    assert(expected, 'the server holds no chain from 8 to 14');
     assert(
-      (await pathSummary.innerText()).startsWith('3 steps') &&
-        links.length === 3 &&
-        links[0]?.includes('resembles') &&
-        links[1]?.includes('same place') &&
-        links[2]?.includes('derived from'),
-      `the chain from 8 to 14 reads ${JSON.stringify(links)}`,
+      (await pathSummary.innerText()).startsWith(
+        expected.length === 1 ? 'Directly' : `${expected.length} steps`,
+      ) &&
+        links.length === expected.length &&
+        expected.every((step, i) => links[i]?.includes(step.edge.relation)),
+      `the chain from 8 to 14 reads ${JSON.stringify(links)}; the rows say ${JSON.stringify(expected.map((s) => s.edge.relation))}`,
     );
     assert(
       (

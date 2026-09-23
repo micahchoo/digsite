@@ -396,6 +396,65 @@ async function main() {
     'PASS: reach shows where img-7 leads, and "Bring here" adds img-15',
   );
 
+  // -- 7b. the machine suggests, a person decides ---------------------------
+  const imagesBefore = await page.evaluate(
+    () =>
+      window.__digsite
+        .getElements()
+        .filter((e) => !e.isDeleted && e.customData?.kind === 'image').length,
+  );
+  const firstImage = await page.evaluate(
+    () =>
+      window.__digsite
+        .getElements()
+        .find((e) => !e.isDeleted && e.customData?.kind === 'image')?.id ?? '',
+  );
+  await page.evaluate((id: string) => window.__digsite.select(id), firstImage);
+  await page.getByTestId('looks-like').waitFor({ timeout: 10_000 });
+  await page.getByTestId('looks-like-bring').first().click();
+  await page
+    .getByTestId('looks-like-connect')
+    .first()
+    .waitFor({ timeout: 10_000 });
+  const imagesAfter = await page.evaluate(
+    () =>
+      window.__digsite
+        .getElements()
+        .filter((e) => !e.isDeleted && e.customData?.kind === 'image').length,
+  );
+  assert(imagesAfter === imagesBefore + 1, 'Bring here should add one picture');
+  const edgesBefore = await page.evaluate(
+    () =>
+      window.__digsite
+        .getElements()
+        .filter(
+          (e) =>
+            !e.isDeleted &&
+            e.customData?.kind === 'edge' &&
+            e.customData.relation === 'resembles',
+        ).length,
+  );
+  await page.getByTestId('looks-like-connect').first().click();
+  await page.waitForFunction(
+    (n: number) =>
+      window.__digsite
+        .getElements()
+        .filter(
+          (e) =>
+            !e.isDeleted &&
+            e.customData?.kind === 'edge' &&
+            e.customData.relation === 'resembles',
+        ).length ===
+      n + 1,
+    edgesBefore,
+  );
+  await page.screenshot({
+    path: new URL('sense-looks-like.png', SCREEN_DIR).pathname,
+  });
+  console.log(
+    'PASS: "Looks like" suggests; Bring here adds one, and only a click connects it',
+  );
+
   // -- 8. the board's Terms index finds images, and a merge widens it ------
   // "find" is on img-8 (seed) and img-11 (step 4); "fragment" on img-9.
   await page.goto(`${WEB}/b/b1`);
