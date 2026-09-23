@@ -50,6 +50,8 @@ const SCRIPTS = [
   'scripts/smoke-sense.ts',
   // Horizon 6: every "making sense" surface in dark mode and at phone width.
   'scripts/smoke-surfaces.ts',
+  // Horizon 6: the rest of the app at phone width.
+  'scripts/smoke-phone.ts',
 ];
 
 function log(msg: string): void {

@@ -6,44 +6,10 @@
 //
 // Against the stub: s1 holds images 0..11 with a "resembles" edge.
 import { type Page, chromium } from 'playwright';
+import { assert, fits, reachable } from './layout-checks.ts';
 
 const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
 const SCREEN_DIR = new URL('../screenshots/', import.meta.url);
-
-function assert(cond: unknown, message: string): asserts cond {
-  if (!cond) throw new Error(`FAIL: ${message}`);
-}
-
-/** No sideways scroll: the page is never wider than the screen. */
-async function fits(page: Page, what: string) {
-  const [scroll, inner] = await page.evaluate(() => [
-    document.documentElement.scrollWidth,
-    window.innerWidth,
-  ]);
-  assert(
-    scroll <= inner + 1,
-    `${what}: page is ${scroll}px wide on a ${inner}px screen`,
-  );
-}
-
-/** Inside the screen, and the thing itself is on top at its centre. */
-async function reachable(page: Page, testId: string, what: string) {
-  const ok = await page
-    .getByTestId(testId)
-    .first()
-    .evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
-      if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return false;
-      // Its whole width on screen: a panel hanging off one side passed a
-      // centre-only check (the phone's side drawer, 25 px off the left).
-      if (r.left < -1 || r.right > innerWidth + 1) return false;
-      const top = document.elementFromPoint(cx, cy);
-      return !!top && (top === el || el.contains(top) || top.contains(el));
-    });
-  assert(ok, `${what}: "${testId}" cannot be reached`);
-}
 
 async function shot(page: Page, name: string) {
   await page.waitForTimeout(300);
