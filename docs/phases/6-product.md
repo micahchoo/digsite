@@ -3,6 +3,29 @@
 Everything works; now it has to feel like one place. This phase is a
 product-design pass, not a feature list. Words: `../../CONTEXT.md`.
 
+## Implementation status — 2026-09-22
+
+The shell, image-ID selection, find/filter controls, live sheet additions,
+thread browser, archive/reopen and server-backed unread state are built.
+The native sheet canvas is now the only implementation; the user chose it
+and requested removal of Excalidraw. Legacy saved scenes remain readable.
+
+Sheet surroundings include previous/next navigation, a mobile details drawer,
+and relation emphasis across owned and foreign connections. Connection labels
+and foreign-region labels avoid occupied label space. A label with no clear
+position stays available through claim selection and the inspector. These
+presentation changes never enter saved scenes or collaboration messages.
+
+Bulk uploads now have a persistent in-page queue across route navigation,
+bounded transfers, visible progress/errors and a shell indicator. Queue file
+handles do not survive a browser reload. Accepted files continue processing
+on the server. See `../measurements/bulk-upload-feedback.md` for test limits.
+
+Still open: thread participants, GeoCities group themes/banner/guestbook,
+richer typed-property controls and indexes, board claim overlays and presence,
+copy choices, viewport-complete search dimming, copy-to-board/download, and
+dedicated per-sort rank tables. The requirements below describe the full target.
+
 ## The three metaphors, and what each one decides
 
 The owner named them in order of weight. Each is a source of decisions,

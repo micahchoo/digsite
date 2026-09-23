@@ -1,144 +1,121 @@
 # HANDOFF — digsite product repo
 
-Updated 2026-09-22 after the second Luna agent pass. Phases 0–4 and both canvas adapters are built. Roadmap: `docs/roadmap.md`.
+Updated 2026-09-22 after the native-canvas and bulk-upload Luna pass.
+The product repository is `app/`; roadmap: `docs/roadmap.md`.
+Nothing was deployed. The isolated functional preview uses ports 5292/8892.
 
-The first pass committed the native canvas reset (`831efb3`), server/shared
-contracts (`feecca2`), and selection/interface work (`78a5121`). The second
-pass adds request diagnostics (`dcdfe8c`), live sheet additions and the
-Excalidraw delete fix (`d3be875`), and thread/mobile/upload UI (`698b293`).
-These changes run in the isolated local preview; nothing was deployed.
+## Current result
 
-## Where things stand
+The user chose the native canvas and requested removal of Excalidraw.
+The implementation, dependency, runtime switch and obsolete adapter tests are
+removed. Native persistence still reads legacy saved scenes, including their
+ordering and bound arrows. CI now runs the native canvas only.
 
-Before this pass, `main` had 50 commits covering phases 0–4, phase 5 hardening
-(access audit, limits, sessions, logs, metrics, CI with a fresh-database
-e2e, scale debts, the canvas leak fix, ladder fairness, serialised rank
-rebuilds), the UX audit and design (`docs/ux/`), the UX defect fixes,
-and slice 1 of the design (the Discord shell).
+A real acceptance run exposed a sheet startup race: the initial socket scene
+could arrive before metadata allowed the canvas to mount. The room now joins
+only after metadata for the current sheet arrives. A browser regression delays
+metadata and checks the exact persisted region appears in a joining peer.
 
-Luna agents resumed the memory, selection, and server work, then reviewed
-the server and rebuilt the interface. This pass read both files in `../.brainstorm/`
-and the user's image-graph reference. See `docs/ux/interface-direction.md`.
+Bulk upload feedback was rebuilt after two reported 20,000-file selections.
+The old panel mounted 20,000 rows. The replacement mounts at most 80, keeps
+at most two transfers active across boards, retains the queue during route
+navigation, and exposes a shell indicator. Counts distinguish queued,
+uploading, processing, ready, failed, unconfirmed and canceled files.
+Rate limits show a retry countdown; ambiguous writes are not resubmitted.
+Stopping queued work allows current transfers to finish. A browser reload
+loses queued File handles; accepted images continue processing on the server.
 
-- Slice 2 now includes find/filter controls and an Actions button.
-  Selection writes use a queue and show their save status.
-  A hard reload before a save finishes can still lose the pending change.
-- The interface now has compact board controls, an image-first inspector,
-  a group landing page, and responsive sheet controls. Upload activity uses
-  a bounded, themed list. Completed batches refresh the board before the
-  full upload finishes. Switching boards invalidates stale UI updates.
-- Phase 6 includes thread data, saved selections, find/filter, activity,
-  and date/list sort types. Board deletion now deletes the new dependent rows.
-  PostgreSQL aggregates sortable property types before the server reads them.
-- `e2e/src/board-selection.ts` checks the real browser and server together.
-  It covers find, persistence, sort changes, tray order, sheet layout, and additions without duplicates.
-  `scripts/e2e-fresh.ts` includes this acceptance check.
+Processing checks now query accepted image IDs in groups of at most 500,
+without ranks or the old newest-500 limit. Final resumable responses expose
+the accepted image ID. Tus logging attaches before request handling so PATCH
+completions are recorded. Original MIME types come from verified file bytes.
+See `docs/measurements/bulk-upload-feedback.md` for evidence and limits.
 
-Later product slices and the dedicated per-sort rank table remain unfinished.
-The existing stub smokes do not prove that the entire product design is complete.
-Find highlights returned matches and shows truncation. Full nonmatch dimming needs a response limited to the current viewport.
-Copy-to-board and download remain disabled. The neighbourhood menu opens Explore controls.
-Sort preferences stay in browser storage. Saved selections use the server.
-Adding images now broadcasts the committed scene to open sheet peers. Clients load
-new image previews before applying it and retain one merged pending scene while
-assets load. A two-user integration check covers a stale peer edit and rejoin.
+The roadmap pass adds relation emphasis across owned and foreign connections.
+Connection labels avoid occupied space. Foreign-region labels avoid owned
+labels and one another, move with short leaders when needed, and stay
+selectable. Layout is presentation-only; it never changes scenes or claims.
+One text-measure canvas is reused per overlay to avoid pan-time allocation.
 
-The next Luna pass adds a searchable board thread browser with image previews,
-unread state, archive and reopen. Opening a sheet marks it seen. The sheet has
-previous/next navigation and a mobile details drawer. The relation control dims
-other sheets' connections only; filtering owned connections still needs a
-canvas presentation API. Label collision handling, thread participants, GeoCities
-themes, board presence/claims, copy choices and richer property UI remain open.
+## Product work already present
 
-The historical demo OOM remains unconfirmed. The journal records two
-16 GB kills about 11 seconds after restart, at 15:23 and 16:14 local time.
-The sampler started at 16:27, after both crashes. It did not capture their spikes.
+- Discord-style group rail, board channels, nested sheets and quick switcher.
+- Image-ID selections, tray ordering, sort/reload persistence, find/filter,
+  and real-server selection acceptance checks.
+- Live additions to mounted sheet peers, with a merged pending scene while
+  assets load and a check against stale peer edits.
+- Searchable thread browser with previews, archive/reopen, server-backed
+  unread state, previous/next sheet links and a mobile details drawer.
+- Phase 6 server contracts for threads, selections, find/filter, activity,
+  and date/list properties. Board deletion handles their dependent rows.
 
-A separate reproduction found native memory growth in the real ladder cache.
-For 250 page loads with a one-page cache, RSS grew from 105 MB to 359 MB.
-Resetting the recycled canvas before repainting reduced a repeat run to 104–124 MB.
-Pixel checks passed in both runs. The harness is `server/scripts/repro-ladder-page-churn.ts`.
-This result proves a cache defect, but not the exact historical crash trigger.
-The demo worktree and database remain unchanged by this pass.
-Opt-in `DIGSITE_REQUEST_DIAGNOSTICS=1` now logs bounded start/end breadcrumbs
-and process memory for board/tile requests, including requests killed before
-completion. It retains at most 128 active entries. This is instrumentation,
-not proof of the historical cause.
+Still open: thread participants; GeoCities themes, banner and guestbook;
+richer typed-property controls and indexes; board claims and presence;
+copy choices; full viewport search dimming; copy-to-board/download;
+dedicated per-sort rank tables; and final product/scale closeout.
+Private staging remains parked. The existing product mockups are not an
+approved visual target; the user disliked them. Read the image-graph reference
+and `docs/ux/interface-direction.md` before more visual work.
 
-## Validation so far
+## Verification
 
-The current isolated server suite passed 83 tests, with one skipped and no
-failures. The final web suite passed 161 tests. Package typechecks, Biome,
-seam checks and the production web build passed.
-All 13 registered smoke scripts passed across the full 12-script run and
-the added sheet-surroundings check. The board smoke passed again after the
-upload feedback fix, including an intercepted rejected batch.
+- Isolated server suite: 87 passed, one skipped, no failures.
+- Web unit suite: 142 passed, no failures.
+- Shared unit suite: 51 passed; script tests: 4 passed.
+- Fresh real-server suites: mixed multipart/resumable uploads, board
+  selection/live additions/archive, 10/10 core scenarios, 9/9 group lifecycle,
+  and 9/9 collaborative-sheet checks including delayed metadata hydration.
+- Two 20,000-file browser selections: 80 mounted rows, two held upload
+  requests, feedback within 142 ms and 119 ms of input change. This checks
+  browser queue behavior, not storage ingestion of 40,000 images.
+- Real mixed upload test: 13 small images and one image over 8 MiB reached
+  ready exactly once. Status/auth/Tus logging tests pass.
+- All 13 registered browser smoke scripts pass. Typechecks, Biome, seam
+  checks and the production build pass.
 
-Both fresh canvas runs passed board selection/live additions/thread archive,
-10 walking-skeleton scenarios, 9 group lifecycle scenarios and 8 sheet-session
-checks. The first Excalidraw run exposed stale canvas callbacks replacing a pending delete
-before socket transmission. The adapter now keeps the applied scene until the
-callback catches up. A focused unit regression and a deterministic browser
-check verify that the deleted claim disappears from the server projection.
-The final native run also passed the new deletion check. Both test databases
-were dropped by their runners.
+Fresh test databases are created and dropped by `scripts/e2e-fresh.ts`.
+It accepts selected suite paths, for example `src/upload-queue.ts`.
 
-Upload status checks now retry within the existing 60-second window without
-re-uploading accepted files. If confirmation remains unavailable, the UI says
-so. Failed rows show a reason and a summary count. Unit tests cover transient
-and persistent status-read failures; the browser checks rejected-batch feedback.
+## Preview and historical OOM
 
-Latest demo check: port 5180 serves the older `../demo` frontend (HTTP 200),
-but port 8800 refuses connections. The formerly transient user service
-`digsite-demo-server` is no longer registered. The demo is not usable end to end.
-The real preview runs on 5292 with its server on 8892. Login and an actual
-upload passed. Sign in as `owner@example.test` with `password1234`.
-Its isolated database is `digsite_preview_1790122818`; storage is
-`../.preview/digsite_preview_1790122818/data`. Server PID: 1713523; Vite PID: 1716578 (launcher 1716552).
-Request diagnostics are enabled on this isolated server. Browser login passed.
-The latest upload to Finds has 20 ready images and no failed or pending jobs;
-a separate browser confirmed the images render. The reported upload failure
-has not been attributed to a specific failed request. A misleading status-read
-failure path was fixed, but it is not confirmed as the cause of that report.
-Keep this preview available for review. Remove only these processes, this
-database, and this data directory when the preview is no longer needed.
-The older UI preview on 5291 uses a stub on 8891. It renders synthetic tiles
-and does not retain uploaded photos. Use 5292 for functional review.
-Existing demo users use `password1`; new test seeds use `password1234`.
+Use http://localhost:5292, backed by http://localhost:8892.
+Sign in as `owner@example.test` with `password1234`.
+Database: `digsite_preview_1790122818`.
+Storage: `../.preview/digsite_preview_1790122818/data`.
+Persistent logs: `/tmp/digsite-preview-server.log` and
+`/tmp/digsite-preview-web.log`. Request diagnostics are enabled.
+The latest read-only database check found 104 ready images and no jobs.
+Neither historical 20,000-file attempt could be traced conclusively.
+Final browser verification opened the real board, Find controls and native
+sheet with no runtime errors; the 390px layout had no horizontal overflow.
 
-## Read first
+Keep this preview available. Remove only its processes, database and storage
+when it is no longer needed. Port 5291 is an older stub preview; it does not
+retain uploaded photos. The older demo at 5180/8800 is separate and was not
+modified. Earlier inspection found its frontend up and backend down; do not
+assume its current state from those old observations.
 
-`CONTEXT.md` (the words), `docs/design.md` (the contract), the four
-rules in `.claude/rules/` (the seams). Each rule names the measurement
-that justifies it and the test that verifies it.
+The historical demo OOM remains unconfirmed. The journal recorded two 16 GB
+kills about 11 seconds after restart; sampling began after both crashes.
+A separate ladder-cache reproduction grew RSS from 105 MB to 359 MB across
+250 page loads. Resetting recycled canvases reduced it to 104–124 MB while
+pixel checks passed. This proves a cache defect, not the historical trigger.
+The harness is `server/scripts/repro-ladder-page-churn.ts`.
+Opt-in `DIGSITE_REQUEST_DIAGNOSTICS=1` records bounded request-start/end and
+memory breadcrumbs, retaining at most 128 active entries.
 
-`../.brainstorm/THREADS.md` and `../.brainstorm/sessions/0001-shared-image-canvas.md`
-record the original decisions. Later decisions supersede the earlier locked-element approach.
-Private staging remains parked. Board images remain board-owned. Sheets own their claims.
+## Read first and invariants
 
-## Infra
+Read `CONTEXT.md`, `docs/design.md`, `.claude/rules/`, and both files under
+`../.brainstorm/`. The inspiration is
+`/mnt/Ghar/2TA/DevStuff/notebook/obsidian-developing-plugins/image-graph`.
 
-- Product DB: compose service `db`, container `digsite-db`,
-  `127.0.0.1:5440`, user/pass/db `digsite`, volume `digsite-db`. Loopback
-  only on purpose (Docker ports bypass UFW on this machine).
-- Prototype DB `digsite-pg` on `0.0.0.0:5432` may still be running and is
-  LAN-exposed; it is not used here. `deploy-postgres-1` (5433) and
-  `penpot-postgres` are other projects; never touch.
-- Ports: server 8800, web 5180. The prototypes used 8787/8790/8791 and
-  5173/5174; the board viewer's Vite on 5173 may still be up.
+Boards own images; sheets own their claims. Foreign claims stay in a
+presentation overlay, never the saved scene. Fractions are the fact; pixel
+positions follow image geometry. Selection stores image IDs, never ranks.
+Any member can create a board. A group owner excluded from a private board's
+allowlist is denied. Do not reintroduce private staging or shared cross-board
+image identity without a product decision.
 
-## Decisions carried into code
-
-- Any member may create a board, private included; the plugin's `member`
-  role is widened for team operations; `access/boardForManagingAllowlist`
-  is the real gate.
-- Foreign claims live on an overlay, never in the Excalidraw scene.
-- Fractions are the fact; pixels are derived from the image's current
-  rect at render, and `copyForeign` places against the image now.
-- An org owner not on a private board's allowlist is denied.
-
-## Next after the build
-
-Materialise coarse tile levels per sort (the next lever named in
-`tile-cache-is-for-the-second-viewer.md`); upload pipeline as a worker;
-group-by section headers on the map; the parked private staging space.
+Product PostgreSQL is container `digsite-db`, loopback port 5440. Other
+containers/databases belong to unrelated projects and must not be touched.
