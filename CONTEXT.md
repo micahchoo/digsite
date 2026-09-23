@@ -44,6 +44,9 @@ line here before it gets a file.
   row, row-major. `col = rank % 16`, `row = rank / 16`.
 - **Tile** — a 256 px PNG of the cells in one square of the map at one
   **zoom** `z ∈ {0..−5}`. Composed on request from the ladder, cached.
+- **Presence** — who else is looking at a board: each viewer's hovered
+  cell and selected images, outlined in their colour. A viewer is a
+  browser tab, so one person can be two viewers.
 - **Board change** — anything that alters what a board's tiles draw (a
   picture added, painted, failed, edited, moved). It always ends in a new
   build, and it goes through one module (`boards/change.ts`), which

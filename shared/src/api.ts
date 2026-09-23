@@ -456,6 +456,26 @@ export type GetStatsResponse = {
 /** Canvas implementation details are web's concern; shared only sees data. */
 export type SceneElements = unknown[];
 
+// Presence on a board (server boards/presence.ts), over the sheet rooms'
+// socket: client -> 'board-join' {boardId}, then 'board-presence' at most 5
+// a second; server -> 'presence', either the whole list (`full`, on a join
+// or a leave) or the one viewer who changed. A viewer is a socket: one
+// person with two tabs is two viewers with the same `id`.
+export type BoardJoinPayload = { boardId: string };
+export type PresenceUpdatePayload = {
+  hover: string | null;
+  selected: string[];
+};
+export type PresenceViewer = {
+  key: string;
+  id: string;
+  name: string;
+  colour: string;
+  hover: string | null;
+  selected: string[];
+};
+export type BoardPresencePayload = { full: boolean; viewers: PresenceViewer[] };
+
 export type JoinPayload = { sheetId: string };
 export type JoinedPayload = { elements: SceneElements; peers: string[] };
 export type JoinDeniedPayload = { reason: string };

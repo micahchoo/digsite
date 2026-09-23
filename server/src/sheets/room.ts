@@ -27,6 +27,7 @@ import { Pool } from 'pg';
 import { type Socket, Server as SocketIOServer } from 'socket.io';
 import { AccessDenied, sheetForEditing } from '../access/index.ts';
 import { auth } from '../auth.ts';
+import { attachBoardPresence } from '../boards/presence.ts';
 import { env } from '../env.ts';
 import { checkLimit } from '../limits.ts';
 import { getSnapshotElements, saveSnapshotAndProject } from './snapshot.ts';
@@ -147,6 +148,9 @@ export function mountSheetRoom(httpServer: HttpServer): SocketIOServer {
     io.close();
     adapterPool.end().catch(() => {});
   });
+
+  // The same socket carries presence on boards (boards/presence.ts).
+  attachBoardPresence(io);
 
   io.on('connection', (socket: Socket) => {
     socket.on('join', async (payload: JoinPayload) => {
