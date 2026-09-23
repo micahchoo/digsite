@@ -31,9 +31,11 @@ import {
   ConfidenceControl,
   DirectionControl,
 } from './ClaimControls.tsx';
+import { CopyChooser } from './CopyChooser.tsx';
 import { Discussion } from './Discussion.tsx';
 import { LooksLike } from './LooksLike.tsx';
 import type { SceneElement } from './canvas/types.ts';
+import type { CopyChoice } from './copy-foreign.ts';
 import {
   type EvidenceEnd,
   type PairClaim,
@@ -43,6 +45,7 @@ import {
   ownEvidence,
   ownPairEdges,
 } from './evidence.ts';
+import type { ForeignShape } from './overlay/screen.ts';
 import type { Selected } from './tools.ts';
 
 export interface InspectorProps {
@@ -58,7 +61,9 @@ export interface InspectorProps {
   onSetProperty: (id: string, key: string, value: PropertyValue) => void;
   onRemoveProperty: (id: string, key: string) => void;
   onSetTermOn: (ids: readonly string[], term: string) => void;
-  onCopyForeign: (id: string) => void;
+  /** Copies a foreign claim here with what the person chose to bring;
+   * the reason when it could not (copy-foreign.ts). */
+  onCopyForeign: (id: string, choice: CopyChoice) => string | null;
   onDeleteSelected: () => void;
   /** Selects a claim listed on the same pair: an element or a foreign id. */
   onSelectClaim: (id: string) => void;
@@ -552,13 +557,7 @@ function ForeignClaim(props: InspectorProps) {
       <Link className="claim-link-button" to={`/s/${shape.row.sheetId}`}>
         Open {shape.sheetName}
       </Link>
-      <button
-        type="button"
-        data-testid="copy-foreign"
-        onClick={() => onCopyForeign(shape.id)}
-      >
-        Copy to this sheet
-      </button>
+      <CopyAction shape={shape} onCopy={onCopyForeign} />
     </div>
   );
 
@@ -814,5 +813,37 @@ function ImageInspector({
         />
       )}
     </div>
+  );
+}
+
+/** "Copy to this sheet", which first asks what comes along (CopyChooser). */
+function CopyAction({
+  shape,
+  onCopy,
+}: {
+  shape: ForeignShape;
+  onCopy: InspectorProps['onCopyForeign'];
+}) {
+  const [choosing, setChoosing] = useState(false);
+  if (!choosing)
+    return (
+      <button
+        type="button"
+        data-testid="copy-foreign"
+        onClick={() => setChoosing(true)}
+      >
+        Copy to this sheet
+      </button>
+    );
+  return (
+    <CopyChooser
+      shape={shape}
+      onCopy={(choice) => {
+        const refused = onCopy(shape.id, choice);
+        if (!refused) setChoosing(false);
+        return refused;
+      }}
+      onCancel={() => setChoosing(false)}
+    />
   );
 }

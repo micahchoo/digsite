@@ -3,6 +3,7 @@
 // grouping, bindings, arrow geometry, and bound text.
 
 import type {
+  Confidence,
   Direction,
   SceneElement as ProjectableElement,
   Properties,
@@ -106,6 +107,10 @@ export interface NewEdgeOp {
   direction: Direction;
   properties: Properties;
   made?: Stamp;
+  /** A copy of another sheet's connection may bring how sure it was, and
+   * why (CONTEXT.md "Confidence", "Note"). */
+  confidence?: Confidence | null;
+  note?: string;
 }
 
 export interface UpdateOp {

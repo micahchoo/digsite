@@ -128,6 +128,8 @@ function buildEdge(op: NewEdgeOp): SceneElement[] {
       direction: op.direction,
       properties: op.properties,
       ...(op.made ? { made: op.made } : {}),
+      ...(op.confidence ? { confidence: op.confidence } : {}),
+      ...(op.note ? { note: op.note } : {}),
     },
   };
   const elements: SceneElement[] = [arrow];

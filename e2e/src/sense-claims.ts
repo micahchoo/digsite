@@ -1523,6 +1523,61 @@ async function main(): Promise<void> {
       '15. a repeat visit asks the server for no tile; a new order build brings them back once',
     );
 
+    // -- 17. Copy another sheet's connection, choosing what travels ---------
+    // Before this claim, copying one called connect(imageId, imageId) while
+    // image elements are keyed el-img-<imageId>, so nothing happened.
+    await M.open(firstPass.id);
+    const foreignEdge = await m.evaluate(() => {
+      const d = (
+        window as unknown as {
+          __digsite: {
+            getForeign: () => {
+              id: string;
+              kind: string;
+              row: { relation: string; properties: Record<string, unknown> };
+            }[];
+          };
+        }
+      ).__digsite;
+      return (
+        d.getForeign().find((s) => s.kind === 'edge' && s.row.relation) ?? null
+      );
+    });
+    assert(foreignEdge, 'First pass shows no connection from another sheet');
+    const edgesBefore = (await M.elements()).filter(
+      (e) => e.customData?.kind === 'edge',
+    ).length;
+    await m.evaluate(
+      (id) => (window as unknown as SheetWindow).__digsite.select(id),
+      foreignEdge.id,
+    );
+    await m.getByTestId('copy-foreign').click();
+    await m.getByTestId('copy-chooser').waitFor();
+    await m.screenshot({ path: `${SHOTS}17-copy-chooser.png` });
+    await m.getByTestId('copy-foreign-confirm').click();
+    await m.getByTestId('copy-chooser').waitFor({ state: 'detached' });
+    const copied = (await M.elements()).filter(
+      (e) =>
+        e.customData?.kind === 'edge' &&
+        e.customData.relation === foreignEdge.row.relation,
+    );
+    const edgesAfter = (await M.elements()).filter(
+      (e) => e.customData?.kind === 'edge',
+    ).length;
+    assert(
+      edgesAfter === edgesBefore + 1,
+      `copying added ${edgesAfter - edgesBefore} connections, not one`,
+    );
+    const bound = copied.some(
+      (e) =>
+        e.startBinding?.elementId.startsWith('el-') &&
+        e.endBinding?.elementId.startsWith('el-'),
+    );
+    assert(bound, 'the copy is not joined to this sheet’s pictures');
+    pass(
+      `17. a connection from another sheet copies here through the chooser ("${foreignEdge.row.relation}"), joined to this sheet's pictures`,
+    );
+
     await meaningClaim(member, lab.id, m);
 
     assert(errors.length === 0, `page errors: ${errors.join(' | ')}`);

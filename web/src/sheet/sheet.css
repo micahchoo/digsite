@@ -735,6 +735,34 @@
 .claim-actions button {
   box-shadow: none;
 }
+/* What travels with a copy of another sheet's claim (CopyChooser.tsx). */
+.copy-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  font-size: var(--text-sm);
+}
+.copy-chooser-lead {
+  margin: 0 0 var(--space-1);
+  color: var(--text-secondary);
+}
+.copy-chooser label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.copy-chooser-refused {
+  margin: 0;
+  color: var(--danger);
+}
+.copy-chooser-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
 .claim-link-button {
   display: inline-flex;
   align-items: center;
@@ -1248,6 +1276,34 @@
 }
 .claim-actions button {
   box-shadow: none;
+}
+/* What travels with a copy of another sheet's claim (CopyChooser.tsx). */
+.copy-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  font-size: var(--text-sm);
+}
+.copy-chooser-lead {
+  margin: 0 0 var(--space-1);
+  color: var(--text-secondary);
+}
+.copy-chooser label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.copy-chooser-refused {
+  margin: 0;
+  color: var(--danger);
+}
+.copy-chooser-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
 }
 .claim-link-button {
   display: inline-flex;

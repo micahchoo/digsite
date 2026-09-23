@@ -884,7 +884,13 @@ export function Sheet() {
             tools.setTermOn(ids, term);
             rerender();
           },
-          onCopyForeign: (fid) => tools.copyForeign(fid),
+          onCopyForeign: (fid, choice) => {
+            let refused: string | null = null;
+            tools.copyForeign(fid, choice, (reason) => {
+              refused = reason;
+            });
+            return refused;
+          },
           onDeleteSelected: () => tools.deleteSelected(),
           sheetId,
           userId: session?.user.id ?? null,

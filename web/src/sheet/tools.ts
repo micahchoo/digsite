@@ -24,6 +24,7 @@ import {
 import { api as httpApi } from '../lib/api.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
 import type { CanvasHandle, PatchOp, SceneElement } from './canvas/types.ts';
+import { type CopyChoice, fullChoice, planCopy } from './copy-foreign.ts';
 import { isDangling } from './dangling.ts';
 import { type Tool, rectFromDrag } from './gestures.ts';
 import { hitAt } from './hit.ts';
@@ -64,7 +65,11 @@ export interface Tools {
   ) => string | null;
   moveImage: (imageId: string, dx: number, dy: number) => void;
   setRegionRect: (id: string, fraction: Partial<Fraction>) => void;
-  copyForeign: (foreignShapeId: string) => string | null;
+  copyForeign: (
+    foreignShapeId: string,
+    choice?: CopyChoice,
+    onRefused?: (reason: string) => void,
+  ) => string | null;
   select: (id: string) => void;
   deleteSelected: () => void;
   getElements: () => SceneElement[];
@@ -262,45 +267,32 @@ export function createTools(deps: ToolsDeps): Tools {
     handle.apply([{ op: 'update', id, changes: rect }]);
   }
 
-  function copyForeign(foreignShapeId: string): string | null {
+  /** Copies another sheet's claim here with what `choice` lets travel
+   * (copy-foreign.ts); everything, when none is given. The new claim's id,
+   * or null with the reason given to `onRefused`. */
+  function copyForeign(
+    foreignShapeId: string,
+    choice?: CopyChoice,
+    onRefused?: (reason: string) => void,
+  ): string | null {
     const handle = getHandle();
     if (!handle) return null;
-    const shape = getForeignShapes().find((s) => s.id === foreignShapeId);
+    const shapes = getForeignShapes();
+    const shape = shapes.find((s) => s.id === foreignShapeId);
     if (!shape) return null;
-
-    if (shape.kind === 'region') {
-      const imgEl = liveImageElements(handle).get(shape.row.imageId);
-      if (!imgEl) return null;
-      const rect = foreignCopyRect(shape.row, rectOf(imgEl)); // recomputed NOW
-      const id = newId();
-      handle.apply([
-        {
-          op: 'addRegion',
-          made: stamp(),
-          id,
-          imageId: shape.row.imageId,
-          groupId: imageGroupId(shape.row.imageId),
-          rect,
-          label: shape.row.label,
-          properties: shape.row.properties,
-        },
-      ]);
-      return id;
-    }
-
-    // A foreign edge copies only when both ends are plain image endpoints —
-    // this sheet always holds that image (Foreign already filters to it).
-    // An end bound to a foreign REGION has nothing on this sheet to bind to
-    // unless that region was copied first, so it is not copyable here.
-    if (shape.row.source.regionSourceId || shape.row.target.regionSourceId) {
+    const plan = planCopy(
+      shape,
+      choice ?? fullChoice(shape),
+      { images: liveImageElements(handle), shapes },
+      newId,
+      stamp(),
+    );
+    if (!plan.ok) {
+      onRefused?.(plan.reason);
       return null;
     }
-    return connect(
-      shape.row.source.imageId,
-      shape.row.target.imageId,
-      shape.row.relation,
-      shape.row.direction,
-    );
+    handle.apply(plan.ops);
+    return plan.id;
   }
 
   function select(id: string): void {
