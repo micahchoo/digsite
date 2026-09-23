@@ -13,6 +13,7 @@ import type {
   AllowlistRequest,
   AllowlistResponse,
   ArchiveSheetResponse,
+  BoardFootprint,
   BoardImage,
   BoardSummary,
   CopyImagesRequest,
@@ -26,11 +27,13 @@ import type {
   FindBoardResponse,
   FindFilterClause,
   FolderImport,
+  GetBoardAllowlistResponse,
   GetBoardResponse,
   GetBoardSelectionResponse,
   GetBoardVocabularyResponse,
   GetGroupResponse,
   GetImageResponse,
+  GetInvitationResponse,
   GetNeighbourhoodResponse,
   GetRepliesResponse,
   GetSectionsResponse,
@@ -43,25 +46,37 @@ import type {
   InviteRequest,
   InviteResponse,
   LabelSuggestionsResponse,
+  ListBoardImagesByIdsResponse,
   ListBoardImagesResponse,
+  ListBoardsResponse,
   ListGroupSheetsResponse,
   ListGroupThreadsResponse,
   ListGroupsResponse,
   ListMembersResponse,
+  ListPendingInvitationsResponse,
+  ListRecentSheetsResponse,
+  ListSheetsResponse,
   MarkSheetSeenResponse,
   MeaningResponse,
   Member,
   PutAliasRequest,
   PutBoardSelectionRequest,
   PutBoardSelectionResponse,
+  RenameBoardRequest,
+  RenameBoardResponse,
   Role,
   SelectionRangeRequest,
   SelectionRangeResponse,
+  SheetFootprint,
   SheetSummary,
   UpdateBoardRequest,
   UpdateBoardResponse,
   UpdateImagePropertiesRequest,
   UpdateImagePropertiesResponse,
+  UpdateMemberRoleRequest,
+  UpdateMemberRoleResponse,
+  UpdateSheetRequest,
+  UpdateSheetResponse,
   UploadImageStatusesResponse,
   UploadImagesResponse,
 } from '@digsite/shared/api';
@@ -76,111 +91,6 @@ export const SERVER_ORIGIN: string =
  * and the upload rows both want to say "a status", not spell out the union
  * every time. */
 export type ImageStatus = BoardImage['status'];
-
-// Phase 2 (docs/phases/2-sheet.md section 6): the sheet list's stats and
-// rename aren't in @digsite/shared/api yet (same TODO as sections/upload
-// status above) — the real server's ListSheetsResponse should grow
-// `imageCount`/`savedAt` to match `SheetSummaryWithStats` below, and add an
-// `UpdateSheetRequest`/`Response` pair for `PATCH /sheets/:id`.
-export type SheetSummaryWithStats = SheetSummary & {
-  imageCount: number;
-  savedAt: string | null;
-  unread?: boolean;
-};
-export type ListSheetsWithStatsResponse = SheetSummaryWithStats[];
-export type UpdateSheetRequest = { name: string };
-export type UpdateSheetResponse = { name: string };
-
-// Phase 3 (docs/phases/3-groups.md): invitation links, role management,
-// allowlist display, footprints and rename/delete — none of this is in
-// @digsite/shared/api yet, same TODO pattern as above. The real server's
-// routes should grow to match these shapes exactly (see this file's report
-// back to the lead for the full list).
-export type GetInvitationResponse = {
-  groupName: string;
-  inviterName: string;
-  open: boolean;
-};
-/** `POST /groups/:id/invite` — additive on top of shared's InviteResponse:
- * the join URL the group page shows with a copy button. */
-export type InviteResponseWithUrl = InviteResponse & { url: string };
-export type PendingInvitation = {
-  id: string;
-  email: string | null;
-  createdAt: string;
-};
-export type ListPendingInvitationsResponse = PendingInvitation[];
-
-export type UpdateMemberRoleRequest = { role: Role };
-export type UpdateMemberRoleResponse = { userId: string; role: Role };
-
-export type GetBoardAllowlistResponse = { groupId: string; members: Member[] };
-
-export type BoardFootprint = {
-  images: number;
-  sheets: number;
-  regions: number;
-  edges: number;
-};
-export type SheetFootprint = { foreignViews: number };
-
-export type RenameBoardRequest = { name: string };
-export type RenameBoardResponse = { name: string };
-
-/** `GET /groups/:id/boards` — additive on top of shared's BoardSummary for
- * the group home (docs/phases/3-groups.md section 5): sheet count and last
- * activity, plus the group id every board already knows since boards live
- * in exactly one group. */
-export type BoardSummaryWithStats = BoardSummary & {
-  groupId: string;
-  sheetCount: number;
-  lastActivity: string | null;
-};
-export type ListBoardsWithStatsResponse = BoardSummaryWithStats[];
-
-/** `GET /boards/:id` — additive: the board's group id, so the board page
- * (which has no group id in its own URL) can fetch group members for the
- * allowlist's "add" control. */
-export type GetBoardResponseWithGroup = GetBoardResponse & { groupId: string };
-
-export type RecentSheet = {
-  id: string;
-  name: string;
-  boardId: string;
-  boardName: string;
-  savedAt: string | null;
-};
-export type ListRecentSheetsResponse = RecentSheet[];
-
-/** `GET /sheets/:id` — additive per-image `name`/`missing`, so the sheet
- * can load a placeholder file instead of fetching a deleted original
- * (docs/phases/3-groups.md section 4). */
-export type SheetImageWithStatus = {
-  id: string;
-  slot: number;
-  width: number;
-  height: number;
-  name: string;
-  missing: boolean;
-};
-export type GetSheetResponseWithStatus = Omit<GetSheetResponse, 'images'> & {
-  images: SheetImageWithStatus[];
-};
-
-// Phase 2 section 4 (docs/phases/2-sheet.md): sheet-from-a-neighbourhood.
-// Two params `GET /boards/:id/images` does not have on the real server
-// today — see this file's report back to the lead:
-//
-// - `ids=<comma-separated image ids>`: an explicit id list, order
-//   preserved, ignoring `from`/`count`. Needed so Board.tsx's
-//   `selectImages(ids)` can turn a neighbourhood's image ids into a map
-//   selection with ONE call instead of one `GET /images/:id` per id.
-// - a `rank` on each returned `BoardImage`, present only when `ids` was
-//   used, computed against the `sort` param passed alongside it — the
-//   caller already knows the sort it wants ranks for.
-
-export type BoardImageWithRank = BoardImage & { rank?: number };
-export type ListBoardImagesByIdsResponse = { images: BoardImageWithRank[] };
 
 export class ApiError extends Error {
   constructor(
@@ -292,7 +202,7 @@ export const api = {
   // real server 500s on today. Group.tsx's `sendInvite` builds the body
   // that way; this signature just has to allow it.
   invite: (groupId: string, body: Partial<InviteRequest>) =>
-    request<InviteResponseWithUrl>(`/groups/${groupId}/invite`, post(body)),
+    request<InviteResponse>(`/groups/${groupId}/invite`, post(body)),
   listPendingInvitations: (groupId: string) =>
     request<ListPendingInvitationsResponse>(`/groups/${groupId}/invitations`),
   getInvitation: (invitationId: string) =>
@@ -334,11 +244,11 @@ export const api = {
 
   // -- boards ----------------------------------------------------------------
   listBoards: (groupId: string) =>
-    request<ListBoardsWithStatsResponse>(`/groups/${groupId}/boards`),
+    request<ListBoardsResponse>(`/groups/${groupId}/boards`),
   createBoard: (groupId: string, body: CreateBoardRequest) =>
     request<CreateBoardResponse>(`/groups/${groupId}/boards`, post(body)),
   getBoard: (boardId: string) =>
-    request<GetBoardResponseWithGroup>(`/boards/${boardId}`),
+    request<GetBoardResponse>(`/boards/${boardId}`),
   updateBoard: (boardId: string, body: UpdateBoardRequest) =>
     request<UpdateBoardResponse>(`/boards/${boardId}`, patch(body)),
   renameBoard: (boardId: string, body: RenameBoardRequest) =>
@@ -588,7 +498,7 @@ export const api = {
 
   // -- sheets ------------------------------------------------------------
   listSheets: (boardId: string, includeArchived = false) =>
-    request<ListSheetsWithStatsResponse>(
+    request<ListSheetsResponse>(
       `/boards/${boardId}/sheets${includeArchived ? '?archived=1' : ''}`,
     ),
   markSheetSeen: (sheetId: string) =>
@@ -600,7 +510,7 @@ export const api = {
   createSheet: (boardId: string, body: CreateSheetRequest) =>
     request<CreateSheetResponse>(`/boards/${boardId}/sheets`, post(body)),
   getSheet: (sheetId: string) =>
-    request<GetSheetResponseWithStatus>(`/sheets/${sheetId}`),
+    request<GetSheetResponse>(`/sheets/${sheetId}`),
   updateSheet: (sheetId: string, body: UpdateSheetRequest) =>
     request<UpdateSheetResponse>(`/sheets/${sheetId}`, patch(body)),
   deleteSheet: (sheetId: string) =>

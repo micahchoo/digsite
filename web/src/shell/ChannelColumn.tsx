@@ -5,20 +5,17 @@
 // never unmounts across a route change (it lives inside Shell, not inside
 // a page), so this is a belt-and-braces persistence, not the only thing
 // keeping a board's fold state alive during one session.
+import type { BoardSummary, GroupThreadSummary } from '@digsite/shared/api';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { Icon } from '../components/Icon.tsx';
-import type {
-  BoardSummaryWithStats,
-  SheetSummaryWithStats,
-  api,
-} from '../lib/api.ts';
+import type { api } from '../lib/api.ts';
 
 interface Props {
   groupName: string | null;
   groupId: string | null;
-  boards: BoardSummaryWithStats[];
-  sheetsByBoard: Record<string, SheetSummaryWithStats[]>;
+  boards: BoardSummary[];
+  sheetsByBoard: Record<string, GroupThreadSummary[]>;
   activeBoardId: string | null;
   activeSheetId: string | null;
 }
@@ -51,8 +48,8 @@ function BoardRow({
   activeBoardId,
   activeSheetId,
 }: {
-  board: BoardSummaryWithStats;
-  sheets: SheetSummaryWithStats[];
+  board: BoardSummary;
+  sheets: GroupThreadSummary[];
   activeBoardId: string | null;
   activeSheetId: string | null;
 }) {

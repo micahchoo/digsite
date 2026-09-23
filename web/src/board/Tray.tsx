@@ -7,9 +7,10 @@ import { SHEET_LIMIT } from '@digsite/shared';
 // reorder — that order becomes a new sheet's initial grid layout, design.md
 // §5.1's own "What a selection can become"); hover flashes the image's cell
 // on the map; click flies there; `×` removes just that one.
+import type { SheetSummary } from '@digsite/shared/api';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
-import { type SheetSummaryWithStats, api } from '../lib/api.ts';
+import { api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
 import type { SaveState } from './useSelection.ts';
 
@@ -20,7 +21,7 @@ export interface TrayAction {
 
 interface Props {
   items: BoardImage[]; // in selection order
-  sheets: SheetSummaryWithStats[];
+  sheets: SheetSummary[];
   onRemove: (id: string) => void;
   onReorder: (nextIds: string[]) => void;
   onHoverItem: (id: string | null) => void;

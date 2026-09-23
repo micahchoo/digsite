@@ -107,6 +107,7 @@ import { WHOLE } from '../components/compare-view.ts';
 import { modalOpen } from '../lib/modal.ts';
 import { noteOrderVersion, waitForOrderVersion } from '../lib/order-version.ts';
 import '../board/board.css';
+import type { GetBoardResponse } from '@digsite/shared/api';
 import { Confirm } from '../components/Confirm.tsx';
 import {
   ErrorState,
@@ -115,14 +116,7 @@ import {
 } from '../components/ErrorState.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { RenameInline } from '../components/RenameInline.tsx';
-import {
-  ApiError,
-  type BoardFootprint,
-  type GetBoardAllowlistResponse,
-  type GetBoardResponseWithGroup,
-  type SheetFootprint,
-  api,
-} from '../lib/api.ts';
+import { ApiError, api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
 import { useVocabulary } from '../lib/vocabulary.ts';
@@ -290,9 +284,9 @@ export function Board() {
   const sortChangeAt = useRef(performance.now());
   // `board` read from inside Deck's event closures (built once, on mount)
   // would otherwise be stale; those read this ref instead.
-  const boardRef = useRef<GetBoardResponseWithGroup | null>(null);
+  const boardRef = useRef<GetBoardResponse | null>(null);
 
-  const [board, setBoard] = useState<GetBoardResponseWithGroup | null>(null);
+  const [board, setBoard] = useState<GetBoardResponse | null>(null);
   boardRef.current = board;
   const [boardError, setBoardError] = useState<ErrorStateInfo | null>(null);
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);

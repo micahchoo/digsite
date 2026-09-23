@@ -14,13 +14,10 @@
 // page's own `ErrorState` explains what happened — the shell frame never
 // blocks that from rendering (design principle 3: "the shell never
 // disappears").
+import type { BoardSummary, GroupThreadSummary } from '@digsite/shared/api';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
-import {
-  type BoardSummaryWithStats,
-  type SheetSummaryWithStats,
-  api,
-} from '../lib/api.ts';
+import { api } from '../lib/api.ts';
 import { notifySheetsChanged, onSheetsChanged } from '../lib/sheetEvents.ts';
 
 export type RouteKind = 'other' | 'groups' | 'group' | 'board' | 'sheet';
@@ -38,8 +35,8 @@ export interface ShellRoute {
 export interface ShellData {
   route: ShellRoute;
   groups: Awaited<ReturnType<typeof api.listGroups>>;
-  boards: BoardSummaryWithStats[];
-  sheetsByBoard: Record<string, SheetSummaryWithStats[]>;
+  boards: BoardSummary[];
+  sheetsByBoard: Record<string, GroupThreadSummary[]>;
   /** Every group/board/sheet the quick switcher can jump to — the same
    * data the rail/channel column already hold, flattened. */
   refreshGroups: () => void;
@@ -72,9 +69,9 @@ export function useShellData(): ShellData {
     sheetId: null,
     sheetName: null,
   });
-  const [boards, setBoards] = useState<BoardSummaryWithStats[]>([]);
+  const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [sheetsByBoard, setSheetsByBoard] = useState<
-    Record<string, SheetSummaryWithStats[]>
+    Record<string, GroupThreadSummary[]>
   >({});
 
   const kind = routeKindOf(location.pathname);
@@ -222,7 +219,7 @@ export function useShellData(): ShellData {
         setBoards(sorted);
         const allSheets = groupId ? await api.listGroupThreads(groupId) : [];
         if (cancelled) return;
-        const grouped: Record<string, SheetSummaryWithStats[]> = {};
+        const grouped: Record<string, GroupThreadSummary[]> = {};
         for (const b of sorted) grouped[b.id] = [];
         for (const s of allSheets) {
           grouped[s.boardId]?.push(s);

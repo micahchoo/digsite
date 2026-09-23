@@ -4,7 +4,7 @@
 // reason (../.claude/rules/access-one-function-per-intent.md: the web
 // never decides access, so there's nothing here to unit test for that),
 // this is pure string shaping with no access decision in it.
-import type { BoardFootprint, SheetFootprint } from '../lib/api.ts';
+import type { BoardFootprint, SheetFootprint } from '@digsite/shared/api';
 import { plural } from '../lib/plural.ts';
 
 export function boardDeleteMessage(

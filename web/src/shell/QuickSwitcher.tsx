@@ -5,14 +5,11 @@
 // Escape closes. A combobox/listbox pair for a11y (design's own
 // requirement, and `better-accessibility`'s "label and type every
 // control").
+import type { BoardSummary, GroupThreadSummary } from '@digsite/shared/api';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Icon, type IconName } from '../components/Icon.tsx';
-import type {
-  BoardSummaryWithStats,
-  SheetSummaryWithStats,
-  api,
-} from '../lib/api.ts';
+import type { api } from '../lib/api.ts';
 import { fuzzyScore } from './fuzzy.ts';
 
 export interface SwitcherEntry {
@@ -39,8 +36,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   groups: Awaited<ReturnType<typeof api.listGroups>>;
-  boards: BoardSummaryWithStats[];
-  sheetsByBoard: Record<string, SheetSummaryWithStats[]>;
+  boards: BoardSummary[];
+  sheetsByBoard: Record<string, GroupThreadSummary[]>;
 }
 
 export function QuickSwitcher({
