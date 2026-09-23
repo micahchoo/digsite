@@ -2,7 +2,7 @@
 // debug status line), `Dangling` (the "remove dangling" list) and
 // `Inspector`, composed in one file per docs/phases/2-sheet.md section 7.
 // Styling is `sheet.css` classes only — no inline styles.
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { Link } from 'react-router';
 import { Icon } from '../components/Icon.tsx';
 import { RenameInline } from '../components/RenameInline.tsx';
@@ -38,7 +38,8 @@ interface HeaderProps {
   onNavigateSheet: (id: string) => void;
   onCloseMobile: () => void;
   closeButtonRef: React.RefObject<HTMLButtonElement | null>;
-  foreignRelations: string[];
+  /** Every relation on the sheet, own and other sheets', most used first. */
+  relations: { relation: string; count: number }[];
   connectionRelation: string | null;
   onConnectionRelationChange: (relation: string | null) => void;
 }
@@ -58,10 +59,11 @@ function Header({
   onNavigateSheet,
   onCloseMobile,
   closeButtonRef,
-  foreignRelations,
+  relations,
   connectionRelation,
   onConnectionRelationChange,
 }: HeaderProps) {
+  const relationGroup = useId();
   const lastSyncAt = Math.max(status.lastEmitAt ?? 0, status.lastRecvAt ?? 0);
   const lastSyncMs = lastSyncAt ? Date.now() - lastSyncAt : null;
   const savedSecondsAgo =
@@ -142,48 +144,59 @@ function Header({
           ))}
         </div>
       )}
-      <div className="sheet-header-meta">
-        {savedSecondsAgo === null
-          ? 'not saved yet'
-          : `saved ${savedSecondsAgo}s ago`}
+      <div className="sheet-header-meta" data-testid="sync-state">
+        {status.lastEmitAt === null
+          ? 'No changes yet'
+          : `Synced ${agoText(savedSecondsAgo ?? 0)}`}
       </div>
-      {foreignRelations.length > 0 && (
-        <div className="sheet-foreign-relation-filter">
-          <label htmlFor="connection-relation-filter">
-            Connection emphasis
-          </label>
-          <select
-            id="connection-relation-filter"
-            aria-describedby="foreign-relation-help"
-            value={
-              connectionRelation === null
-                ? ''
-                : String(foreignRelations.indexOf(connectionRelation) + 1)
-            }
-            onChange={(event) => {
-              const index = Number(event.target.value) - 1;
-              onConnectionRelationChange(
-                index < 0 ? null : (foreignRelations[index] ?? null),
-              );
-            }}
-          >
-            <option value="">All connections</option>
-            {foreignRelations.map((relation, index) => (
-              <option key={relation || 'no-relation'} value={index + 1}>
-                {relation || '(no relation)'}
-              </option>
+      {relations.length > 0 && (
+        <fieldset
+          className="sheet-relations"
+          data-testid="relation-emphasis"
+          aria-describedby="relation-emphasis-help"
+        >
+          <legend>Relations on this sheet</legend>
+          <div className="sheet-relations-chips">
+            <label>
+              <input
+                type="radio"
+                name={relationGroup}
+                checked={connectionRelation === null}
+                onChange={() => onConnectionRelationChange(null)}
+              />
+              All
+            </label>
+            {relations.map(({ relation, count }) => (
+              <label key={relation || 'no-relation'}>
+                <input
+                  type="radio"
+                  name={relationGroup}
+                  checked={connectionRelation === relation}
+                  data-testid="relation-emphasis-option"
+                  onChange={() => onConnectionRelationChange(relation)}
+                />
+                {relation || 'unnamed'}
+                <span className="sheet-relations-count">{count}</span>
+              </label>
             ))}
-          </select>
-          <small id="foreign-relation-help">
-            Other relations dim; no connections are removed.
+          </div>
+          <small id="relation-emphasis-help">
+            Choosing one dims the others; nothing is removed.
           </small>
-        </div>
+        </fieldset>
       )}
       <div className="visually-hidden" data-testid="status">
         {statusText}
       </div>
     </div>
   );
+}
+
+/** "just now", "12s ago", "3 min ago": how long since the last sync. */
+function agoText(seconds: number): string {
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.round(seconds / 60)} min ago`;
 }
 
 interface DanglingProps {

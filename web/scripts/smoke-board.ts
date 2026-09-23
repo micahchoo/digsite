@@ -503,9 +503,7 @@ async function main() {
     `a full disk should send nothing more, but ${fullDiskPosts - inFlight} more requests followed`,
   );
   assert(
-    (await page.getByTestId('upload-counts').innerText()).includes(
-      '0 queued',
-    ),
+    (await page.getByTestId('upload-counts').innerText()).includes('0 queued'),
     'nothing should stay queued behind a full disk',
   );
   await page.unroute('**/boards/b1/images*');

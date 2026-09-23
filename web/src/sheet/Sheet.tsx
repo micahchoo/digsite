@@ -273,16 +273,24 @@ export function Sheet() {
     sheetIndex >= 0 && sheetIndex < boardSheets.length - 1
       ? (boardSheets[sheetIndex + 1] ?? null)
       : null;
-  const connectionRelations = Array.from(
-    new Set([
-      ...foreign.rows.edges.map((edge) => edge.relation),
-      ...sceneElements.flatMap((element) => {
-        if (element.isDeleted) return [];
-        const data = dataOf(element);
-        return data?.kind === 'edge' ? [data.relation] : [];
-      }),
-    ]),
-  ).sort((a, b) => a.localeCompare(b));
+  // Every relation drawn on this sheet, own and other sheets', with how
+  // many connections carry it: the header lists them to emphasise one.
+  const connectionRelations = (() => {
+    const counts = new Map<string, number>();
+    const add = (relation: string) =>
+      counts.set(relation, (counts.get(relation) ?? 0) + 1);
+    for (const edge of foreign.rows.edges) add(edge.relation);
+    for (const element of sceneElements) {
+      if (element.isDeleted) continue;
+      const data = dataOf(element);
+      if (data?.kind === 'edge') add(data.relation);
+    }
+    return [...counts]
+      .map(([relation, count]) => ({ relation, count }))
+      .sort(
+        (a, b) => b.count - a.count || a.relation.localeCompare(b.relation),
+      );
+  })();
   const currentImageCount = sceneElements.filter(
     (element) => !element.isDeleted && dataOf(element)?.kind === 'image',
   ).length;
@@ -603,7 +611,7 @@ export function Sheet() {
           onNavigateSheet: (id) => navigate(`/s/${id}`),
           onCloseMobile: () => setMobileInspectorOpen(false),
           closeButtonRef: inspectorCloseRef,
-          foreignRelations: connectionRelations,
+          relations: connectionRelations,
           connectionRelation,
           onConnectionRelationChange: setConnectionRelation,
         }}

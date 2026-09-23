@@ -526,7 +526,8 @@ async function main() {
     'Shift+Tab escaped the inspector focus cycle',
   );
 
-  const relationFilter = page.locator('#connection-relation-filter');
+  const relationFilter = page.getByTestId('relation-emphasis');
+  const relationOptions = page.getByTestId('relation-emphasis-option');
   if (await relationFilter.isVisible()) {
     const shapesBefore = await page
       .locator('[data-testid="foreign-shape"][data-foreign-kind="edge"]')
@@ -534,8 +535,8 @@ async function main() {
     const sceneBefore = await page.evaluate(() =>
       JSON.stringify(window.__digsite.getElements()),
     );
-    if ((await relationFilter.locator('option').count()) > 1) {
-      await relationFilter.selectOption({ index: 1 });
+    if ((await relationOptions.count()) > 0) {
+      await relationOptions.first().check();
       const shapesAfter = await page
         .locator('[data-testid="foreign-shape"][data-foreign-kind="edge"]')
         .count();
@@ -563,10 +564,12 @@ async function main() {
         'PASS: relation emphasis preserves matching labels and scene elements',
       );
     }
-    await relationFilter.focus();
+    await relationOptions.first().focus();
     await page.waitForTimeout(3200); // one foreign poll and parent rerender
     assert(
-      await relationFilter.evaluate((node) => node === document.activeElement),
+      await relationOptions
+        .first()
+        .evaluate((node) => node === document.activeElement),
       'a foreign poll stole focus while editing the relation filter',
     );
   }
