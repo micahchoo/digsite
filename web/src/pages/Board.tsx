@@ -70,6 +70,7 @@ import {
 } from '../board/ContextMenu.tsx';
 import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
+import { FolderImport } from '../board/FolderImport.tsx';
 import { Terms } from '../board/Terms.tsx';
 import { ThreadBrowser } from '../board/ThreadBrowser.tsx';
 import { Tray } from '../board/Tray.tsx';
@@ -292,6 +293,7 @@ export function Board() {
   const [boardError, setBoardError] = useState<ErrorStateInfo | null>(null);
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
+  const [folderImport, setFolderImport] = useState(false);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [, forceRender] = useState(0);
 
@@ -1704,6 +1706,11 @@ export function Board() {
     }
     const uploadGroup: MenuItem[] = [
       { label: 'Upload images', onSelect: () => fileInputRef.current?.click() },
+      {
+        label: 'Import a folder from the server…',
+        testId: 'board-menu-folder-import',
+        onSelect: () => setFolderImport(true),
+      },
     ];
     const undoGroup: MenuItem[] = [
       {
@@ -2584,6 +2591,19 @@ export function Board() {
         </div>
       )}
       <UploadActivity boardId={boardId} snapshot={uploadSnapshot} />
+      {folderImport && (
+        <FolderImport
+          boardId={boardId}
+          onClose={() => setFolderImport(false)}
+          onProgress={() => {
+            setTileVersion((value) => value + 1);
+            void api
+              .getBoard(boardId)
+              .then(setBoard)
+              .catch(() => {});
+          }}
+        />
+      )}
 
       <ZoomControl
         zoom={s.zoom}

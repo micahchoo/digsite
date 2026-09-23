@@ -4,7 +4,7 @@
 // section is one claim; it asserts what the person would see and saves a
 // screenshot. Seed (server/src/seed.ts): board "Field", sheets "First pass"
 // (member, slots 0..11) and "Faces" (listed, slots 6..17).
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { type BrowserContext, type Page, chromium } from 'playwright';
 import { edgePaths, midSegment } from '../../web/src/sheet/routing.ts';
 import { SERVER, type Session, WEB, signIn } from './session.ts';
@@ -777,6 +777,56 @@ async function main(): Promise<void> {
     pass(
       '7. the board zooms to 800%, and past the tiles each picture on screen draws from its own preview',
     );
+
+    // -- 8. Import a folder the server can read -------------------------------
+    // Only where the server allows folder imports (IMPORT_ROOTS).
+    const root = process.env.IMPORT_ROOTS?.split(':')[0];
+    if (root) {
+      const folder = `${root}/walk-${Date.now()}`;
+      mkdirSync(folder, { recursive: true });
+      const { createCanvas } = await import('@napi-rs/canvas');
+      for (let i = 0; i < 5; i++) {
+        const c = createCanvas(64, 48);
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = `hsl(${i * 70}, 60%, 50%)`;
+        ctx.fillRect(0, 0, 64, 48);
+        writeFileSync(`${folder}/import-${i}.png`, c.encodeSync('png'));
+      }
+      writeFileSync(`${folder}/notes.txt`, 'not a picture');
+      const before = (
+        await member.get<{ imageCount: number }>(`/boards/${field.id}`)
+      ).json.imageCount;
+      await m.getByTestId('board-actions-button').click();
+      await m.getByTestId('board-menu-folder-import').click();
+      await m.getByTestId('folder-import-path').fill(folder);
+      await m.getByTestId('folder-import-start').click();
+      const card = m.getByTestId('folder-import');
+      await card.waitFor({ timeout: 10_000 });
+      await m.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-testid="folder-import"]')
+            ?.getAttribute('data-state') === 'done',
+        undefined,
+        { timeout: 60_000 },
+      );
+      const counts = await m.getByTestId('folder-import-counts').innerText();
+      await m.screenshot({ path: `${SHOTS}8-folder-import.png` });
+      // The server lists only picture files; notes.txt never counts.
+      assert(
+        counts.includes('Done: 5 of 5 imported'),
+        `the import card reads "${counts}"`,
+      );
+      const after = (
+        await member.get<{ imageCount: number }>(`/boards/${field.id}`)
+      ).json.imageCount;
+      assert(after === before + 5, `the board went from ${before} to ${after}`);
+      pass(
+        '8. a server folder imports from the Actions menu, and the card follows it to done',
+      );
+    } else {
+      console.log('SKIP: 8. folder import (IMPORT_ROOTS is not set)');
+    }
 
     assert(errors.length === 0, `page errors: ${errors.join(' | ')}`);
     console.log('sense-claims: all claims passed');
