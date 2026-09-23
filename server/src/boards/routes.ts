@@ -18,6 +18,7 @@ import type {
   GetBoardVocabularyResponse,
   GetImageResponse,
   GetSectionsResponse,
+  LabelSuggestionsResponse,
   ListBoardImagesByIdsResponse,
   ListBoardImagesResponse,
   ListBoardsResponse,
@@ -1481,7 +1482,8 @@ export function registerBoardRoutes(router: Router) {
     if (suggestions === null) {
       return json(ctx.res, 409, { error: 'image is not embedded yet' });
     }
-    return json(ctx.res, 200, { suggestions });
+    const response: LabelSuggestionsResponse = { suggestions };
+    return json(ctx.res, 200, response);
   });
 
   router.get('/boards/:id/search', async (ctx) => {

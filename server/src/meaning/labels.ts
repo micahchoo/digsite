@@ -7,11 +7,10 @@
 // A term's text embedding is cached per process: a vocabulary changes
 // slowly, and one CLIP text call costs milliseconds. Whole-image scoring;
 // a region's own embedding would suit better and is not built.
+import type { LabelSuggestion } from '@digsite/shared/api';
 import { vocabularyOf } from '../boards/vocabulary.ts';
 import { pool } from '../db/pool.ts';
 import { MODEL } from './model.ts';
-
-export type LabelSuggestion = { term: string; score: number };
 
 /** The most-used terms scored per request. A board with thousands of
  * labels costs one embedding per new term, once; this bounds the first. */
