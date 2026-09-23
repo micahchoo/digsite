@@ -3,7 +3,7 @@
 // their help come from shortcuts.ts. Above the toolbar, the mode bar says
 // what a tool that takes the pointer is waiting for, and how to leave it.
 import { useEffect } from 'react';
-import { Icon } from '../components/Icon.tsx';
+import { Icon, type IconName } from '../components/Icon.tsx';
 import { modalOpen } from '../lib/modal.ts';
 import { ShortcutsPanel } from './ShortcutsPanel.tsx';
 import type { CanvasHandle } from './canvas/types.ts';
@@ -20,6 +20,13 @@ interface Props {
   onHelp: (open: boolean) => void;
 }
 
+const TOOL_ICONS: Record<Tool, IconName> = {
+  select: 'cursor',
+  region: 'region',
+  edge: 'edge',
+  pan: 'hand',
+};
+
 /** What a tool is waiting for, said where the person is looking. Select
  * waits for nothing, so it has no bar. */
 function modeText(tool: Tool, pendingEdge: boolean): string | null {
@@ -34,86 +41,6 @@ function modeText(tool: Tool, pendingEdge: boolean): string | null {
       return 'Drag to move around the sheet.';
     default:
       return null;
-  }
-}
-
-function ToolIcon({
-  name,
-}: { name: Tool | 'zoom-out' | 'zoom-in' | 'fit' | 'undo' | 'redo' }) {
-  const common = {
-    viewBox: '0 0 20 20',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.65,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    className: 'sheet-toolbar-icon',
-    'aria-hidden': true as const,
-  };
-  switch (name) {
-    case 'select':
-      return (
-        <svg {...common} aria-hidden="true">
-          <path d="m5 3 9 8-4 .5 2 4-2 1-2-4-3 2z" />
-        </svg>
-      );
-    case 'region':
-      return (
-        <svg {...common} aria-hidden="true">
-          <rect
-            x="3.5"
-            y="4"
-            width="13"
-            height="12"
-            rx="1.5"
-            strokeDasharray="2 2"
-          />
-        </svg>
-      );
-    case 'edge':
-      return (
-        <svg {...common} aria-hidden="true">
-          <path d="M3 15 14 4m0 0h-5m5 0v5m-2 4 4 3" />
-        </svg>
-      );
-    case 'pan':
-      return (
-        <svg {...common} aria-hidden="true">
-          <path d="M7 10V5.5a1.5 1.5 0 0 1 3 0V9m0-2a1.5 1.5 0 0 1 3 0v3m0-1a1.5 1.5 0 0 1 3 0v4a5 5 0 0 1-5 5h-1.5a4 4 0 0 1-3.2-1.6L4 13.5a1.4 1.4 0 0 1 2.1-1.8L7 13" />
-        </svg>
-      );
-    case 'zoom-out':
-      return (
-        <svg {...common} aria-hidden="true">
-          <circle cx="8.5" cy="8.5" r="5.5" />
-          <path d="M6 8.5h5m1.5 4 4 4" />
-        </svg>
-      );
-    case 'zoom-in':
-      return (
-        <svg {...common} aria-hidden="true">
-          <circle cx="8.5" cy="8.5" r="5.5" />
-          <path d="M6 8.5h5m-2.5-2.5v5m4-1 4 4" />
-        </svg>
-      );
-    case 'fit':
-      return (
-        <svg {...common} aria-hidden="true">
-          <path d="M7 3H3v4m10-4h4v4M3 13v4h4m10-4v4h-4" />
-        </svg>
-      );
-    case 'undo':
-      return (
-        <svg {...common} aria-hidden="true">
-          <path d="M7 7 3.5 10.5 7 14M4 10.5h6a5 5 0 0 1 5 5" />
-        </svg>
-      );
-    case 'redo':
-      return (
-        <svg {...common} aria-hidden="true">
-          <path d="m13 7 3.5 3.5L13 14m3-3.5h-6a5 5 0 0 0-5 5" />
-        </svg>
-      );
   }
 }
 
@@ -203,7 +130,11 @@ export function Toolbar({
                 : 'sheet-toolbar-btn'
             }
           >
-            <ToolIcon name={t.tool} />
+            <Icon
+              name={TOOL_ICONS[t.tool]}
+              size={15}
+              className="sheet-toolbar-icon"
+            />
             <span className="sheet-toolbar-label">{t.label}</span>
           </button>
         ))}
@@ -215,7 +146,7 @@ export function Toolbar({
           className="sheet-toolbar-btn"
           onClick={() => canvas?.zoomBy(1 / 1.2)}
         >
-          <ToolIcon name="zoom-out" />
+          <Icon name="zoomOut" size={15} className="sheet-toolbar-icon" />
         </button>
         <button
           type="button"
@@ -224,7 +155,7 @@ export function Toolbar({
           onClick={() => canvas?.zoomToFit()}
           title="Fit every picture (0)"
         >
-          <ToolIcon name="fit" />
+          <Icon name="fit" size={15} className="sheet-toolbar-icon" />
         </button>
         <button
           type="button"
@@ -233,7 +164,7 @@ export function Toolbar({
           className="sheet-toolbar-btn"
           onClick={() => canvas?.zoomBy(1.2)}
         >
-          <ToolIcon name="zoom-in" />
+          <Icon name="zoomIn" size={15} className="sheet-toolbar-icon" />
         </button>
         <span className="sheet-toolbar-sep" aria-hidden="true" />
         <button
@@ -243,7 +174,7 @@ export function Toolbar({
           className="sheet-toolbar-btn"
           onClick={() => canvas?.undo()}
         >
-          <ToolIcon name="undo" />
+          <Icon name="undo" size={15} className="sheet-toolbar-icon" />
         </button>
         <button
           type="button"
@@ -252,7 +183,7 @@ export function Toolbar({
           className="sheet-toolbar-btn"
           onClick={() => canvas?.redo()}
         >
-          <ToolIcon name="redo" />
+          <Icon name="redo" size={15} className="sheet-toolbar-icon" />
         </button>
         <span className="sheet-toolbar-sep" aria-hidden="true" />
         <button

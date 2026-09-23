@@ -19,6 +19,7 @@ import {
   type ErrorStateInfo,
   fromCaught,
 } from '../components/ErrorState.tsx';
+import { Icon } from '../components/Icon.tsx';
 import { WHOLE } from '../components/compare-view.ts';
 import { api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
@@ -874,12 +875,7 @@ export function Sheet() {
           aria-expanded={mobileInspectorOpen}
           onClick={() => setMobileInspectorOpen((open) => !open)}
         >
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M3 4.5h14M3 10h14M3 15.5h14" />
-            <circle cx="7" cy="4.5" r="1.5" />
-            <circle cx="13" cy="10" r="1.5" />
-            <circle cx="8" cy="15.5" r="1.5" />
-          </svg>
+          <Icon name="settings" size={18} />
           <span>Details</span>
         </button>
         {webRoots && sheetInfo && (
