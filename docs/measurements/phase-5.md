@@ -647,3 +647,33 @@ before each materialised page is drawn. This bounds the reproduced native
 growth under page churn. It does not establish that this path caused the
 September 22 service kill; the precise tile or board request remains
 unknown.
+
+#### Historical journal correlation and request-start probe
+
+Read-only extraction from `journalctl --user -u digsite-demo-server.service`
+on September 22 recovered request completions from both restart windows.
+At 15:22:55–57, the server completed tile requests in roughly 26–43 ms.
+At 15:23:00.938, 15:23:01.619 and 15:23:02.271, three tile GETs completed
+with compose timings of 1,868 ms, 2,552 ms and 3,205 ms. The last completion
+was about 0.7 seconds before systemd recorded the 16 GB OOM kill. This is
+temporal evidence that tile composition was active immediately before the
+first kill; the normalized route log omits tile coordinates and it cannot
+show requests still running at termination, so it does not identify the
+trigger or establish causation.
+
+In the 16:13:59 restart window, the journal shows four tile requests
+completing in 22–30 ms and several `GET /boards/:id` calls taking about
+1.5–1.6 seconds before the 16:14:10 OOM kill. That second window does not
+show a slow tile completion. The board route reads sortable properties, but
+the journal has no request parameters or in-flight state, so this is only a
+candidate for follow-up, not a cause.
+
+`server/src/request-diagnostics.ts` adds an opt-in probe for tile and board
+metadata requests. Start the server with `DIGSITE_REQUEST_DIAGNOSTICS=1` to
+log a request-start record with a validated board ID, tile sort and
+coordinates where applicable, plus RSS, V8 heap, external and array-buffer
+memory. A matching request-end record reports duration and final memory. It
+omits query strings, headers, cookies and bodies, tracks at most 128 active
+requests, and clears its entry on finish, close or abort. The existing
+historical OOM remains unconfirmed; this probe is intended to make the next
+capture useful if the failure recurs.

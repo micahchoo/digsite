@@ -6,6 +6,7 @@ import { fromNodeHeaders } from 'better-auth/node';
 import { AccessDenied } from './access/index.ts';
 import { auth } from './auth.ts';
 import { logError, logRequest, requestIdFor } from './logging.ts';
+import { startRequestDiagnostic } from './request-diagnostics.ts';
 
 export type Ctx = {
   req: IncomingMessage;
@@ -100,6 +101,12 @@ export class Router {
       const params: Record<string, string> = {};
       route.keys.forEach((k, i) => {
         params[k] = decodeURIComponent(m[i + 1] ?? '');
+      });
+      startRequestDiagnostic(req, res, {
+        requestId,
+        method: route.method,
+        route: route.pattern,
+        params,
       });
       const userId = await sessionUserId(req);
       const ctx: Ctx = { req, res, url, params, userId, requestId };
