@@ -68,6 +68,7 @@ import {
   type MenuItem,
   type MenuSection,
 } from '../board/ContextMenu.tsx';
+import { Copies } from '../board/Copies.tsx';
 import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
 import { FolderImport } from '../board/FolderImport.tsx';
@@ -95,6 +96,7 @@ import {
 import { useSelection } from '../board/useSelection.ts';
 import { Compare, type CompareEnd } from '../components/Compare.tsx';
 import { WHOLE } from '../components/compare-view.ts';
+import { modalOpen } from '../lib/modal.ts';
 import '../board/board.css';
 import { Confirm } from '../components/Confirm.tsx';
 import {
@@ -882,6 +884,7 @@ export function Board() {
   // an input's own undo. -----------------------------------------------------
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (modalOpen()) return;
       if (e.key === 'Escape') {
         setDetailImage(null);
         setContextMenu(null);
@@ -2042,6 +2045,30 @@ export function Board() {
               setFindLike({ id: detailImage.id, name: detailImage.name });
               setFindQuery('');
               setFindOpen(true);
+            }}
+          />
+        )}
+        {detailImage && !detailImage.missing && (
+          <Copies
+            boardId={boardId}
+            sort={currentSortId}
+            imageId={detailImage.id}
+            onShow={showOnMap}
+            onSelect={(ids) => selection.replace(ids)}
+            onCompare={async (copyId) => {
+              const copy = await api.getImage(copyId).catch(() => null);
+              setComparing([
+                {
+                  src: api.originalUrl(detailImage.id),
+                  name: detailImage.name,
+                  focus: WHOLE,
+                },
+                {
+                  src: api.originalUrl(copyId),
+                  name: copy?.name ?? 'The copy',
+                  focus: WHOLE,
+                },
+              ]);
             }}
           />
         )}

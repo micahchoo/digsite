@@ -3,7 +3,8 @@
 // what is in them (the server's embeddings), best first. Nothing reaches
 // the sheet until someone chooses it, and nothing is connected until
 // someone says how: Bring here puts it beside this picture, and only then
-// is "resembles" offered as a connection.
+// is a connection offered: "copy of" for a near-duplicate (CONTEXT.md),
+// "resembles" for the rest.
 import { useEffect, useState } from 'react';
 import { ApiError, api } from '../lib/api.ts';
 
@@ -41,12 +42,21 @@ export function LooksLike({
   const [brought, setBrought] = useState<Map<string, string>>(new Map());
   const [connected, setConnected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  /** Near-duplicates among the suggestions: offered as "copy of". */
+  const [copies, setCopies] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
     setState({ kind: 'loading' });
     setBrought(new Map());
     setConnected(new Set());
+    setCopies(new Set());
+    api
+      .nearDuplicates(boardId, sort, imageId)
+      .then(({ matches }) => {
+        if (!cancelled) setCopies(new Set(matches.map((m) => m.imageId)));
+      })
+      .catch(() => {});
     api
       .similarImages(boardId, sort, imageId, 40)
       .then(({ matches }) => {
@@ -108,8 +118,15 @@ export function LooksLike({
           {suggestions.map((id) => {
             const element = brought.get(id);
             return (
-              <li key={id} data-testid="looks-like-item">
+              <li
+                key={id}
+                data-testid="looks-like-item"
+                data-copy={copies.has(id) || undefined}
+              >
                 <img src={api.previewUrl(id)} alt="" loading="lazy" />
+                {copies.has(id) && (
+                  <span className="looks-like-copy">Nearly the same</span>
+                )}
                 {!element ? (
                   <button
                     type="button"
@@ -135,11 +152,14 @@ export function LooksLike({
                     type="button"
                     data-testid="looks-like-connect"
                     onClick={() => {
-                      onConnect(element, 'resembles');
+                      onConnect(
+                        element,
+                        copies.has(id) ? 'copy of' : 'resembles',
+                      );
                       setConnected((set) => new Set(set).add(id));
                     }}
                   >
-                    Connect: resembles
+                    {copies.has(id) ? 'Connect: copy of' : 'Connect: resembles'}
                   </button>
                 )}
               </li>

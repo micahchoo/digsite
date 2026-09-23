@@ -83,28 +83,48 @@ the user asked to commit as I go, 2026-09-23). Also done since then:
   and last changed a claim (`customData.made/edited`; digsite-1b signs them
   in the room). Replies on a claim (`claim_replies`, 0023,
   `sheets/replies.ts`, `sheet/Discussion.tsx`).
-- Horizon 3 started: "How are they connected?" (`board/path.ts`,
-  `board/PathPanel.tsx`) finds the chain of claims up to six steps across
-  sheets and draws it.
+- Horizon 2 finished: extract a region as its own picture
+  (`POST /images/:id/extract`, `boards/extract.ts`; the sheet places it
+  beside its parent with `sheet/beside.ts` and connects "derived from").
+- Horizon 3: "How are they connected?" (`board/path.ts`, `PathPanel.tsx`),
+  and the web view (`board/WebView.tsx`, `web-layout.ts`): hop rings, bent
+  lines so two claims on one pair read as two arcs, walk from a picture.
+  Opens from Explore, the path panel, and a connection on a sheet.
+- Horizon 4: "Looks like" under a sheet picture (`sheet/LooksLike.tsx`):
+  Bring here, then a click connects ("copy of" for a near-duplicate).
+  "Copies of this picture" on the board (`board/Copies.tsx`, digsite-1b's
+  `/duplicates`).
+- Horizon 5: `/b/<board>?image=<id>` and `/s/<sheet>?claim=<id>` links;
+  "Export a report" (`sheet/report.ts`, `crop.ts`): one HTML file.
+- Horizon 6: arrow keys walk pictures and a live region announces the
+  selection (`arrow-walk.ts`, `announce.ts`); `smoke-surfaces.ts` checks
+  dark mode and 390 px; CI uses a pgvector database.
 
-Found and fixed on the way: `smoke-sheet-surroundings.ts` hung forever on
-a failure (the five codex smoke trees; digsite-1b killed them). Found and
-reported to digsite-1b, who fixed it (fed0b5d): `statfs` overflowed on the
-24 TB volume and every upload got 507.
+Found and fixed on the way:
+- `smoke-sheet-surroundings.ts` hung forever on a failure (the five codex
+  smoke trees; digsite-1b killed them).
+- `statfs` overflowed on the 24 TB volume and every upload got 507
+  (reported; digsite-1b fixed it, fed0b5d).
+- The canvas cast wire elements to `SceneElement`; one without `groupIds`
+  crashed Bring here. `canvas/native/restore.ts` restores every element
+  at the only intake.
+- On a phone, Find pushed the board's chrome 13 px off screen (grid items
+  keep their content width; content-box plus padding); the map container
+  now clips.
+- Esc in a dialog also closed the picture's details and the shell's
+  drawers; `lib/modal.ts#modalOpen` makes page key handlers stand back.
+- `besideSpot` measured the element's own position instead of the spot.
 
-Verify with `bun run smoke` (15 scripts),
-`bun run e2e:fresh src/sense-claims.ts` (claims 1-10 on the real server;
-8 needs `IMPORT_ROOTS=<dir>`), `cd web && bun test`, `cd shared && bun
-test`, and `cd server && bun test replies-routes making-sense access.test
-routes-audit`.
+Verify with `bun run smoke` (16 scripts), `bun run e2e:fresh` (all six
+suites pass together; `IMPORT_ROOTS=<dir>` for walk claim 8), `cd web &&
+bun test`, `cd shared && bun test`, and `cd server && bun test
+replies-routes extract-routes making-sense access.test routes-audit`.
 
-Next: horizon 2's last item (extract a region as its own picture: needs a
-server crop route), then horizon 3 (explore from a connection or a
-relation, a graph view with hop rings), 4 (suggestions from embeddings:
-digsite-1b is building near-duplicates as a route like /similar), 5 (stable
-links, read-only view, export) and 6 (dark mode, phone width, arrow keys,
-announcer, CI). Also open: `shell.css` stacks overrides; ~20 inline SVGs
-sit outside `Icon`. Biome does not catch a hook after an early return.
+Open: a web of one relation (horizon 3); label suggestions (4); a
+read-only view for people outside the group (5); the rest of the app at
+phone width (6). The preview API needs a restart for `/duplicates`
+(asked digsite-1b). `shell.css` stacks overrides; ~20 inline SVGs sit
+outside `Icon`. Biome does not catch a hook after an early return.
 
 ## Server roadmap (2026-09-23)
 

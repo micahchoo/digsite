@@ -1840,3 +1840,11 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.looks-like-copy {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text-primary);
+  font-size: var(--text-2xs);
+}

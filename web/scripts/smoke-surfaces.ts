@@ -108,11 +108,9 @@ async function run(mode: 'dark' | 'phone') {
   console.log(`PASS: ${mode}: Compare opens, fits and closes`);
 
   // -- the web around the connection ------------------------------------------
-  if (mode === 'phone') {
-    await page.evaluate((id: string) => window.__digsite.select(id), edgeId);
-    const toggle = page.locator('.sheet-mobile-inspector-toggle');
-    if (await toggle.isVisible()) await toggle.click();
-  }
+  // Closing Compare leaves the details open: its Esc belongs to the
+  // dialog alone (lib/modal.ts).
+  await page.getByTestId('inspector-open-web').waitFor({ timeout: 5000 });
   await page.getByTestId('inspector-open-web').click();
   await page.getByTestId('web-view').waitFor();
   await page.getByTestId('web-view-node').first().waitFor({ timeout: 10_000 });

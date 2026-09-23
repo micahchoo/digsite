@@ -1559,7 +1559,9 @@ const httpServer = createServer(async (req, res) => {
   // The stub has no embeddings, so "meaning" is a stand-in that is stable
   // and testable: similar is nearness in upload order, search is a hash of
   // text and id. Best first, like the real server; scores close together.
-  const meaning = url.pathname.match(/^\/boards\/([^/]+)\/(search|similar)$/);
+  const meaning = url.pathname.match(
+    /^\/boards\/([^/]+)\/(search|similar|duplicates)$/,
+  );
   if (meaning && req.method === 'GET') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
@@ -1574,6 +1576,19 @@ const httpServer = createServer(async (req, res) => {
     const ranked = rankedImages(boardId, sort);
     const limit = Math.min(Number(url.searchParams.get('limit') ?? 200), 500);
     let scored: { img: Img; score: number }[];
+    if (meaning[2] === 'duplicates') {
+      // Stand-in: the picture uploaded right after this one is its copy.
+      const source = ranked.find(
+        (img) => img.id === url.searchParams.get('image'),
+      );
+      if (!source) return json(400, { error: 'image is not on this board' });
+      const copy = ranked.find((img) => img.slot === source.slot + 1);
+      return json(200, {
+        matches: copy
+          ? [{ imageId: copy.id, rank: ranked.indexOf(copy), score: 0.99 }]
+          : [],
+      });
+    }
     if (meaning[2] === 'similar') {
       const source = ranked.find(
         (img) => img.id === url.searchParams.get('image'),

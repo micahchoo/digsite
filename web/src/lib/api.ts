@@ -406,6 +406,12 @@ export const api = {
       `/images/${imageId}/extract`,
       { method: 'POST', body: JSON.stringify(body) },
     ),
+  /** Pictures that are nearly this one, in meaning and in pixels
+   * (CONTEXT.md "Near-duplicate"): suggestions a person accepts or not. */
+  nearDuplicates: (boardId: string, sort: string, imageId: string) =>
+    request<MeaningResponse>(
+      `/boards/${boardId}/duplicates?${new URLSearchParams({ image: imageId, sort })}`,
+    ),
   startFolderImport: (boardId: string, path: string) =>
     request<FolderImport>(`/boards/${boardId}/imports`, {
       method: 'POST',

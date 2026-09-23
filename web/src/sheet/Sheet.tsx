@@ -22,6 +22,7 @@ import {
 import { WHOLE } from '../components/compare-view.ts';
 import { api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
+import { modalOpen } from '../lib/modal.ts';
 import { useVocabulary, withLocalTerms } from '../lib/vocabulary.ts';
 import { ConnectLayer } from './ConnectLayer.tsx';
 import { DrawLayer } from './DrawLayer.tsx';
@@ -208,7 +209,7 @@ export function Sheet() {
   useEffect(() => {
     if (!mobileInspectorOpen) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape' && !e.defaultPrevented)
+      if (e.key === 'Escape' && !e.defaultPrevented && !modalOpen())
         setMobileInspectorOpen(false);
     }
     window.addEventListener('keydown', onKeyDown);
@@ -700,7 +701,8 @@ export function Sheet() {
     };
     function onKeyDown(e: KeyboardEvent) {
       const direction = ARROWS[e.key];
-      if (!direction || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!direction || e.metaKey || e.ctrlKey || e.altKey || modalOpen())
+        return;
       const target = e.target as HTMLElement | null;
       if (
         target?.closest(
@@ -720,7 +722,7 @@ export function Sheet() {
     function onKeyDown(e: KeyboardEvent) {
       const menuKey =
         e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10');
-      if (!menuKey) return;
+      if (!menuKey || modalOpen()) return;
       const target = e.target as HTMLElement | null;
       if (target?.closest('input, textarea, [contenteditable="true"]')) return;
       const canvas = canvasRef.current;

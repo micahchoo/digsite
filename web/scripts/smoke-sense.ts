@@ -555,6 +555,31 @@ async function main() {
   await page.getByTestId('compare').waitFor({ state: 'detached' });
   console.log('PASS: two selected pictures open side by side from the tray');
 
+  // Copies: a near-duplicate is suggested, checked side by side, never merged.
+  await page.evaluate(() =>
+    (
+      window as unknown as { __digsiteBoard: { clear: () => void } }
+    ).__digsiteBoard.clear(),
+  );
+  await page.evaluate(() =>
+    (
+      window as unknown as { __digsiteBoard: { select: (r: number) => void } }
+    ).__digsiteBoard.select(1),
+  );
+  await page.getByTestId('copies').waitFor({ timeout: 10_000 });
+  await page.getByTestId('copies-compare').first().click();
+  await page.getByTestId('compare').waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('compare').waitFor({ state: 'detached' });
+  await page.getByTestId('copies-select').click();
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll('[data-testid="selection-item"]').length === 2,
+  );
+  console.log(
+    'PASS: a copy is suggested, compared, and selected with its original',
+  );
+
   await browser.close();
   console.log('smoke-sense: all assertions passed');
 }
