@@ -24,6 +24,8 @@ export interface SheetMenuActions {
   fit: (ids?: string[]) => void;
   /** Switch to the Region tool framed on this picture. */
   markRegion: (imageElementId: string) => void;
+  /** Make a picture of its own from this region, beside its parent. */
+  extract: (regionId: string) => void;
   /** Open the relation picker on this connection. */
   rename: (edgeId: string) => void;
   setConfidence: (edgeId: string, confidence: Confidence | null) => void;
@@ -82,11 +84,18 @@ export function sheetMenu(
       },
     );
   } else if (target?.kind === 'region') {
-    thing.push({
-      label: 'Fit to this region',
-      testId: 'sheet-menu-fit-one',
-      onSelect: () => act.fit([target.id]),
-    });
+    thing.push(
+      {
+        label: 'Make a picture of this region',
+        testId: 'sheet-menu-extract',
+        onSelect: () => act.extract(target.id),
+      },
+      {
+        label: 'Fit to this region',
+        testId: 'sheet-menu-fit-one',
+        onSelect: () => act.fit([target.id]),
+      },
+    );
   } else if (target?.kind === 'edge') {
     const el = byId.get(target.id);
     const data = el ? dataOf(el) : null;

@@ -347,6 +347,11 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/images/${fx.imageId}/preview`,
     outsider: 403,
   },
+  'POST /images/:id/extract': {
+    method: 'POST',
+    path: (fx) => `/images/${fx.imageId}/extract`,
+    outsider: 403,
+  },
   'PATCH /images/:id': {
     method: 'PATCH',
     path: (fx) => `/images/${fx.imageId}`,

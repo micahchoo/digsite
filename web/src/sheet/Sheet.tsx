@@ -1,4 +1,9 @@
-import { type GetSheetReachResponse, dataOf, fileId } from '@digsite/shared';
+import {
+  type GetSheetReachResponse,
+  dataOf,
+  fileId,
+  toFraction,
+} from '@digsite/shared';
 // Composition only: loads the sheet, owns its room and foreign poll, and
 // lays out the page. Imperative canvas work goes through `CanvasHandle`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,6 +23,7 @@ import { ConnectLayer } from './ConnectLayer.tsx';
 import { DrawLayer } from './DrawLayer.tsx';
 import { RelationPicker } from './RelationPicker.tsx';
 import { SidePanel } from './SidePanel.tsx';
+import { besideSpot } from './beside.ts';
 import { Canvas } from './canvas/Canvas.tsx';
 import type {
   CanvasFile,
@@ -101,6 +107,8 @@ export function Sheet() {
     sections: MenuSection[];
   } | null>(null);
   const [help, setHelp] = useState(false);
+  /** A long action in progress, said where the person is looking. */
+  const [working, setWorking] = useState<string | null>(null);
   const [comparing, setComparing] = useState<{
     a: CompareEnd;
     b: CompareEnd;
@@ -370,6 +378,83 @@ export function Sheet() {
     : undefined;
   const namingData = namingEdge ? dataOf(namingEdge) : null;
 
+  /**
+   * A region made into a picture of its own (CONTEXT.md "Extract"): the
+   * server crops the original; once the new picture is read it joins the
+   * sheet beside its parent, and a "derived from" connection says where it
+   * came from. Each step waits for the one before, because a picture the
+   * worker has not read has no size yet to place it by.
+   */
+  async function extractToPicture(regionId: string) {
+    const canvas = canvasRef.current;
+    const info = sheetInfo;
+    if (!canvas || !info) return;
+    const region = canvas.elements().find((el) => el.id === regionId);
+    const data = region ? dataOf(region) : null;
+    if (!region || data?.kind !== 'region') return;
+    const parent = canvas
+      .elements()
+      .find(
+        (el) =>
+          !el.isDeleted &&
+          dataOf(el)?.kind === 'image' &&
+          (dataOf(el) as { imageId: string }).imageId === data.imageId,
+      );
+    if (!parent) return;
+    const label = data.label || 'Region';
+    try {
+      setWorking(`Making a picture of "${label}"…`);
+      const made = await api.extractRegion(data.imageId, {
+        ...toFraction(region, parent),
+        label: data.label,
+      });
+      for (let i = 0; i < 60; i++) {
+        const { images } = await api.uploadImageStatuses(info.boardId, [
+          made.id,
+        ]);
+        const status = images[0]?.status;
+        if (status === 'ready') break;
+        if (status === 'failed')
+          throw new Error('the new picture could not be read');
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      setWorking(`Adding "${label}" to the sheet…`);
+      await api.addSheetImages(info.boardId, sheetId, { imageIds: [made.id] });
+      let added: SceneElement | undefined;
+      for (let i = 0; i < 80 && !added; i++) {
+        added = canvas
+          .elements()
+          .find(
+            (el) =>
+              !el.isDeleted &&
+              dataOf(el)?.kind === 'image' &&
+              (dataOf(el) as { imageId: string }).imageId === made.id,
+          );
+        if (!added) await new Promise((r) => setTimeout(r, 125));
+      }
+      if (!added) throw new Error('the new picture did not reach the sheet');
+      const others = canvas
+        .elements()
+        .filter(
+          (el) =>
+            !el.isDeleted &&
+            el.id !== added?.id &&
+            dataOf(el)?.kind === 'image',
+        );
+      const spot = besideSpot(parent, added, others);
+      if (spot) tools.moveImage(made.id, spot.x - added.x, spot.y - added.y);
+      tools.connect(added.id, region.id, 'derived from');
+      canvas.select([added.id]);
+      rerender();
+      setWorking(null);
+    } catch (err) {
+      setWorking(
+        `Could not make the picture: ${err instanceof Error ? err.message : 'unknown error'}`,
+      );
+      window.setTimeout(() => setWorking(null), 6000);
+    }
+  }
+
   /** The context menu at a client point, on what the frame shows there.
    * A right-click on something already selected keeps the selection, so
    * the items act on all of it (image-graph's `scene.holds`). */
@@ -388,6 +473,7 @@ export function Sheet() {
     };
     const sections = sheetMenu(hit, acting, canvas.elements(), {
       fit: (ids) => canvas.zoomToFit(ids),
+      extract: (id) => void extractToPicture(id),
       markRegion: (id) => {
         setTool('region');
         canvas.zoomToFit([id]);
@@ -585,6 +671,11 @@ export function Sheet() {
           </svg>
           <span>Details</span>
         </button>
+        {working && (
+          <output className="sheet-working" data-testid="sheet-working">
+            {working}
+          </output>
+        )}
         {comparing && (
           <Compare
             a={comparing.a}
@@ -662,6 +753,7 @@ export function Sheet() {
           onDeleteSelected: () => tools.deleteSelected(),
           sheetId,
           userId: session?.user.id ?? null,
+          onExtract: (id) => void extractToPicture(id),
           onCompare: ([a, b], relation) => {
             const end = (e: typeof a): CompareEnd => ({
               src: api.originalUrl(e.imageId),

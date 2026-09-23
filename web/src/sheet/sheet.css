@@ -1777,3 +1777,20 @@
   font-size: var(--text-xs);
   text-wrap: pretty;
 }
+
+/* A long action in progress (Sheet.tsx#extractToPicture). */
+.sheet-working {
+  position: absolute;
+  z-index: 6;
+  top: 12px;
+  left: 50%;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-s);
+  font-size: var(--text-xs);
+  transform: translateX(-50%);
+}

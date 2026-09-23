@@ -396,6 +396,16 @@ export const api = {
     request<{ ok: true }>(`/sheets/${sheetId}/replies/${replyId}`, {
       method: 'DELETE',
     }),
+  /** A region of a picture made into a picture of its own on its board
+   * (CONTEXT.md "Extract"); 202 like an upload, pending until read. */
+  extractRegion: (
+    imageId: string,
+    body: { fx: number; fy: number; fw: number; fh: number; label: string },
+  ) =>
+    request<{ id: string; name: string; width: number; height: number }>(
+      `/images/${imageId}/extract`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
   startFolderImport: (boardId: string, path: string) =>
     request<FolderImport>(`/boards/${boardId}/imports`, {
       method: 'POST',

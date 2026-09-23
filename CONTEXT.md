@@ -105,6 +105,11 @@ sheet that made it. The board never writes a claim.
 - **Comparison** — the two ends opened in one view to check the claim:
   side by side, swiped, or overlaid (with a difference blend). One zoom
   drives both, in units of each end's region.
+- **Extract** — a region made into a picture of its own on the same board:
+  the server crops the original in the displayed frame (after its EXIF
+  turn) and ingests the crop like an upload. The new picture carries
+  `derived_from` and `derived_region`; on the sheet it sits beside its
+  parent, joined "derived from" to the region.
 - **Stamp** — who did something to a claim and when: `made` when it was
   drawn, `edited` at its last change. Written by the client of the person
   signed in; a claim drawn before stamps has none. The server vouches for

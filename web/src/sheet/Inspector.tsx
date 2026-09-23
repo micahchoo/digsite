@@ -65,6 +65,8 @@ export interface InspectorProps {
   sheetId: string;
   /** The signed-in person, who may remove their own replies. */
   userId: string | null;
+  /** Makes a picture of its own from a region, beside its parent. */
+  onExtract?: (regionId: string) => void;
   /** Opens the two ends of a connection side by side, to check the claim. */
   onCompare?: (ends: [EvidenceEnd, EvidenceEnd], relation: string) => void;
 }
@@ -379,6 +381,17 @@ function OwnClaim(
           <div className="claim-evidence claim-evidence--single">
             <Crop end={end} src={imageSrc(data.imageId)} size={160} />
           </div>
+        )}
+        {props.onExtract && (
+          <button
+            type="button"
+            className="claim-compare"
+            data-testid="inspector-extract"
+            onClick={() => props.onExtract?.(el.id)}
+          >
+            <Icon name="plus" size={15} />
+            Make a picture of this region
+          </button>
         )}
         <section className="claim-section">
           <h3>Label</h3>

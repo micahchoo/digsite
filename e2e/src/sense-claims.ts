@@ -692,6 +692,63 @@ async function main(): Promise<void> {
       '6e. a connection opens side by side; one wheel zooms both; swipe and difference; Esc closes',
     );
 
+    // -- 11. A region becomes a picture of its own, beside its parent --------
+    const before = await M.elements();
+    const findRegion = before.find(
+      (e) =>
+        e.customData?.kind === 'region' &&
+        e.customData.label === 'find' &&
+        e.customData.imageId === M.id(0),
+    );
+    assert(findRegion, 'the "find" region on image 0 is gone');
+    await m.evaluate(
+      (id) => (window as unknown as SheetWindow).__digsite.select(id),
+      findRegion.id,
+    );
+    await m.getByTestId('inspector-extract').click();
+    await m.waitForFunction(
+      (regionId) =>
+        (window as unknown as SheetWindow).__digsite
+          .getElements()
+          .some(
+            (e) =>
+              e.customData?.kind === 'edge' &&
+              e.customData.relation === 'derived from' &&
+              e.endBinding?.elementId === regionId,
+          ),
+      findRegion.id,
+      { timeout: 30_000 },
+    );
+    const after = await M.elements();
+    const made = after.find(
+      (e) =>
+        e.customData?.kind === 'image' && !before.some((b) => b.id === e.id),
+    );
+    assert(made, 'no new picture joined the sheet');
+    const img0 = await M.imageEl(0);
+    // Beside its parent, and on no other picture.
+    const near =
+      Math.abs(made.x + made.width / 2 - (img0.x + img0.width / 2)) +
+      Math.abs(made.y + made.height / 2 - (img0.y + img0.height / 2));
+    const overlapping = after.filter(
+      (e) =>
+        e.customData?.kind === 'image' &&
+        e.id !== made.id &&
+        e.x < made.x + made.width &&
+        made.x < e.x + e.width &&
+        e.y < made.y + made.height &&
+        made.y < e.y + e.height,
+    );
+    assert(
+      near < 500 && overlapping.length === 0,
+      `the new picture should sit beside image 0 on nothing else: ${JSON.stringify({ made: [made.x, made.y], img0: [img0.x, img0.y], on: overlapping.map((e) => e.customData?.imageId) })}`,
+    );
+    await m.waitForTimeout(400);
+    await m.screenshot({ path: `${SHOTS}11-extract.png` });
+    pass(
+      '11. "Make a picture of this region" adds the crop beside its parent, joined "derived from" to the region',
+    );
+
     // -- 10. Discuss a claim: across two people and two sheets --------------
     // The member answers on their own 10 -> 11 "same place"; the listed user
     // reads it on Faces, where it shows as First pass's claim, and replies.

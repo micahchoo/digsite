@@ -96,6 +96,7 @@ import {
 } from '../storage/index.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { enqueueMaterialiseJob } from '../worker/jobs.ts';
+import { extractRegion, parseFraction } from './extract.ts';
 import type { FilterClause } from './filter.ts';
 import { findRanks } from './find.ts';
 import {
@@ -966,6 +967,34 @@ export function registerBoardRoutes(router: Router) {
   // shape, or a purged upload), this image's S=128 ladder cell. `missing`
   // always 404s regardless of what's on disk — CONTEXT.md's "Missing" is a
   // placeholder state the sheet draws itself, not a fetch.
+  // POST /images/:id/extract {fx, fy, fw, fh, label?} (CONTEXT.md
+  // "Extract"): a region of this picture becomes a picture of its own on
+  // the same board (extract.ts). Seeing the picture is not enough: it adds
+  // an image, so it needs upload access and counts against the upload
+  // limit.
+  router.post('/images/:id/extract', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const image = await imageForViewing(userId, param(ctx, 'id'));
+    await boardForUploading(userId, image.board_id);
+    if (image.missing) return json(ctx.res, 404, { error: 'missing' });
+    const body = (await readJsonBody(ctx.req)) as Record<string, unknown>;
+    const fraction = parseFraction(body);
+    if (!fraction) {
+      return json(ctx.res, 400, {
+        error: 'fx, fy in 0..1 and fw, fh above 0 are required',
+      });
+    }
+    const limit = checkLimit('upload', userId, 1);
+    if (!limit.allowed) {
+      return tooManyRequests(ctx.res, 'upload', limit.retryAfter);
+    }
+    const label =
+      typeof body.label === 'string' ? body.label.slice(0, 120) : '';
+    const extracted = await extractRegion(image, fraction, label, userId);
+    if (!extracted) return json(ctx.res, 404, { error: 'no original to crop' });
+    json(ctx.res, 202, extracted);
+  });
+
   router.get('/images/:id/preview', async (ctx) => {
     const userId = requireAuth(ctx);
     const image = await imageForViewing(userId, param(ctx, 'id'));
