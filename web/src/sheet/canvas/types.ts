@@ -141,6 +141,13 @@ export interface CanvasHandle {
    * layer received the browser event. `point` is canvas-relative. */
   wheel(input: WheelInput, point: { x: number; y: number }): void;
   zoomToFit(ids?: string[]): void;
+  /** What the frame shows on top at a client point (`clientX`/`clientY`):
+   * a connection, else a region, else an image, else null. The same answer
+   * a click there gets, so a context menu opens on what was clicked. */
+  hitAt(client: { x: number; y: number }): {
+    id: string;
+    kind: 'image' | 'region' | 'edge';
+  } | null;
   /** Zoom by `factor` (>1 in, <1 out) around the container's own centre —
    * the toolbar's zoom in/out buttons. Not in the brief's original sketch
    * (only `zoomToFit` was); added because the container's own pixel size,
@@ -167,5 +174,8 @@ export interface CanvasProps {
   tool: Tool;
   /** Visual emphasis only; never stored in or emitted with the scene. */
   dimRelations?: string | null;
+  /** imageId -> the picture's name, drawn under it when there is room.
+   * Display only, like `dimRelations`. */
+  captions?: ReadonlyMap<string, string>;
   onChange(scene: SceneChange): void;
 }

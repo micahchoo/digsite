@@ -9,12 +9,14 @@ import {
   hitAt,
   hitGrip,
   marqueeSelect,
+  paintOrder,
   regionHandles,
   resizeRegion,
   retargetEdges,
   selectedGroupMembers,
 } from '../src/sheet/canvas/native/scene.ts';
 import type { SceneElement } from '../src/sheet/canvas/types.ts';
+import { edgePaths, midSegment } from '../src/sheet/routing.ts';
 
 let seq = 0;
 function element(
@@ -295,5 +297,69 @@ describe('marqueeSelect', () => {
     expect(new Set(marqueeSelect(elements, band))).toEqual(
       new Set(['img-1', 'r-1']),
     );
+  });
+});
+
+// A saved native scene carries no fractional index, and the server's merge
+// once sorted it by id: edges and regions (random uuids) came back before
+// their images, and a reload drew every claim underneath its picture.
+describe('claims stay above images, whatever the saved order', () => {
+  const a = image('img-a', 'A', { x: 0, y: 0, width: 200, height: 200 });
+  const c = image('img-c', 'C', { x: 300, y: 0, width: 200, height: 200 });
+  const b = image('img-b', 'B', { x: 600, y: 0, width: 200, height: 200 });
+  const r = region('0-region', 'A', { x: 20, y: 20, width: 50, height: 50 });
+  // A to B, centre to centre, passing over the whole width of image C.
+  const e = edge(
+    '0-edge',
+    'img-a',
+    'img-b',
+    { x: 100, y: 100 },
+    { x: 700, y: 100 },
+  );
+  const saved = [e, r, a, c, b];
+
+  test('paint order is images, then regions, then connections', () => {
+    expect(paintOrder(saved).map((el) => el.id)).toEqual([
+      'img-a',
+      'img-c',
+      'img-b',
+      '0-region',
+      '0-edge',
+    ]);
+  });
+
+  test('zoomed far out, a connection is drawn straight, border to border', () => {
+    expect(edgePaths(saved, 0.05).get('0-edge')).toEqual([
+      { x: 200, y: 100 },
+      { x: 600, y: 100 },
+    ]);
+    // …and there, where it crosses another image, a click hits the line.
+    expect(hitAt({ x: 400, y: 100 }, saved, 0.05)?.id).toBe('0-edge');
+  });
+
+  test('otherwise it goes around the image between its ends', () => {
+    const path = edgePaths(saved, 1).get('0-edge') ?? [];
+    expect(path.length).toBeGreaterThan(2);
+    // It leaves A through its border and arrives through B's.
+    expect(path[0]).toEqual({ x: 100, y: 200 });
+    expect(path.at(-1)).toEqual({ x: 700, y: 200 });
+    // No point of it lies inside C, and C is what a click on C selects.
+    for (const p of path)
+      expect(p.x > 300 && p.x < 500 && p.y > 0 && p.y < 200).toBe(false);
+    expect(hitAt({ x: 400, y: 100 }, saved, 1)?.id).toBe('img-c');
+    // A click on the route, over C, selects the line.
+    const [a, b] = midSegment(path);
+    expect(
+      hitAt({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, saved, 1)?.id,
+    ).toBe('0-edge');
+  });
+
+  test('a click on an image the connection joins selects the image', () => {
+    expect(hitAt({ x: 100, y: 100 }, saved, 1)?.id).toBe('img-a');
+    expect(hitAt({ x: 700, y: 100 }, saved, 1)?.id).toBe('img-b');
+  });
+
+  test('a region saved before its image is still hit over the image', () => {
+    expect(hitAt({ x: 40, y: 40 }, saved, 1)?.id).toBe('0-region');
   });
 });

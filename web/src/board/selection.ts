@@ -50,3 +50,16 @@ export function cellPolygon(rank: number): [number, number][] {
     [x, y + CELL],
   ];
 }
+
+/** A small triangle in a cell's top-right corner, world space: the mark on
+ * an image some sheet has annotated (CONTEXT.md "Making sense"). */
+export function cellCorner(rank: number, size: number): [number, number][] {
+  const { col, row } = cellOf(rank);
+  const right = (col + 1) * CELL;
+  const top = row * CELL;
+  return [
+    [right - size, top],
+    [right, top],
+    [right, top + size],
+  ];
+}

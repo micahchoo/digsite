@@ -1,6 +1,7 @@
 // Focused chrome checks for slice 3 sheet surroundings. Drives the isolated
 // web stub and real canvas UI; it does not edit sheet data or scene elements.
 import { type Page, chromium } from 'playwright';
+import { regionChip } from '../src/sheet/labels.ts';
 
 const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
 const FOCUSABLE =
@@ -143,7 +144,8 @@ async function main() {
       );
     }
   }
-  const ownRegionLabelBox = await page.evaluate(() => {
+  // The chip the canvas draws for the own region's label (labels.ts).
+  const ownRegion = await page.evaluate(() => {
     const region = window.__digsite
       .getElements()
       .find(
@@ -158,22 +160,14 @@ async function main() {
     if (!region || !appState || !canvasArea) return null;
     const ctx = document.createElement('canvas').getContext('2d');
     if (ctx) ctx.font = '11px system-ui, sans-serif';
-    const rect = {
-      x: (region.x + appState.scrollX) * appState.zoom.value,
-      y: (region.y + appState.scrollY) * appState.zoom.value,
-      width: region.width * appState.zoom.value,
-      height: region.height * appState.zoom.value,
-    };
     return {
-      x: canvasArea.x + rect.x + 4,
-      y: canvasArea.y + rect.y + 3,
-      width: Math.min(
-        ctx?.measureText('owned find').width ?? 70,
-        Math.max(0, rect.width - 8),
-      ),
-      height: 14,
+      x: canvasArea.x + (region.x + appState.scrollX) * appState.zoom.value,
+      y: canvasArea.y + (region.y + appState.scrollY) * appState.zoom.value,
+      textWidth: ctx?.measureText('owned find').width ?? 70,
     };
   });
+  const ownRegionLabelBox =
+    ownRegion && regionChip(ownRegion, ownRegion.textWidth);
   assert(ownRegionLabelBox, 'own-region label fixture was not found');
   for (const box of regionLabelBoxes) {
     assert(
@@ -638,7 +632,9 @@ async function main() {
   await browser.close();
 }
 
+// exit, not exitCode: a failure leaves Chromium open, and an open browser
+// keeps the process alive, so the runner waited on a failed run forever.
 main().catch((err) => {
   console.error(err);
-  process.exitCode = 1;
+  process.exit(1);
 });

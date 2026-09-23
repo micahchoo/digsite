@@ -227,7 +227,7 @@ async function main() {
   await page.waitForFunction(
     () =>
       document.querySelector('[data-testid="detail-save-state"]')
-        ?.textContent === 'saved',
+        ?.textContent === 'Saved',
     undefined,
     { timeout: 3000 },
   );

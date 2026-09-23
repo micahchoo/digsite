@@ -5,20 +5,25 @@
 // fixture stays honest about the contract.
 import { createServer } from 'node:http';
 import {
+  type Aliases,
   COLS,
   type EdgeRow,
   type FindFilterClause,
   SHEET_LIMIT,
   type SceneElement,
   type Sort,
+  type TermKind,
   arrowheadsFor,
+  buildVocabulary,
   cellPx,
   fileId,
   fromFraction,
   imageGroupId,
   parseSortId,
   project,
+  termsMeaning,
   tileRanks,
+  withAlias,
 } from '@digsite/shared';
 import { createCanvas } from '@napi-rs/canvas';
 import { type Socket, Server as SocketServer } from 'socket.io';
@@ -525,6 +530,61 @@ function foreignFor(sheetId: string) {
     }
   }
   return { regions, edges };
+}
+
+// -- making sense (CONTEXT.md): aliases, board-wide claims, reach --------
+const ALIASES: Record<string, Aliases> = {};
+function aliasesFor(boardId: string): Aliases {
+  return ALIASES[boardId] ?? { label: {}, relation: {} };
+}
+
+/** Every sheet's projected rows on one board — the union. */
+function claimsOnBoard(boardId: string) {
+  const regions: ReturnType<typeof project>['regions'] = [];
+  const edges: EdgeRow[] = [];
+  for (const id of Object.keys(SHEET_NAME)) {
+    if ((SHEET_BOARD[id] ?? 'b1') !== boardId) continue;
+    const rows = project(id, elementsBySheet[id] ?? []);
+    regions.push(...rows.regions);
+    edges.push(...rows.edges);
+  }
+  return { regions, edges };
+}
+
+/** Other sheets' edges with exactly one end on `sheetId` — GET /sheets/:id/reach. */
+function reachFor(sheetId: string) {
+  const held = new Set(SHEET_IMAGES[sheetId]?.map((slot) => `img-${slot}`));
+  const boardId = SHEET_BOARD[sheetId] ?? 'b1';
+  const edges = [];
+  for (const [otherId, els] of Object.entries(elementsBySheet)) {
+    if (otherId === sheetId || (SHEET_BOARD[otherId] ?? 'b1') !== boardId)
+      continue;
+    for (const row of project(otherId, els).edges) {
+      const src = held.has(row.source.imageId);
+      const dst = held.has(row.target.imageId);
+      if (src === dst) continue;
+      edges.push({
+        ...row,
+        sheetName: SHEET_NAME[otherId],
+        near: src ? ('source' as const) : ('target' as const),
+      });
+    }
+  }
+  const farIds = new Set(
+    edges.map((e) =>
+      e.near === 'source' ? e.target.imageId : e.source.imageId,
+    ),
+  );
+  const far = images
+    .filter((img) => farIds.has(img.id))
+    .map(({ id, name, width, height, missing }) => ({
+      id,
+      name,
+      width,
+      height,
+      missing,
+    }));
+  return { edges, images: far };
 }
 
 /** GET /sheets/:id/footprint — how many OTHER sheets hold a claim this
@@ -1422,6 +1482,12 @@ const httpServer = createServer(async (req, res) => {
       ...ordered.map((i) => i.slot),
     ];
     sheetSavedAt[sheetId] = new Date().toISOString();
+    // server/src/sheets/routes.ts: the room sees the merged scene at once,
+    // so a peer with the sheet open gets the new images live.
+    io.to(sheetId).emit('scene', {
+      elements: elementsBySheet[sheetId],
+      from: 'server',
+    });
     return json(200, { added: ordered.map((i) => i.id), skipped });
   }
 
@@ -1528,13 +1594,47 @@ const httpServer = createServer(async (req, res) => {
           return Array.isArray(actual) && actual.includes(expected);
       }
     };
+    // Claim filters (CONTEXT.md "Making sense"), matched through aliases.
+    const claims = claimsOnBoard(boardId);
+    const aliases = aliasesFor(boardId);
+    const label = url.searchParams.get('label');
+    const relation = url.searchParams.get('relation');
+    const labelled = label
+      ? new Set(
+          claims.regions
+            .filter((r) => termsMeaning(label, aliases.label).includes(r.label))
+            .map((r) => r.imageId),
+        )
+      : null;
+    const related = relation
+      ? new Set(
+          claims.edges
+            .filter((e) =>
+              termsMeaning(relation, aliases.relation).includes(e.relation),
+            )
+            .flatMap((e) => [e.source.imageId, e.target.imageId]),
+        )
+      : null;
+    const annotated =
+      url.searchParams.get('annotated') === '1'
+        ? new Set([
+            ...claims.regions.map((r) => r.imageId),
+            ...claims.edges.flatMap((e) => [
+              e.source.imageId,
+              e.target.imageId,
+            ]),
+          ])
+        : null;
     const matched = rankedImages(boardId, sort).filter((img) => {
       const haystack = [img.name, ...Object.values(img.properties).map(String)]
         .join(' ')
         .toLocaleLowerCase();
       return (
         (!query || haystack.includes(query)) &&
-        filters.every((f) => matchesFilter(img, f))
+        filters.every((f) => matchesFilter(img, f)) &&
+        (!labelled || labelled.has(img.id)) &&
+        (!related || related.has(img.id)) &&
+        (!annotated || annotated.has(img.id))
       );
     });
     return json(200, {
@@ -1564,26 +1664,71 @@ const httpServer = createServer(async (req, res) => {
     return json(200, computeSections(boardId, sort));
   }
 
-  // GET /boards/:id/relations — not on the real server yet
-  // (web/src/lib/api.ts's header comment): the distinct relations across
-  // every sheet's own edges on this board, for Explore.tsx's relation
-  // filter dropdown.
-  const boardRelations = url.pathname.match(/^\/boards\/([^/]+)\/relations$/);
-  if (boardRelations && req.method === 'GET') {
+  // GET /boards/:id/vocabulary (server/src/boards/vocabulary.ts): every
+  // label and relation on the board's sheets, folded onto aliases.
+  const boardVocabulary = url.pathname.match(/^\/boards\/([^/]+)\/vocabulary$/);
+  if (boardVocabulary && req.method === 'GET') {
     const u = sessionUser(req.headers.cookie);
     if (!u) return json(401, { reason: 'sign in required' });
-    const boardId = boardRelations[1] ?? '';
+    const boardId = boardVocabulary[1] ?? '';
     const denied = boardForViewing(u, boardId);
     if (denied) return json(403, denied);
-    const sheetIds = Object.keys(SHEET_NAME).filter(
-      (id) => (SHEET_BOARD[id] ?? 'b1') === boardId,
-    );
-    const set = new Set<string>();
-    for (const id of sheetIds) {
-      const { edges } = project(id, elementsBySheet[id] ?? []);
-      for (const e of edges) if (e.relation) set.add(e.relation);
+    const claims = claimsOnBoard(boardId);
+    const aliases = aliasesFor(boardId);
+    const count = (terms: string[]) => {
+      const counts = new Map<string, number>();
+      for (const t of terms) counts.set(t, (counts.get(t) ?? 0) + 1);
+      return counts;
+    };
+    return json(200, {
+      labels: buildVocabulary(
+        count(claims.regions.map((r) => r.label)),
+        aliases.label,
+      ),
+      relations: buildVocabulary(
+        count(claims.edges.map((e) => e.relation)),
+        aliases.relation,
+      ),
+      aliases,
+    });
+  }
+
+  // PUT /boards/:id/aliases, DELETE /boards/:id/aliases/:kind/:term.
+  const boardAliases = url.pathname.match(
+    /^\/boards\/([^/]+)\/aliases(?:\/(label|relation)\/([^/]+))?$/,
+  );
+  if (boardAliases && (req.method === 'PUT' || req.method === 'DELETE')) {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = boardAliases[1] ?? '';
+    const denied = boardForViewing(u, boardId);
+    if (denied) return json(403, denied);
+    const current = aliasesFor(boardId);
+    if (req.method === 'DELETE') {
+      const kind = boardAliases[2] as TermKind | undefined;
+      const term = decodeURIComponent(boardAliases[3] ?? '');
+      if (!kind) return json(400, { error: 'kind must be label or relation' });
+      const next = { ...current[kind] };
+      delete next[term];
+      ALIASES[boardId] = { ...current, [kind]: next };
+      return json(200, ALIASES[boardId]);
     }
-    return json(200, Array.from(set).sort());
+    const body = await readJson<{
+      kind?: TermKind;
+      term?: string;
+      canonical?: string;
+    }>();
+    const kind = body.kind;
+    const term = body.term?.trim() ?? '';
+    const canonical = body.canonical?.trim() ?? '';
+    if (kind !== 'label' && kind !== 'relation')
+      return json(400, { error: 'kind must be label or relation' });
+    if (!term || !canonical)
+      return json(400, { error: 'term and canonical are required' });
+    const next = withAlias(current[kind], term, canonical);
+    if (!next) return json(400, { error: 'a term cannot mean itself' });
+    ALIASES[boardId] = { ...current, [kind]: next };
+    return json(200, ALIASES[boardId]);
   }
 
   // GET /boards/:id/neighbourhood?from=&hops=&relation= (docs/phases/2-sheet.md
@@ -1618,8 +1763,11 @@ const httpServer = createServer(async (req, res) => {
     for (const id of sheetIds) {
       allEdges.push(...project(id, elementsBySheet[id] ?? []).edges);
     }
-    const relevant = relation
-      ? allEdges.filter((e) => e.relation === relation)
+    const meaning = relation
+      ? new Set(termsMeaning(relation, aliasesFor(boardId).relation))
+      : null;
+    const relevant = meaning
+      ? allEdges.filter((e) => meaning.has(e.relation))
       : allEdges;
     const adj = new Map<string, Set<string>>();
     function link(a: string, b: string) {
@@ -1899,6 +2047,9 @@ const httpServer = createServer(async (req, res) => {
   }
   if (/^\/sheets\/[^/]+\/foreign$/.test(url.pathname)) {
     return json(200, foreignFor(url.pathname.split('/')[2] ?? ''));
+  }
+  if (/^\/sheets\/[^/]+\/reach$/.test(url.pathname)) {
+    return json(200, reachFor(url.pathname.split('/')[2] ?? ''));
   }
   if (/^\/sheets\/[^/]+\/rows$/.test(url.pathname)) {
     const id = url.pathname.split('/')[2] ?? '';

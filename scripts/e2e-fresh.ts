@@ -41,6 +41,8 @@ const SUITE_PATHS = [
   'src/run.ts',
   'src/groups-life.ts',
   'src/sheet-hour.ts',
+  // CONTEXT.md "Making sense", walked through the real app as people would.
+  'src/sense-claims.ts',
 ];
 const requested = process.argv.slice(2);
 if (requested.some((path) => !SUITE_PATHS.includes(path))) {

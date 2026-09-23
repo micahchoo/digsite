@@ -22,6 +22,7 @@ import { isValidEmail } from '../lib/email.ts';
 import { plural } from '../lib/plural.ts';
 import type { ShellRoute } from '../shell/useShellData.ts';
 import './group.css';
+import { Icon } from '../components/Icon.tsx';
 
 const ROLES: Role[] = ['owner', 'admin', 'member'];
 
@@ -454,9 +455,11 @@ export function Group() {
                           })}
                         </time>
                       )}
-                      <span className="group-board-arrow" aria-hidden="true">
-                        ↗
-                      </span>
+                      <Icon
+                        name="arrowUpRight"
+                        size={16}
+                        className="group-board-arrow"
+                      />
                     </Link>
                   </li>
                 ))}

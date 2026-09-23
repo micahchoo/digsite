@@ -3,6 +3,7 @@
 // docs/ux/audit.md #5 (blocker): the board had no on-screen zoom control at
 // all, wheel-only. `%` is itself a button: click resets to 100% (zoom 0,
 // `cellPx = 128 * 2^z` at z=0 is the board's native pixel size).
+import { Icon } from '../components/Icon.tsx';
 interface Props {
   zoom: number;
   minZoom: number;
@@ -41,7 +42,7 @@ export function ZoomControl({
         disabled={zoom <= minZoom}
         onClick={onZoomOut}
       >
-        −
+        <Icon name="minus" size={16} />
       </button>
       <button
         type="button"
@@ -60,7 +61,7 @@ export function ZoomControl({
         disabled={zoom >= maxZoom}
         onClick={onZoomIn}
       >
-        +
+        <Icon name="plus" size={16} />
       </button>
       <button
         type="button"
@@ -69,7 +70,7 @@ export function ZoomControl({
         title="Fit everything"
         onClick={onFit}
       >
-        ⛶
+        <Icon name="fit" size={16} />
       </button>
     </div>
   );

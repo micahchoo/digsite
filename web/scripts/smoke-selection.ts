@@ -223,15 +223,17 @@ async function main() {
   console.log('screenshot: board-zoom.png');
 
   // -- 7. neighbourhood select, from the image detail's Explore panel ---------
+  // img-8 has a connection in the seed (s1's "resembles" to img-9); an
+  // image with none shows no neighbourhood to select.
   await page.evaluate(() => window.__digsiteBoard?.clear());
-  await page.evaluate(() => window.__digsiteBoard?.selectImages(['img-6']));
+  await page.evaluate(() => window.__digsiteBoard?.selectImages(['img-8']));
   await page.waitForSelector('[data-testid="explore-panel"]', {
     timeout: 5000,
   });
-  await page.selectOption('[data-testid="explore-hops"]', '1');
+  await page.getByTestId('explore-hops-1').check();
   await page.click('[data-testid="explore-go"]');
   await page.waitForSelector('[data-testid="explore-result"]');
-  // currentSelectionCount was 1 (img-6) when Explore ran, so it asks first
+  // currentSelectionCount was 1 (img-8) when Explore ran, so it asks first
   // (docs/ux/audit.md #6) rather than silently replacing.
   await page.waitForSelector('[data-testid="explore-selection-confirm"]');
   await page.click('[data-testid="explore-selection-replace"]');

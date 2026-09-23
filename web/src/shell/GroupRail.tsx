@@ -5,6 +5,7 @@
 // unread yet, and the task's own instruction is to render only what the
 // API already returns.
 import { Link } from 'react-router';
+import { Icon } from '../components/Icon.tsx';
 import type { api } from '../lib/api.ts';
 
 interface Props {
@@ -60,17 +61,7 @@ export function GroupRail({ groups, activeGroupId }: Props) {
         title="Create or join a group"
         aria-label="Create or join a group"
       >
-        <svg
-          aria-hidden="true"
-          className="shell-icon"
-          viewBox="0 0 20 20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-        >
-          <path d="M10 4v12M4 10h12" />
-        </svg>
+        <Icon name="plus" />
       </Link>
     </nav>
   );

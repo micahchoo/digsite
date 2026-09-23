@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router';
 import { getUploadOverview, subscribeUploadOverview } from '../board/upload.ts';
+import { Icon } from '../components/Icon.tsx';
 import { api } from '../lib/api.ts';
 
 /** Background uploads remain discoverable when their board is not open. */
@@ -59,7 +60,7 @@ export function UploadIndicator() {
             : `${attention.toLocaleString()} uploads need attention`
         }
       >
-        {remaining ? '↑' : '!'}{' '}
+        <Icon name={remaining ? 'upload' : 'alert'} size={16} />
         <span className="shell-upload-label">Uploads </span>
         {(remaining || attention).toLocaleString()}
       </summary>

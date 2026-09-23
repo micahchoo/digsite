@@ -40,12 +40,14 @@ import {
   type FindFilterClause,
   GRID_LAYOUT_VERSION,
   type GetImageResponse,
+  type GetNeighbourhoodResponse,
   type Properties,
   type PropertyValue,
   SHEET_LIMIT,
   type Section,
   type Sort,
   type SortKey,
+  type TermKind,
   cellOf,
   parseSortId,
   rankAtWorld,
@@ -68,13 +70,20 @@ import {
 } from '../board/ContextMenu.tsx';
 import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
+import { Terms } from '../board/Terms.tsx';
 import { ThreadBrowser } from '../board/ThreadBrowser.tsx';
 import { Tray } from '../board/Tray.tsx';
 import { UploadActivity } from '../board/UploadActivity.tsx';
 import { ZoomControl, zoomIn, zoomOut } from '../board/ZoomControl.tsx';
+import {
+  DetailCache,
+  MAX_VIEW_ZOOM,
+  containedRect,
+  visibleRanks,
+} from '../board/detail.ts';
 import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
-import { cellPolygon } from '../board/selection.ts';
+import { cellCorner, cellPolygon } from '../board/selection.ts';
 import {
   enqueueUploads,
   getUploadSnapshot,
@@ -88,6 +97,7 @@ import {
   type ErrorStateInfo,
   fromCaught,
 } from '../components/ErrorState.tsx';
+import { Icon } from '../components/Icon.tsx';
 import { RenameInline } from '../components/RenameInline.tsx';
 import {
   ApiError,
@@ -99,7 +109,9 @@ import {
 } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
+import { useVocabulary } from '../lib/vocabulary.ts';
 import { useRightColumn } from '../shell/RightColumn.tsx';
+import { rgba, usePalette } from '../theme/palette.ts';
 
 declare global {
   interface Window {
@@ -129,12 +141,12 @@ declare global {
 }
 
 const MIN_ZOOM = -5;
-const MAX_ZOOM = 0;
+/** The tile pyramid's finest level: a cell is 128 px, as a ladder page
+ * stores it. The view zooms past it (MAX_ZOOM) and board/detail.ts draws
+ * each visible cell's own preview there. */
+const MAX_TILE_ZOOM = 0;
+const MAX_ZOOM = MAX_VIEW_ZOOM;
 const TILE_SIZE = 256;
-const SELECTION_COLOR: [number, number, number, number] = [255, 90, 0, 255];
-const FLASH_COLOR: [number, number, number, number] = [79, 93, 255, 255];
-const SECTION_LINE_COLOR: [number, number, number, number] = [30, 30, 30, 160];
-const SECTION_TEXT_COLOR: [number, number, number, number] = [20, 20, 20, 230];
 
 interface Status {
   zoom: number;
@@ -155,6 +167,15 @@ interface OpenContextMenu {
   x: number;
   y: number;
   sections: MenuSection[];
+}
+
+/** Today a sheet's save reads as a time; before today, as a date. */
+function savedLabel(iso: string): string {
+  const at = new Date(iso);
+  const today = new Date().toDateString() === at.toDateString();
+  return today
+    ? `Saved ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+    : `Saved ${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 }
 
 function storageKey(boardId: string): string {
@@ -196,7 +217,8 @@ function fitInitialViewState(
   // floor force a compact 16-column board wider than its actual canvas.
   const zoomFloor = Math.min(Math.log2(MIN_INITIAL_CELL_PX / CELL), zoomX);
   if (!fitEverything) zoom = Math.max(zoom, zoomFloor);
-  zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+  // A fit shows the map, so it stops where the tiles do.
+  zoom = Math.max(MIN_ZOOM, Math.min(MAX_TILE_ZOOM, zoom));
   return {
     target: [contentW / 2, worldH / 2, 0],
     zoom,
@@ -226,6 +248,7 @@ function isTextInput(el: EventTarget | null): boolean {
 }
 
 export function Board() {
+  const palette = usePalette();
   const { id } = useParams<{ id: string }>();
   const boardId = id ?? '';
   const navigate = useNavigate();
@@ -254,7 +277,6 @@ export function Board() {
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
   const [fileDragActive, setFileDragActive] = useState(false);
-  const [clickInfo, setClickInfo] = useState<string>('');
   const [, forceRender] = useState(0);
 
   // -- sections --------------------------------------------------------------
@@ -284,6 +306,21 @@ export function Board() {
   const [filterOp, setFilterOp] = useState<'eq' | 'gte' | 'lte'>('eq');
   const [filterValue, setFilterValue] = useState('');
   const [findFilters, setFindFilters] = useState<FindFilterClause[]>([]);
+  /** A label or relation from the Terms index (CONTEXT.md "Making sense"). */
+  const [findClaim, setFindClaim] = useState<{
+    kind: TermKind;
+    term: string;
+  } | null>(null);
+  /** The focused image's neighbourhood (board/Explore.tsx), and where its
+   * images sit under the current sort, for the lines on the map. */
+  const [exploreGraph, setExploreGraph] =
+    useState<GetNeighbourhoodResponse | null>(null);
+  const [exploreRanks, setExploreRanks] = useState<Map<string, number>>(
+    new Map(),
+  );
+  /** Ranks of images any sheet has annotated, for the corner marks. */
+  const [annotatedRanks, setAnnotatedRanks] = useState<number[]>([]);
+  const vocab = useVocabulary(boardId);
   const [findResult, setFindResult] = useState<{
     ranks: number[];
     imageIds: string[];
@@ -623,7 +660,7 @@ export function Board() {
             : Math.abs(b - a) + 1;
         setSelectionNote(
           imageIds.length > 0 && imageIds.length < span
-            ? `selection capped at ${plural(imageIds.length, 'image')}`
+            ? `Selection capped at ${plural(imageIds.length, 'image')}`
             : '',
         );
       } catch {
@@ -880,8 +917,9 @@ export function Board() {
 
   // Search and typed property filters use the current rank table. Debounce
   // keystrokes and discard any response for criteria that are now stale.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the aliases are a trigger (a merge changes what a term matches), not an input
   useEffect(() => {
-    if (!findOpen || (!findQuery.trim() && !findFilters.length)) {
+    if (!findOpen || (!findQuery.trim() && !findFilters.length && !findClaim)) {
       setFindResult(null);
       setFindError('');
       return;
@@ -889,7 +927,12 @@ export function Board() {
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void api
-        .findBoard(boardId, currentSortId, findQuery.trim(), findFilters)
+        .findBoard(boardId, currentSortId, findQuery.trim(), findFilters, {
+          ...(findClaim?.kind === 'label' ? { label: findClaim.term } : {}),
+          ...(findClaim?.kind === 'relation'
+            ? { relation: findClaim.term }
+            : {}),
+        })
         .then((result) => {
           if (!cancelled) {
             setFindResult(result);
@@ -907,7 +950,62 @@ export function Board() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [boardId, currentSortId, findOpen, findQuery, findFilters]);
+    // An alias changes what a term means, so a find by term runs again.
+  }, [
+    boardId,
+    currentSortId,
+    findOpen,
+    findQuery,
+    findFilters,
+    findClaim,
+    vocab.vocabulary.aliases,
+  ]);
+
+  // Where the neighbourhood's images sit on the map under this sort.
+  useEffect(() => {
+    if (!exploreGraph) {
+      setExploreRanks(new Map());
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getBoardImagesByIds(
+        boardId,
+        currentSortId,
+        exploreGraph.images.map((i) => i.id),
+      )
+      .then(({ images }) => {
+        if (cancelled) return;
+        const ranks = new Map<string, number>();
+        for (const img of images)
+          if (typeof img.rank === 'number') ranks.set(img.id, img.rank);
+        setExploreRanks(ranks);
+      })
+      .catch(() => {
+        if (!cancelled) setExploreRanks(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId, currentSortId, exploreGraph]);
+
+  // Which images carry any claim. Refetched when the vocabulary changes,
+  // which is when some sheet's claims did.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the vocabulary is the trigger, not an input
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .findBoard(boardId, currentSortId, '', [], { annotated: true })
+      .then((r) => {
+        if (!cancelled) setAnnotatedRanks(r.ranks);
+      })
+      .catch(() => {
+        if (!cancelled) setAnnotatedRanks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId, currentSortId, vocab.vocabulary]);
 
   // -- hover tooltip goes stale across a sort change (the rank means a
   // different image) --------------------------------------------------------
@@ -985,10 +1083,65 @@ export function Board() {
     };
   }, [selection.imageIds, boardId, currentSortId]);
 
+  // -- detail: past the tiles, each visible cell draws its own preview ------
+  const [detailVersion, setDetailVersion] = useState(0);
+  const detailCacheRef = useRef<DetailCache | null>(null);
+  if (!detailCacheRef.current)
+    detailCacheRef.current = new DetailCache(
+      async (imageId) => {
+        const res = await fetch(api.previewUrl(imageId), {
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error(`preview failed: ${res.status}`);
+        return createImageBitmap(await res.blob());
+      },
+      () => setDetailVersion((n) => n + 1),
+    );
+  useEffect(() => () => detailCacheRef.current?.clear(), []);
+  const detailView = viewStateRef.current;
+  const detailBox = canvasRef.current?.getBoundingClientRect();
+  const detailKey =
+    detailView && detailBox && board
+      ? visibleRanks(
+          {
+            target: detailView.target as number[],
+            zoom: detailView.zoom as number,
+          },
+          detailBox.width,
+          detailBox.height,
+          board.imageCount,
+        ).join(',')
+      : '';
+  // Which image each visible cell holds: one request for the whole view.
+  useEffect(() => {
+    if (!detailKey) return;
+    const cache = sortCache(imageCacheRef.current, currentSortId);
+    const missing = detailKey
+      .split(',')
+      .map(Number)
+      .filter((rank) => !cache.has(rank));
+    if (!missing.length) return;
+    const from = Math.min(...missing);
+    const count = Math.max(...missing) - from + 1;
+    let cancelled = false;
+    api
+      .listBoardImages(boardId, currentSortId, from, count)
+      .then(({ images }) => {
+        images.forEach((img, i) => cache.set(from + i, img));
+        if (!cancelled) setDetailVersion((n) => n + 1);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [detailKey, boardId, currentSortId]);
+
   // -- one layers array: tiles + sections + the selection outline -----------
   const zoom = statusRef.current.zoom;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: detailVersion is the signal that a preview bitmap or a cell's image arrived in a ref-held cache
   useEffect(() => {
     if (!deckRef.current || !board) return;
+    const accent = rgba(palette.accent);
     const [, , w, h] = worldExtent(board.imageCount);
     const tileLayer = new TileLayer({
       id: `board-tiles-${currentSortId}-grid-${GRID_LAYOUT_VERSION}`,
@@ -996,7 +1149,7 @@ export function Board() {
       tileSize: TILE_SIZE,
       extent: [0, 0, w, h],
       minZoom: MIN_ZOOM,
-      maxZoom: MAX_ZOOM,
+      maxZoom: MAX_TILE_ZOOM,
       refinementStrategy: 'never',
       // Updating already visible cells must not replace the whole layer.
       // TileLayer reloads selected tiles for a changed getTileData trigger
@@ -1021,6 +1174,25 @@ export function Board() {
 
     const list: LayersList = [tileLayer];
 
+    // Over the stretched tiles, the pictures themselves (board/detail.ts).
+    if (detailKey) {
+      const cache = sortCache(imageCacheRef.current, currentSortId);
+      for (const rank of detailKey.split(',').map(Number)) {
+        const img = cache.get(rank);
+        if (!img || img.status !== 'ready' || img.missing) continue;
+        const bitmap = detailCacheRef.current?.get(img.id);
+        if (!bitmap) continue;
+        const r = containedRect(rank, img.width, img.height);
+        list.push(
+          new BitmapLayer({
+            id: `detail-${img.id}`,
+            image: bitmap,
+            bounds: [r.x, r.y + r.height, r.x + r.width, r.y],
+          }),
+        );
+      }
+    }
+
     if (findResult?.ranks.length) {
       list.push(
         new PolygonLayer({
@@ -1029,7 +1201,7 @@ export function Board() {
           getPolygon: (d) => d,
           stroked: false,
           filled: true,
-          getFillColor: [79, 93, 255, 54],
+          getFillColor: rgba(palette.accent, 56),
         }),
       );
     }
@@ -1042,7 +1214,7 @@ export function Board() {
           data: markers,
           getSourcePosition: (d) => d.lineStart,
           getTargetPosition: (d) => d.lineEnd,
-          getColor: SECTION_LINE_COLOR,
+          getColor: rgba(palette.lineStrong, 200),
           getWidth: 1,
           widthUnits: 'pixels',
         }),
@@ -1055,11 +1227,62 @@ export function Board() {
           getText: (d) => d.label,
           getSize: 12,
           sizeUnits: 'pixels',
-          getColor: SECTION_TEXT_COLOR,
+          getColor: rgba(palette.textPrimary, 235),
           getTextAnchor: 'start',
           getAlignmentBaseline: 'top',
           getPixelOffset: [3, 2],
           billboard: false,
+        }),
+      );
+    }
+
+    // The focused image's connections, drawn between the cells they join.
+    if (exploreGraph && exploreRanks.size > 1) {
+      const centre = (rank: number): [number, number] => {
+        const { col, row } = cellOf(rank);
+        return [col * CELL + CELL / 2, row * CELL + CELL / 2];
+      };
+      const segments = exploreGraph.edges.flatMap((e) => {
+        const a = exploreRanks.get(e.source.imageId);
+        const b = exploreRanks.get(e.target.imageId);
+        return a === undefined || b === undefined
+          ? []
+          : [{ from: centre(a), to: centre(b) }];
+      });
+      list.push(
+        new PolygonLayer({
+          id: 'explore-cells',
+          data: [...exploreRanks.values()],
+          getPolygon: (rank: number) => cellPolygon(rank),
+          stroked: true,
+          filled: false,
+          getLineColor: rgba(palette.claimEdge, 200),
+          getLineWidth: 1.5,
+          lineWidthUnits: 'pixels',
+        }),
+        new LineLayer({
+          id: 'explore-lines',
+          data: segments,
+          getSourcePosition: (d: { from: [number, number] }) => d.from,
+          getTargetPosition: (d: { to: [number, number] }) => d.to,
+          getColor: rgba(palette.claimEdge, 230),
+          getWidth: 2,
+          widthUnits: 'pixels',
+        }),
+      );
+    }
+
+    // A mark on every annotated image once cells are big enough to carry
+    // one (CONTEXT.md "Making sense": the board shows where analysis is).
+    if (annotatedRanks.length && zoom >= -2) {
+      list.push(
+        new PolygonLayer({
+          id: 'annotated-marks',
+          data: annotatedRanks,
+          getPolygon: (rank: number) => cellCorner(rank, 20),
+          stroked: false,
+          filled: true,
+          getFillColor: rgba(palette.claimOwn, 230),
         }),
       );
     }
@@ -1075,7 +1298,7 @@ export function Board() {
           getPolygon: (d) => d,
           stroked: true,
           filled: false,
-          getLineColor: SELECTION_COLOR,
+          getLineColor: accent,
           getLineWidth: 2,
           lineWidthUnits: 'pixels',
         }),
@@ -1092,7 +1315,7 @@ export function Board() {
             getPolygon: (d) => d,
             stroked: true,
             filled: false,
-            getLineColor: FLASH_COLOR,
+            getLineColor: rgba(palette.textPrimary),
             getLineWidth: 3,
             lineWidthUnits: 'pixels',
           }),
@@ -1112,6 +1335,12 @@ export function Board() {
     flashId,
     findResult,
     zoom,
+    palette,
+    annotatedRanks,
+    exploreGraph,
+    exploreRanks,
+    detailKey,
+    detailVersion,
   ]);
 
   // -- hover: hold still 150ms, then look up the rank under the pointer -----
@@ -1156,11 +1385,7 @@ export function Board() {
     if (!b || !info.coordinate) return;
     const [wx, wy] = info.coordinate as [number, number];
     const rank = rankAtWorld(wx, wy);
-    if (rank < 0 || rank >= b.imageCount) {
-      setClickInfo(`rank ${rank} — empty`);
-      return;
-    }
-    setClickInfo(`rank ${rank} toggled`);
+    if (rank < 0 || rank >= b.imageCount) return;
     const native = event?.srcEvent;
     const ctrl = !!(native?.ctrlKey || native?.metaKey);
     const shift = !!native?.shiftKey;
@@ -1308,6 +1533,23 @@ export function Board() {
     statusRef.current.zoom = nz;
     forceRender((n) => n + 1);
   }
+  /** Walks the graph: the neighbour joins the selection, becomes the focused
+   * image, and the map centres on it. */
+  function visitImage(imgId: string) {
+    selection.add([imgId]);
+    setFocusedImageId(imgId);
+    const rank = exploreRanks.get(imgId);
+    if (rank === undefined || !deckRef.current) return;
+    const { col, row } = cellOf(rank);
+    const next: OrthographicViewState = {
+      ...(viewStateRef.current ?? {}),
+      target: [col * CELL + CELL / 2, row * CELL + CELL / 2, 0],
+    };
+    viewStateRef.current = next;
+    deckRef.current.setProps({ viewState: next });
+    forceRender((n) => n + 1);
+  }
+
   function flyToImage(imgId: string) {
     const img = selectedImages.find((i) => i.id === imgId);
     if (!img || typeof img.rank !== 'number' || !deckRef.current) return;
@@ -1571,192 +1813,12 @@ export function Board() {
     notifySheetsChanged();
   }
 
-  // -- the right column's content (design.md §3.4/§7 slice 2: "move
-  // Board.tsx's inline side panel into the shell's right column"). --------
+  // -- the right column: what you are looking at first (the focused image,
+  // then where it leads), then the board's sheets, then the board itself.
+  // DOM order is reading order; nothing is reordered in CSS.
   useRightColumn(
     board && (
       <div className="board-right" data-testid="board-side">
-        <div className="board-inspector-heading">
-          <div className="board-inspector-title-row">
-            <span className="board-inspector-label">Board access</span>
-            <button
-              type="button"
-              className="board-icon-button board-delete-button"
-              data-testid="board-delete"
-              aria-label="Delete board"
-              title="Delete board"
-              onClick={() => void openBoardDeleteConfirm()}
-            >
-              <svg aria-hidden="true" viewBox="0 0 20 20">
-                <path d="M4.5 5.5h11M8 5.5V4h4v1.5m2.5 0-.7 10.2a1.5 1.5 0 0 1-1.5 1.3H7.7a1.5 1.5 0 0 1-1.5-1.3L5.5 5.5m3 3v5m3-5v5" />
-              </svg>
-            </button>
-          </div>
-          <div className="board-inspector-meta">
-            <span className="board-open-status">
-              <span aria-hidden="true" />
-              {board.open ? 'Shared with group' : 'Private board'}
-            </span>
-            <span>{plural(board.imageCount, 'image')}</span>
-          </div>
-        </div>
-        {boardDeleteConfirm && (
-          <Confirm
-            testId="board-delete-confirm"
-            message={boardDeleteMessage(board.name, boardDeleteConfirm)}
-            busy={boardDeleteBusy}
-            error={boardDeleteError}
-            onConfirm={() => void confirmDeleteBoard()}
-            onCancel={() => setBoardDeleteConfirm(null)}
-          />
-        )}
-
-        {!board.open && (
-          <div className="card" data-testid="allowlist-card">
-            <h4>allowlist</h4>
-            {allowlistError && <div className="error">{allowlistError}</div>}
-            <table data-testid="allowlist-table">
-              <tbody>
-                {(allowlist?.members ?? []).map((m) => (
-                  <tr key={m.userId}>
-                    <td>{m.name}</td>
-                    <td className="muted">{m.role}</td>
-                    <td>
-                      <button
-                        type="button"
-                        data-testid={`allowlist-remove-${m.userId}`}
-                        onClick={() => void removeFromAllowlist(m.userId)}
-                      >
-                        remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="row">
-              <select
-                data-testid="allowlist-add-select"
-                value={allowlistPick}
-                onChange={(e) => setAllowlistPick(e.target.value)}
-              >
-                <option value="">add member…</option>
-                {groupMembers
-                  .filter(
-                    (m) =>
-                      !(allowlist?.members ?? []).some(
-                        (x) => x.userId === m.userId,
-                      ),
-                  )
-                  .map((m) => (
-                    <option key={m.userId} value={m.userId}>
-                      {m.email}
-                    </option>
-                  ))}
-              </select>
-              <button
-                type="button"
-                data-testid="allowlist-add"
-                disabled={!allowlistPick}
-                onClick={() => {
-                  const userId = allowlistPick;
-                  setAllowlistPick('');
-                  if (userId) void addToAllowlist(userId);
-                }}
-              >
-                add
-              </button>
-            </div>
-          </div>
-        )}
-
-        <section className="board-inspector-section board-sheets-section">
-          <div className="board-section-heading">
-            <div>
-              <span className="board-eyebrow">WORKSPACES</span>
-              <h4>
-                Sheets <span>{sheets.length}</span>
-              </h4>
-            </div>
-            <ThreadBrowser
-              groupId={board.groupId}
-              boardId={boardId}
-              onChanged={refreshSheets}
-            />
-          </div>
-          <ul
-            data-testid="sheet-list"
-            className="board-sheet-list"
-            style={{ listStyle: 'none', padding: 0 }}
-          >
-            {sheets.map((sheet) => (
-              <li
-                key={sheet.id}
-                data-testid="sheet-list-item"
-                className="board-sheet-row"
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '3px 0',
-                }}
-              >
-                <RenameInline
-                  name={sheet.name}
-                  onRename={(name) => renameSheet(sheet.id, name)}
-                  testId={`sheet-rename-${sheet.id}`}
-                />
-                <span className="muted" style={{ fontSize: 12 }}>
-                  {plural(sheet.imageCount, 'image')} ·{' '}
-                  {sheet.savedAt
-                    ? new Date(sheet.savedAt).toLocaleTimeString()
-                    : 'unsaved'}
-                </span>
-                <Link className="board-sheet-open" to={`/s/${sheet.id}`}>
-                  Open <span aria-hidden="true">↗</span>
-                </Link>
-                <button
-                  type="button"
-                  className="board-sheet-select"
-                  data-testid={`sheet-select-${sheet.id}`}
-                  title="Select everything on this sheet"
-                  onClick={() => void selectSheetImages(sheet.id)}
-                >
-                  select
-                </button>
-                <button
-                  type="button"
-                  className="board-sheet-delete"
-                  data-testid={`sheet-delete-${sheet.id}`}
-                  onClick={() => void openSheetDeleteConfirm(sheet.id)}
-                >
-                  delete
-                </button>
-                {sheetDeleteConfirm?.sheetId === sheet.id && (
-                  <Confirm
-                    testId={`sheet-delete-confirm-${sheet.id}`}
-                    message={sheetDeleteMessage(
-                      sheet.name,
-                      sheetDeleteConfirm.footprint,
-                    )}
-                    busy={sheetDeleteBusy}
-                    error={sheetDeleteError}
-                    onConfirm={() => void confirmDeleteSheet()}
-                    onCancel={() => setSheetDeleteConfirm(null)}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-          {sheets.length === 0 && (
-            <p className="board-empty-note">
-              Sheets gather images into a focused, collaborative thread.
-            </p>
-          )}
-        </section>
-
         {detailImage && (
           <Detail
             image={detailImage}
@@ -1777,8 +1839,185 @@ export function Board() {
               if (mode === 'add') selection.add(ids);
               else selection.replace(ids ?? []);
             }}
+            onGraph={setExploreGraph}
+            onVisit={visitImage}
           />
         )}
+
+        <Terms
+          vocab={vocab}
+          active={findClaim}
+          onPick={(claim) => {
+            setFindClaim(claim);
+            if (claim) setFindOpen(true);
+          }}
+        />
+
+        <section className="board-panel-section">
+          <header className="board-panel-heading">
+            <h2>
+              Sheets <span className="board-panel-count">{sheets.length}</span>
+            </h2>
+            <ThreadBrowser
+              groupId={board.groupId}
+              boardId={boardId}
+              onChanged={refreshSheets}
+            />
+          </header>
+          {sheets.length === 0 ? (
+            <p className="board-empty-note">
+              Select images on the map, then start a sheet to arrange them
+              together.
+            </p>
+          ) : (
+            <ul data-testid="sheet-list" className="board-sheet-list">
+              {sheets.map((sheet) => (
+                <li
+                  key={sheet.id}
+                  data-testid="sheet-list-item"
+                  className="board-sheet-row"
+                >
+                  <div className="board-sheet-copy">
+                    <RenameInline
+                      name={sheet.name}
+                      onRename={(name) => renameSheet(sheet.id, name)}
+                      testId={`sheet-rename-${sheet.id}`}
+                    />
+                    <span className="board-sheet-meta">
+                      {plural(sheet.imageCount, 'image')} ·{' '}
+                      {sheet.savedAt ? savedLabel(sheet.savedAt) : 'Not saved'}
+                    </span>
+                  </div>
+                  <div className="board-sheet-actions">
+                    <button
+                      type="button"
+                      className="board-quiet-button"
+                      data-testid={`sheet-select-${sheet.id}`}
+                      title="Select this sheet's images on the map"
+                      onClick={() => void selectSheetImages(sheet.id)}
+                    >
+                      Select
+                    </button>
+                    <Link className="board-sheet-open" to={`/s/${sheet.id}`}>
+                      Open
+                    </Link>
+                    <button
+                      type="button"
+                      className="board-icon-button board-icon-button--danger"
+                      data-testid={`sheet-delete-${sheet.id}`}
+                      aria-label={`Delete sheet ${sheet.name}`}
+                      title="Delete sheet"
+                      onClick={() => void openSheetDeleteConfirm(sheet.id)}
+                    >
+                      <Icon name="trash" size={16} />
+                    </button>
+                  </div>
+                  {sheetDeleteConfirm?.sheetId === sheet.id && (
+                    <Confirm
+                      testId={`sheet-delete-confirm-${sheet.id}`}
+                      message={sheetDeleteMessage(
+                        sheet.name,
+                        sheetDeleteConfirm.footprint,
+                      )}
+                      busy={sheetDeleteBusy}
+                      error={sheetDeleteError}
+                      onConfirm={() => void confirmDeleteSheet()}
+                      onCancel={() => setSheetDeleteConfirm(null)}
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="board-panel-section">
+          <header className="board-panel-heading">
+            <h2>Board</h2>
+          </header>
+          <div className="board-about">
+            <span className="board-open-status" data-open={board.open}>
+              <span aria-hidden="true" />
+              {board.open ? 'Open to the whole group' : 'Private board'}
+            </span>
+            <button
+              type="button"
+              className="board-danger-link"
+              data-testid="board-delete"
+              onClick={() => void openBoardDeleteConfirm()}
+            >
+              Delete board
+            </button>
+          </div>
+          {boardDeleteConfirm && (
+            <Confirm
+              testId="board-delete-confirm"
+              message={boardDeleteMessage(board.name, boardDeleteConfirm)}
+              busy={boardDeleteBusy}
+              error={boardDeleteError}
+              onConfirm={() => void confirmDeleteBoard()}
+              onCancel={() => setBoardDeleteConfirm(null)}
+            />
+          )}
+
+          {!board.open && (
+            <div className="board-allowlist" data-testid="allowlist-card">
+              <h3>Allowlist</h3>
+              {allowlistError && <div className="error">{allowlistError}</div>}
+              <ul data-testid="allowlist-table">
+                {(allowlist?.members ?? []).map((m) => (
+                  <li key={m.userId} className="board-allowlist-row">
+                    <span className="board-allowlist-name">{m.name}</span>
+                    <span className="board-allowlist-role">{m.role}</span>
+                    <button
+                      type="button"
+                      className="board-quiet-button"
+                      data-testid={`allowlist-remove-${m.userId}`}
+                      aria-label={`Remove ${m.name} from the allowlist`}
+                      onClick={() => void removeFromAllowlist(m.userId)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="board-allowlist-add">
+                <select
+                  data-testid="allowlist-add-select"
+                  aria-label="Member to add"
+                  value={allowlistPick}
+                  onChange={(e) => setAllowlistPick(e.target.value)}
+                >
+                  <option value="">Choose a member…</option>
+                  {groupMembers
+                    .filter(
+                      (m) =>
+                        !(allowlist?.members ?? []).some(
+                          (x) => x.userId === m.userId,
+                        ),
+                    )
+                    .map((m) => (
+                      <option key={m.userId} value={m.userId}>
+                        {m.email}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  data-testid="allowlist-add"
+                  disabled={!allowlistPick}
+                  onClick={() => {
+                    const userId = allowlistPick;
+                    setAllowlistPick('');
+                    if (userId) void addToAllowlist(userId);
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
       </div>
     ),
   );
@@ -1887,13 +2126,14 @@ export function Board() {
             type="button"
             className="board-tool-button board-tool-icon"
             aria-label="Board actions"
+            title="Board actions"
             data-testid="board-actions-button"
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               openActionsMenu(rect.left, rect.bottom + 4);
             }}
           >
-            <span aria-hidden="true">···</span>
+            <Icon name="more" />
           </button>
           <button
             type="button"
@@ -1902,10 +2142,7 @@ export function Board() {
             data-testid="board-find-toggle"
             onClick={() => setFindOpen((open) => !open)}
           >
-            <svg aria-hidden="true" viewBox="0 0 20 20">
-              <circle cx="8.6" cy="8.6" r="5.6" />
-              <path d="m13 13 4 4" />
-            </svg>
+            <Icon name="search" />
           </button>
           <div className="board-sort-control">
             <span className="board-sort-label">Arrange by</span>
@@ -1933,6 +2170,7 @@ export function Board() {
               type="button"
               className="board-sort-direction"
               aria-label={`Sort ${sort.dir === 'asc' ? 'descending' : 'ascending'}`}
+              title={sort.dir === 'asc' ? 'Ascending' : 'Descending'}
               data-testid="sort-dir"
               onClick={() =>
                 changeSort({
@@ -1941,7 +2179,7 @@ export function Board() {
                 })
               }
             >
-              <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>
+              <Icon name={sort.dir === 'asc' ? 'arrowUp' : 'arrowDown'} />
             </button>
           </div>
           <button
@@ -1951,9 +2189,7 @@ export function Board() {
             aria-label="Add images"
             onClick={() => fileInputRef.current?.click()}
           >
-            <svg aria-hidden="true" viewBox="0 0 20 20">
-              <path d="M10 13V3m0 0L6.5 6.5M10 3l3.5 3.5M4 12.5v3A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-3" />
-            </svg>
+            <Icon name="upload" />
             <span className="board-upload-label">
               {uploading ? (
                 <>
@@ -2052,8 +2288,19 @@ export function Board() {
               Clear
             </button>
           </div>
-          {findFilters.length > 0 && (
+          {(findFilters.length > 0 || findClaim) && (
             <div className="row board-find-chips">
+              {findClaim && (
+                <button
+                  type="button"
+                  data-testid="board-claim-chip"
+                  onClick={() => setFindClaim(null)}
+                >
+                  {findClaim.kind === 'label' ? 'Label' : 'Relation'}:{' '}
+                  {findClaim.term}
+                  <Icon name="close" size={14} />
+                </button>
+              )}
               {findFilters.map((clause) => (
                 <button
                   type="button"
@@ -2065,12 +2312,13 @@ export function Board() {
                     )
                   }
                 >
-                  {clause.key} {clause.op} {String(clause.value)} ×
+                  {clause.key} {clause.op} {String(clause.value)}
+                  <Icon name="close" size={14} />
                 </button>
               ))}
             </div>
           )}
-          {(findQuery.trim() || findFilters.length > 0) && (
+          {(findQuery.trim() || findFilters.length > 0 || findClaim) && (
             <div className="row board-find-result" aria-live="polite">
               {findError ? (
                 <output>{findError}</output>
@@ -2101,37 +2349,24 @@ export function Board() {
           )}
         </div>
       )}
-      {clickInfo && (
-        <div
-          className="status-line"
-          data-testid="click-info"
-          style={{ bottom: 40 }}
-        >
-          {clickInfo}
-        </div>
-      )}
       {hoverTooltip && (
         <div
-          className="status-line"
+          className="board-hover-card"
           data-testid="hover-tooltip"
           data-rank={hoverTooltip.rank}
-          style={{
-            position: 'absolute',
-            left: hoverTooltip.x + 12,
-            top: hoverTooltip.y + 12,
-            bottom: 'auto',
-            maxWidth: 220,
-            pointerEvents: 'none',
-          }}
+          style={{ left: hoverTooltip.x + 14, top: hoverTooltip.y + 14 }}
         >
-          <div>
-            <b>{hoverTooltip.image.name}</b>
-          </div>
-          {Object.entries(hoverTooltip.image.properties).map(([k, v]) => (
-            <div key={k}>
-              {k}: {String(v)}
-            </div>
-          ))}
+          <b>{hoverTooltip.image.name}</b>
+          {Object.entries(hoverTooltip.image.properties).length > 0 && (
+            <dl>
+              {Object.entries(hoverTooltip.image.properties).map(([k, v]) => (
+                <div key={k}>
+                  <dt>{k}</dt>
+                  <dd>{String(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </div>
       )}
       <UploadActivity boardId={boardId} snapshot={uploadSnapshot} />
@@ -2163,11 +2398,7 @@ export function Board() {
         onAddRequested={() => setAddSheetRequested(false)}
       />
 
-      {selectionNote && (
-        <div className="status-line" style={{ bottom: 96, left: 8 }}>
-          {selectionNote}
-        </div>
-      )}
+      {selectionNote && <output className="board-note">{selectionNote}</output>}
 
       {contextMenu && (
         <ContextMenu

@@ -13,6 +13,7 @@ import { GroupRail } from './GroupRail.tsx';
 import { QuickSwitcher } from './QuickSwitcher.tsx';
 import { RightColumnSetter } from './RightColumn.tsx';
 import './shell.css';
+import { Icon } from '../components/Icon.tsx';
 import { TopBar } from './TopBar.tsx';
 import { useShellData } from './useShellData.ts';
 
@@ -132,7 +133,7 @@ export function Shell() {
             onClick={() => void signOut()}
             data-testid="shell-sign-out"
           >
-            sign out
+            Sign out
           </button>
         </div>
       </div>
@@ -177,7 +178,7 @@ export function Shell() {
                 data-testid="shell-right-close"
                 onClick={() => setRightOpen(false)}
               >
-                ×
+                <Icon name="close" size={16} />
               </button>
             </div>
             <div className="muted shell-right-empty">Nobody else yet.</div>

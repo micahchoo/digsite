@@ -7,6 +7,7 @@
 // keeping a board's fold state alive during one session.
 import { useState } from 'react';
 import { Link } from 'react-router';
+import { Icon } from '../components/Icon.tsx';
 import type {
   BoardSummaryWithStats,
   SheetSummaryWithStats,
@@ -91,15 +92,9 @@ function BoardRow({
           }
           data-testid="shell-board-link"
         >
-          {!board.open && (
-            <span className="shell-lock" aria-hidden="true">
-              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none">
-                <rect x="3.2" y="6.6" width="9.6" height="7" rx="1.5" />
-                <path d="M5.4 6.6V5a2.6 2.6 0 0 1 5.2 0v1.6" />
-              </svg>
-            </span>
-          )}
-          <span aria-hidden="true">#</span> {board.name}
+          {!board.open && <Icon name="lock" size={13} className="shell-lock" />}
+          <Icon name="hash" size={14} className="shell-board-hash" />
+          <span className="shell-board-name">{board.name}</span>
         </Link>
       </div>
       {!collapsed && (
@@ -116,17 +111,14 @@ function BoardRow({
                 data-testid="shell-sheet-link"
                 data-unread={Boolean(s.unread && s.id !== activeSheetId)}
               >
-                <span className="shell-thread-glyph" aria-hidden="true">
-                  ↳
-                </span>
+                <Icon name="thread" size={14} className="shell-thread-glyph" />
                 {s.name}
                 {s.unread && s.id !== activeSheetId && (
                   <span
                     className="shell-unread-dot"
+                    role="img"
                     aria-label="Unread activity"
-                  >
-                    •
-                  </span>
+                  />
                 )}
               </Link>
             </li>
@@ -137,9 +129,7 @@ function BoardRow({
               className="shell-start-sheet"
               data-testid={`shell-start-sheet-${board.id}`}
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none">
-                <path d="M8 3.2v9.6M3.2 8h9.6" />
-              </svg>
+              <Icon name="plus" size={14} />
               Start a sheet
             </Link>
           </li>
@@ -169,7 +159,6 @@ export function ChannelColumn({
     <div className="shell-channel" data-testid="shell-channel">
       <div className="shell-channel-header">
         <div className="shell-channel-identity">
-          <span className="shell-channel-kicker">GROUP WORKSPACE</span>
           <span className="shell-channel-title">{groupName ?? ''}</span>
         </div>
         <Link
@@ -179,19 +168,7 @@ export function ChannelColumn({
           aria-label="Group settings"
           data-testid="shell-group-settings"
         >
-          <svg
-            aria-hidden="true"
-            className="shell-icon"
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="10" cy="10" r="3" />
-            <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2m12.8-5.3-1.4 1.4M6.1 13.9l-1.4 1.4m10.6 0-1.4-1.4M6.1 6.1 4.7 4.7" />
-          </svg>
+          <Icon name="settings" />
         </Link>
       </div>
       <ul className="shell-board-list">

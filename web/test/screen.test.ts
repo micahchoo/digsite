@@ -1,7 +1,13 @@
 // Pure tests, no DOM or canvas — see ../src/sheet/overlay/screen.ts.
 import { describe, expect, test } from 'bun:test';
 import type { Foreign } from '@digsite/shared';
-import { relationOpacity } from '../src/sheet/connection-emphasis.ts';
+import {
+  connectionOpacity,
+  endImages,
+  focusOf,
+  inFocus,
+  relationOpacity,
+} from '../src/sheet/connection-emphasis.ts';
 import {
   type ElementLike,
   foreignCopyRect,
@@ -35,6 +41,55 @@ describe('relation emphasis', () => {
     expect(relationOpacity('resembles', 'resembles')).toBe(1);
     expect(relationOpacity('resembles', null)).toBe(1);
     expect(relationOpacity('overlaps', 'resembles')).toBe(0.12);
+  });
+});
+
+describe('focus emphasis', () => {
+  const img = (id: string, imageId: string) => ({
+    id,
+    customData: { kind: 'image', imageId },
+  });
+  const reg = (id: string, imageId: string) => ({
+    id,
+    customData: { kind: 'region', imageId, label: 'x', properties: {} },
+  });
+  const elements = [
+    img('ea', 'A'),
+    img('eb', 'B'),
+    img('ec', 'C'),
+    reg('ra', 'A'),
+  ];
+  const byId = new Map(elements.map((el) => [el.id, el] as const));
+  const bc = {
+    id: 'bc',
+    startBinding: { elementId: 'eb' },
+    endBinding: { elementId: 'ec' },
+  };
+  const ab = {
+    id: 'ab',
+    startBinding: { elementId: 'ra' },
+    endBinding: { elementId: 'eb' },
+  };
+
+  test('with nothing selected every connection is in focus', () => {
+    expect(focusOf(elements, [])).toBeNull();
+    expect(inFocus(null, 'bc', endImages(bc, byId))).toBe(true);
+  });
+
+  test('a selected region puts the connections of its picture in focus, and only those', () => {
+    const focus = focusOf(elements, ['ra']);
+    expect(inFocus(focus, 'ab', endImages(ab, byId))).toBe(true);
+    expect(inFocus(focus, 'bc', endImages(bc, byId))).toBe(false);
+  });
+
+  test('a selected connection is in focus itself', () => {
+    expect(inFocus(focusOf(elements, ['bc']), 'bc', [null, null])).toBe(true);
+  });
+
+  test('the lower of the two answers wins', () => {
+    expect(connectionOpacity('resembles', null, true)).toBe(1);
+    expect(connectionOpacity('resembles', null, false)).toBe(0.3);
+    expect(connectionOpacity('overlaps', 'resembles', false)).toBe(0.12);
   });
 });
 
@@ -217,6 +272,8 @@ describe('foreignShapes: dangling from a vanished foreign region (docs/phases/2-
           direction: 'forward',
           relation: 'r',
           properties: {},
+          confidence: null,
+          note: '',
           sheetName: 'Other sheet',
         },
       ],
@@ -231,8 +288,9 @@ describe('foreignShapes: dangling from a vanished foreign region (docs/phases/2-
       throw new Error('expected an edge shape');
     expect(edge.danglingStart).toBe(true);
     expect(edge.danglingEnd).toBe(false);
-    // drawn to the image's rect — its centre, same as a plain image end.
-    expect(edge.line[0]).toEqual({ x: 100, y: 100 });
+    // drawn to the image, same as a plain image end: stopping at its border
+    // (clipBetween), so the line never covers the picture it joins.
+    expect(edge.line[0]).toEqual({ x: 200, y: 100 });
   });
 
   test('an edge end whose region IS among the current foreign regions is not dangling', () => {
@@ -262,6 +320,8 @@ describe('foreignShapes: dangling from a vanished foreign region (docs/phases/2-
           direction: 'forward',
           relation: 'r',
           properties: {},
+          confidence: null,
+          note: '',
           sheetName: 'Other sheet',
         },
       ],
@@ -291,6 +351,8 @@ describe('foreignShapes: dangling from a vanished foreign region (docs/phases/2-
           direction: 'forward',
           relation: 'r',
           properties: {},
+          confidence: null,
+          note: '',
           sheetName: 'Other sheet',
         },
       ],

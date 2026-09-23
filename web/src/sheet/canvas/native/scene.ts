@@ -12,16 +12,32 @@
 // rect — ../../../../.claude/rules/image-graph-foreign-regions.md's web
 // cousin, foreign-never-in-scene.md).
 import { dataOf, imageGroupId } from '@digsite/shared';
+import { distanceToPath, edgePaths } from '../../routing.ts';
 import type { SceneElement } from '../types.ts';
-import {
-  type Point,
-  type Rect,
-  distanceToSegment,
-  overlaps,
-} from './geometry.ts';
+import { type Point, type Rect, overlaps } from './geometry.ts';
 import { SpatialIndex } from './spatial.ts';
 
 export type HitKind = 'image' | 'region' | 'edge';
+
+/** What is drawn over what: images, then the regions on them, then the
+ * connections between them. By kind, not by array order: a saved scene's
+ * order is not a z-order (scenes from the native canvas carry no fractional
+ * index), and a claim drawn under its own image is never what anyone
+ * wants. `render.ts` paints in this order and `hitAt` asks in reverse, so
+ * a click lands on what the frame showed on top. */
+const LAYER: Record<HitKind, number> = { image: 0, region: 1, edge: 2 };
+
+export function paintOrder<T extends { customData?: unknown }>(
+  elements: readonly T[],
+): T[] {
+  const layerOf = (el: T) => {
+    const kind = dataOf(el)?.kind;
+    return kind ? LAYER[kind] : LAYER.edge;
+  };
+  // Array.prototype.sort is stable: within a kind, array order still says
+  // which of two overlapping images is on top.
+  return [...elements].sort((a, b) => layerOf(a) - layerOf(b));
+}
 export interface Hit {
   id: string;
   kind: HitKind;
@@ -63,26 +79,10 @@ export function buildIndex(elements: readonly SceneElement[]): SpatialIndex {
   return new SpatialIndex(ids, positions);
 }
 
-/** The arrow's own current endpoints, in scene space — dangling.ts's
- * `currentEndpoints`, ported: never recomputed from a bound element here,
- * since this reads exactly what `retargetEdges` last wrote (or what a
- * remote peer sent), which IS the drawn line. */
-function edgeEndpoints(el: SceneElement): { start: Point; end: Point } {
-  const first = el.points[0] ?? [0, 0];
-  const last = el.points[el.points.length - 1] ?? first;
-  return {
-    start: { x: el.x + first[0], y: el.y + first[1] },
-    end: { x: el.x + last[0], y: el.y + last[1] },
-  };
-}
-
 /**
- * The topmost image or region at `p`, or — failing that — a connection
- * within `EDGE_REACH_PX` (world units, so it shrinks with zoom), or null
- * over empty canvas. Mirrors `../../hit.ts#hitAt` for images/regions
- * (topmost wins) and image-graph's `GraphScene#hit` for the edge fallback
- * (bounding-box reject before the segment distance, so this costs nothing
- * on a frame with no edges near the pointer).
+ * A connection within `EDGE_REACH_PX` of `p`, else the topmost region,
+ * else the image, else null over empty canvas. Mirrors `../../hit.ts#hitAt`
+ * for images/regions and image-graph's `GraphScene#hit` for the edges.
  */
 export function hitAt(
   p: Point,
@@ -90,33 +90,31 @@ export function hitAt(
   scale: number,
   index?: SpatialIndex,
 ): Hit | null {
-  const spatial = index ?? buildIndex(elements);
+  // Topmost layer first: connections, then regions, then images. A
+  // connection is measured along the path the frame drew (routing.ts).
   const byId = new Map(elements.map((e) => [e.id, e] as const));
+  const reach = EDGE_REACH_PX / scale;
+  const paths = edgePaths(elements, scale);
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+    if (!el || el.isDeleted) continue;
+    const path = paths.get(el.id);
+    if (path && distanceToPath(p, path) <= reach)
+      return { id: el.id, kind: 'edge' };
+  }
+
+  const spatial = index ?? buildIndex(elements);
+  let image: Hit | null = null;
   for (const id of spatial.at(p)) {
     const el = byId.get(id);
     if (!el) continue;
     const data = dataOf(el);
     if (data?.kind === 'region')
       return { id, kind: 'region', imageId: data.imageId };
-    if (data?.kind === 'image')
-      return { id, kind: 'image', imageId: data.imageId };
+    if (data?.kind === 'image' && !image)
+      image = { id, kind: 'image', imageId: data.imageId };
   }
-
-  const reach = EDGE_REACH_PX / scale;
-  for (let i = elements.length - 1; i >= 0; i--) {
-    const el = elements[i];
-    if (!el || el.isDeleted) continue;
-    if (dataOf(el)?.kind !== 'edge') continue;
-    const bx0 = Math.min(el.x, el.x + el.width) - reach;
-    const bx1 = Math.max(el.x, el.x + el.width) + reach;
-    const by0 = Math.min(el.y, el.y + el.height) - reach;
-    const by1 = Math.max(el.y, el.y + el.height) + reach;
-    if (p.x < bx0 || p.x > bx1 || p.y < by0 || p.y > by1) continue;
-    const { start, end } = edgeEndpoints(el);
-    if (distanceToSegment(p, start, end) <= reach)
-      return { id: el.id, kind: 'edge' };
-  }
-  return null;
+  return image;
 }
 
 /** Every element a drag on `imageId` carries: the image itself plus every
@@ -272,6 +270,15 @@ export function regionHandles(
     x: rect.x + rect.width * fx,
     y: rect.y + rect.height * fy,
   }));
+}
+
+/** Grips only on a region at least this wide on screen: on a smaller one
+ * eight grips cover it and leave nothing to grab. The renderer draws them
+ * and `hitGrip` answers for them under this one rule. */
+export const GRIP_MIN_SIDE_PX = 48;
+
+export function gripsShown(rect: Rect, zoom: number): boolean {
+  return Math.min(rect.width, rect.height) * zoom >= GRIP_MIN_SIDE_PX;
 }
 
 /** The grip at `p`, within `reach` world units, or null. */

@@ -3,10 +3,12 @@
 // twice. `credentials: 'include'` on every call — the session lives in a
 // cookie (docs/design.md "web/").
 
+import type { TermKind } from '@digsite/shared';
 import type {
   AcceptInvitationResponse,
   AddImagesToSheetRequest,
   AddImagesToSheetResponse,
+  AliasesResponse,
   AllowlistRequest,
   AllowlistResponse,
   ArchiveSheetResponse,
@@ -22,11 +24,13 @@ import type {
   FindFilterClause,
   GetBoardResponse,
   GetBoardSelectionResponse,
+  GetBoardVocabularyResponse,
   GetImageResponse,
   GetNeighbourhoodResponse,
   GetSectionsResponse,
   GetSheetElementsResponse,
   GetSheetForeignResponse,
+  GetSheetReachResponse,
   GetSheetResponse,
   GetSheetRowsResponse,
   GetStatsResponse,
@@ -39,6 +43,7 @@ import type {
   ListMembersResponse,
   MarkSheetSeenResponse,
   Member,
+  PutAliasRequest,
   PutBoardSelectionRequest,
   PutBoardSelectionResponse,
   Role,
@@ -164,12 +169,7 @@ export type GetSheetResponseWithStatus = Omit<GetSheetResponse, 'images'> & {
 // - a `rank` on each returned `BoardImage`, present only when `ids` was
 //   used, computed against the `sort` param passed alongside it — the
 //   caller already knows the sort it wants ranks for.
-//
-// `GET /boards/:id/relations` — distinct edge relations on the board
-// (union of every sheet's own edges), for the Explore panel's relation
-// filter. Also not on the real server today; until it exists (or if this
-// call 404s) the panel derives relations from a neighbourhood response's
-// own edges instead (docs/phases/2-sheet.md section 4's own fallback).
+
 export type BoardImageWithRank = BoardImage & { rank?: number };
 export type ListBoardImagesByIdsResponse = { images: BoardImageWithRank[] };
 
@@ -353,9 +353,13 @@ export const api = {
     sort: string,
     q: string,
     filters: FindFilterClause[],
+    claims: { label?: string; relation?: string; annotated?: boolean } = {},
   ) => {
     const params = new URLSearchParams({ sort, q });
     if (filters.length) params.set('filter', JSON.stringify(filters));
+    if (claims.label) params.set('label', claims.label);
+    if (claims.relation) params.set('relation', claims.relation);
+    if (claims.annotated) params.set('annotated', '1');
     return request<FindBoardResponse>(
       `/boards/${boardId}/find?${params.toString()}`,
     );
@@ -377,11 +381,16 @@ export const api = {
         relation ? `&relation=${encodeURIComponent(relation)}` : ''
       }`,
     ),
-  // Not in the real server's contract yet — see ListBoardImagesByIdsResponse's
-  // header comment. Board.tsx's Explore panel falls back to deriving
-  // relations from a neighbourhood response when this 404s.
-  getBoardRelations: (boardId: string) =>
-    request<string[]>(`/boards/${boardId}/relations`),
+  // CONTEXT.md "Vocabulary" and "Alias".
+  getVocabulary: (boardId: string) =>
+    request<GetBoardVocabularyResponse>(`/boards/${boardId}/vocabulary`),
+  putAlias: (boardId: string, body: PutAliasRequest) =>
+    request<AliasesResponse>(`/boards/${boardId}/aliases`, put(body)),
+  deleteAlias: (boardId: string, kind: TermKind, term: string) =>
+    request<AliasesResponse>(
+      `/boards/${boardId}/aliases/${kind}/${encodeURIComponent(term)}`,
+      { method: 'DELETE' },
+    ),
   getImage: (imageId: string) =>
     request<GetImageResponse>(`/images/${imageId}`),
   originalUrl: (imageId: string) =>
@@ -449,6 +458,8 @@ export const api = {
     request<GetSheetElementsResponse>(`/sheets/${sheetId}/elements`),
   getSheetForeign: (sheetId: string) =>
     request<GetSheetForeignResponse>(`/sheets/${sheetId}/foreign`),
+  getSheetReach: (sheetId: string) =>
+    request<GetSheetReachResponse>(`/sheets/${sheetId}/reach`),
   getSheetRows: (sheetId: string) =>
     request<GetSheetRowsResponse>(`/sheets/${sheetId}/rows`),
   getStats: () => request<GetStatsResponse>('/stats'),

@@ -25,7 +25,9 @@
 // (`pointerIntent` -> 'edge-source'); a preview line follows the pointer to
 // the next press, which completes it (-> 'edge-target') through
 // `tools.connect`. Escape cancels the pending source.
+import type { VocabularyTerm } from '@digsite/shared';
 import { useEffect, useRef, useState } from 'react';
+import { TermInput } from '../components/TermInput.tsx';
 import type { WheelInput } from './canvas/types.ts';
 import {
   type Point,
@@ -46,6 +48,7 @@ import {
   sceneToScreen,
   screenToScene,
 } from './overlay/screen.ts';
+import { nextImage } from './reading-order.ts';
 import type { Tools } from './tools.ts';
 
 interface Props {
@@ -56,6 +59,10 @@ interface Props {
   offset: ContainerOffset;
   onPendingEdgeChange: (pending: boolean) => void;
   onDrawn: () => void;
+  /** A connection made with the Edge tool, and where to name it. */
+  onEdgeDrawn: (edgeId: string, at: Point) => void;
+  /** The board's labels, for the new region's label field. */
+  labelTerms: readonly VocabularyTerm[];
   onPan: (dx: number, dy: number) => void;
   onWheel: (input: WheelInput, point: Point) => void;
 }
@@ -97,6 +104,8 @@ export function DrawLayer({
   offset,
   onPendingEdgeChange,
   onDrawn,
+  onEdgeDrawn,
+  labelTerms,
   onPan,
   onWheel,
 }: Props) {
@@ -112,6 +121,11 @@ export function DrawLayer({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fallbackRef = useRef<FallbackPointer | null>(null);
   const spaceHeldRef = useRef(false);
+  // The keyboard loop: the image the last region went on, and what Tab
+  // needs to read at the moment it is pressed.
+  const currentImageRef = useRef<string | null>(null);
+  const loopRef = useRef({ tool, elements, tools, labelOpen: false });
+  loopRef.current = { tool, elements, tools, labelOpen: labelFor !== null };
 
   useEffect(
     () => onPendingEdgeChange(!!edgePending),
@@ -133,6 +147,26 @@ export function DrawLayer({
     function onKeyDown(e: KeyboardEvent) {
       if (e.code === 'Space' && !isTypingTarget(e.target))
         spaceHeldRef.current = true;
+      // Region tool: Tab moves to the next image, Shift+Tab to the previous.
+      const loop = loopRef.current;
+      if (
+        e.key === 'Tab' &&
+        loop.tool === 'region' &&
+        !loop.labelOpen &&
+        !isTypingTarget(e.target)
+      ) {
+        const next = nextImage(
+          loop.elements,
+          currentImageRef.current,
+          e.shiftKey ? -1 : 1,
+        );
+        if (next) {
+          e.preventDefault();
+          currentImageRef.current = next.id;
+          loop.tools.zoomToFit([next.id]);
+        }
+        return;
+      }
       if (e.key !== 'Escape') return;
       setEdgePending(null);
       setDrag(null);
@@ -189,6 +223,7 @@ export function DrawLayer({
 
     if (intent === 'draw-region') {
       if (!hit) return; // narrows for TS; pointerIntent guarantees target === 'image' here
+      currentImageRef.current = hit.id;
       // Without capture, a drag that leaves this div's bounds (past a
       // window edge, over the Inspector sidebar) stops getting move/up
       // events here at all — the drag state sticks and the tool goes
@@ -211,8 +246,12 @@ export function DrawLayer({
     if (!hit || !edgePending) return;
     if (hit.id === edgePending.elId) return; // same element: not a self-edge
     const newId = tools.connect(edgePending.elId, hit.id);
+    const from = sceneToScreen(edgePending.anchor, viewport, offset);
     setEdgePending(null);
-    if (newId) onDrawn();
+    if (!newId) return;
+    onDrawn();
+    const to = clientPoint(e);
+    onEdgeDrawn(newId, { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 });
   }
 
   function handlePointerMove(e: React.PointerEvent) {
@@ -279,8 +318,8 @@ export function DrawLayer({
     );
   }
 
-  function commitLabel() {
-    if (labelFor) tools.setProperty(labelFor.id, 'label', labelValue);
+  function commitLabel(value = labelValue) {
+    if (labelFor) tools.setProperty(labelFor.id, 'label', value.trim());
     setLabelFor(null);
   }
 
@@ -341,23 +380,26 @@ export function DrawLayer({
         )}
       </svg>
       {labelFor && (
-        <input
+        <TermInput
           ref={inputRef}
+          aria-label="Region label"
           data-testid="region-label-input"
           className="sheet-label-input"
+          placeholder="Label this region…"
           value={labelValue}
-          onChange={(e) => setLabelValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commitLabel();
-            if (e.key === 'Escape') setLabelFor(null);
+          terms={labelTerms}
+          onChange={setLabelValue}
+          onCommit={commitLabel}
+          onCancel={() => setLabelFor(null)}
+          onBlur={() => {
+            if (labelFor) commitLabel();
           }}
-          onBlur={commitLabel}
           // Dynamic per-instance position/size only — every static rule
           // (position, font, z-index) lives in sheet.css's `.sheet-label-input`.
           style={{
             left: labelFor.screenRect.x,
-            top: labelFor.screenRect.y + labelFor.screenRect.height + 2,
-            width: Math.max(80, labelFor.screenRect.width),
+            top: labelFor.screenRect.y + labelFor.screenRect.height + 4,
+            width: Math.max(180, labelFor.screenRect.width),
           }}
         />
       )}

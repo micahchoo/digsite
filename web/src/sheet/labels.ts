@@ -23,3 +23,29 @@ export function truncateLabel(label: string, max = LABEL_MAX_CHARS): string {
   if (max <= 1) return '…';
   return `${label.slice(0, max - 1)}…`;
 }
+
+/** What a region is called, as drawn. The native canvas keeps the label in
+ * `customData.label`; a scene saved by the former canvas kept it in a bound
+ * text element instead, so that is the fallback. */
+export function regionLabelOf(
+  region: {
+    customData?: unknown;
+    boundElements?: readonly { id: string; type: string }[] | null;
+  },
+  byId: ReadonlyMap<string, { text?: string }>,
+): string {
+  const data = region.customData as { label?: unknown } | undefined;
+  if (typeof data?.label === 'string' && data.label) return data.label;
+  const textId = region.boundElements?.find((b) => b.type === 'text')?.id;
+  return (textId ? byId.get(textId)?.text : undefined) ?? '';
+}
+
+/** Where a region's label chip sits on screen: just above the region's
+ * top-left corner, as wide as its text. `canvas/native/render.ts` draws it
+ * here and `overlay/Overlay.tsx` keeps other labels off it; both ask this. */
+export function regionChip(
+  screen: { x: number; y: number },
+  textWidth: number,
+): { x: number; y: number; width: number; height: number } {
+  return { x: screen.x, y: screen.y - 18, width: textWidth + 8, height: 16 };
+}

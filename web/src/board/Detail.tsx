@@ -7,6 +7,7 @@
 // the two panels edit unrelated things that happen to look similar.
 import type { GetImageResponse, PropertyValue } from '@digsite/shared';
 import { useState } from 'react';
+import { Icon } from '../components/Icon.tsx';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -47,36 +48,21 @@ export function Detail({
   const [newKey, setNewKey] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
+  const added = new Date(image.uploadedAt).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
   return (
-    <section className="board-detail" data-testid="detail-panel">
-      <div className="board-panel-heading">
-        <span className="board-eyebrow">SELECTED IMAGE</span>
-        <button
-          type="button"
-          className="board-text-button"
-          aria-label="Close image details"
-          data-testid="detail-close"
-          onClick={onClose}
-        >
-          Close
-        </button>
-      </div>
+    <section className="board-panel-section" data-testid="detail-panel">
       <div className="board-image-identity">
         {image.missing ? (
           <div
+            className="board-detail-thumb is-missing"
             data-testid="detail-missing"
-            style={{
-              width: 56,
-              height: 56,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'var(--surface-sunken)',
-              color: 'var(--text-faint)',
-              borderRadius: 'var(--radius-s)',
-            }}
           >
-            missing
+            Missing
           </div>
         ) : (
           <img
@@ -86,124 +72,146 @@ export function Detail({
           />
         )}
         <div className="board-image-identity-copy">
-          <div className="board-image-name">{image.name}</div>
-          <div className="muted">
-            {image.width} × {image.height}
-          </div>
-          <div className="muted">
-            Added {new Date(image.uploadedAt).toLocaleDateString()}
-          </div>
+          <h2 className="board-image-name">{image.name}</h2>
+          <span className="board-image-facts">
+            {image.width} × {image.height} · Added {added}
+          </span>
+          {image.missing && (
+            <span
+              className="board-image-facts"
+              data-testid="detail-missing-note"
+            >
+              The original file is no longer available.
+            </span>
+          )}
         </div>
-      </div>
-      {image.missing ? (
-        <div className="muted" data-testid="detail-missing-note">
-          Original file is no longer available
-        </div>
-      ) : confirmingDelete ? (
-        <div className="board-detail-delete-confirm">
-          <span className="error">delete this image?</span>
-          <button
-            type="button"
-            data-testid="detail-delete-confirm"
-            onClick={onDelete}
-          >
-            delete
-          </button>
-          <button type="button" onClick={() => setConfirmingDelete(false)}>
-            Cancel
-          </button>
-        </div>
-      ) : (
         <button
           type="button"
-          data-testid="detail-delete"
-          className="board-danger-link"
-          onClick={() => setConfirmingDelete(true)}
+          className="board-icon-button board-icon-button--small"
+          aria-label="Close image details"
+          title="Close"
+          data-testid="detail-close"
+          onClick={onClose}
         >
-          Delete image
+          <Icon name="close" size={16} />
         </button>
-      )}
+      </div>
 
-      <div className="board-property-section">
-        <div className="board-detail-section-title">
-          <span className="board-eyebrow">IMAGE RECORD</span>
-          <b>Properties</b>
-          <span data-testid="detail-save-state" className="muted">
-            {saveState === 'saving'
-              ? 'saving…'
-              : saveState === 'saved'
-                ? 'saved'
-                : saveState === 'error'
-                  ? 'save failed'
-                  : ''}
-          </span>
-        </div>
-        {Object.entries(image.properties).map(([k, v]) => (
-          <div key={k} className="board-property-row">
-            <label
-              className="board-property-name"
-              htmlFor={`detail-property-${k}`}
-            >
-              {k}
-            </label>
-            <select
-              value={typeOf(v)}
-              aria-label={`Type of ${k}`}
-              onChange={(e) =>
-                onSetProperty(
-                  k,
-                  coerce(
-                    String(v),
-                    e.target.value as 'text' | 'number' | 'boolean',
-                  ),
-                )
-              }
-            >
-              <option value="text">text</option>
-              <option value="number">number</option>
-              <option value="boolean">boolean</option>
-            </select>
-            <input
-              id={`detail-property-${k}`}
-              data-testid={`detail-prop-${k}`}
-              aria-label={k}
-              value={String(v)}
-              onChange={(e) =>
-                onSetProperty(k, coerce(e.target.value, typeOf(v)))
-              }
-            />
-            <button
-              type="button"
-              className="board-property-remove"
-              aria-label={`Remove ${k}`}
-              data-testid={`detail-prop-remove-${k}`}
-              onClick={() => onRemoveProperty(k)}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-        <div className="board-property-add">
+      <div className="board-panel-heading">
+        <h3>Properties</h3>
+        <span
+          data-testid="detail-save-state"
+          className="board-save-state"
+          data-state={saveState}
+          aria-live="polite"
+        >
+          {saveState === 'saving'
+            ? 'Saving…'
+            : saveState === 'saved'
+              ? 'Saved'
+              : saveState === 'error'
+                ? 'Not saved'
+                : ''}
+        </span>
+      </div>
+      {Object.entries(image.properties).map(([k, v]) => (
+        <div key={k} className="board-property-row">
+          <label
+            className="board-property-name"
+            htmlFor={`detail-property-${k}`}
+          >
+            {k}
+          </label>
           <input
-            data-testid="detail-new-key"
-            aria-label="New property name"
-            placeholder="new key"
-            value={newKey}
-            onChange={(e) => setNewKey(e.target.value)}
+            id={`detail-property-${k}`}
+            data-testid={`detail-prop-${k}`}
+            aria-label={k}
+            value={String(v)}
+            onChange={(e) =>
+              onSetProperty(k, coerce(e.target.value, typeOf(v)))
+            }
           />
+          <select
+            value={typeOf(v)}
+            aria-label={`Type of ${k}`}
+            onChange={(e) =>
+              onSetProperty(
+                k,
+                coerce(
+                  String(v),
+                  e.target.value as 'text' | 'number' | 'boolean',
+                ),
+              )
+            }
+          >
+            <option value="text">Text</option>
+            <option value="number">Number</option>
+            <option value="boolean">Yes/no</option>
+          </select>
           <button
             type="button"
-            data-testid="detail-add-property"
-            onClick={() => {
-              if (!newKey) return;
-              onSetProperty(newKey, '');
-              setNewKey('');
-            }}
+            className="board-property-remove"
+            aria-label={`Remove ${k}`}
+            title={`Remove ${k}`}
+            data-testid={`detail-prop-remove-${k}`}
+            onClick={() => onRemoveProperty(k)}
           >
-            Add
+            <Icon name="close" size={14} />
           </button>
         </div>
-      </div>
+      ))}
+      <form
+        className="board-property-add"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const key = newKey.trim();
+          if (!key) return;
+          onSetProperty(key, '');
+          setNewKey('');
+        }}
+      >
+        <input
+          data-testid="detail-new-key"
+          aria-label="New property name"
+          placeholder="Add a property…"
+          value={newKey}
+          onChange={(e) => setNewKey(e.target.value)}
+        />
+        <button
+          type="submit"
+          data-testid="detail-add-property"
+          disabled={!newKey.trim()}
+        >
+          Add
+        </button>
+      </form>
+
+      {!image.missing &&
+        (confirmingDelete ? (
+          <div className="board-inline-confirm" role="alert">
+            <span>Delete this image from the board?</span>
+            <button
+              type="button"
+              className="board-danger-button"
+              data-testid="detail-delete-confirm"
+              onClick={onDelete}
+            >
+              Delete
+            </button>
+            <button type="button" onClick={() => setConfirmingDelete(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            data-testid="detail-delete"
+            className="board-danger-link"
+            onClick={() => setConfirmingDelete(true)}
+          >
+            Delete image
+          </button>
+        ))}
     </section>
   );
 }

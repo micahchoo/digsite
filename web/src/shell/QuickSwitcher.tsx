@@ -7,6 +7,7 @@
 // control").
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { Icon, type IconName } from '../components/Icon.tsx';
 import type {
   BoardSummaryWithStats,
   SheetSummaryWithStats,
@@ -22,10 +23,10 @@ export interface SwitcherEntry {
   to: string;
 }
 
-const GLYPH: Record<SwitcherEntry['kind'], string> = {
-  group: '○',
-  board: '#',
-  sheet: '↳',
+const GLYPH: Record<SwitcherEntry['kind'], IconName> = {
+  group: 'group',
+  board: 'hash',
+  sheet: 'thread',
 };
 const GROUP_LABEL: Record<SwitcherEntry['kind'], string> = {
   group: 'Groups',
@@ -230,9 +231,11 @@ export function QuickSwitcher({
                       onMouseEnter={() => setHighlight(idx)}
                       onClick={() => navigateTo(entry)}
                     >
-                      <span aria-hidden="true" className="shell-switcher-glyph">
-                        {GLYPH[entry.kind]}
-                      </span>
+                      <Icon
+                        name={GLYPH[entry.kind]}
+                        size={16}
+                        className="shell-switcher-glyph"
+                      />
                       <span>{entry.label}</span>
                       {entry.sub && (
                         <span className="shell-switcher-sub muted">

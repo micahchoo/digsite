@@ -77,7 +77,7 @@ async function main() {
   // exercises the SAME `pageError` wiring in Group.tsx via a real denial
   // instead: `outsider@example.test` is signed in but not a member of the
   // group at all (web/stub/server.ts's `GROUP_ROLE` has no entry for it).
-  await page.getByRole('button', { name: 'sign out' }).click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
   await page.waitForURL(/\/$/);
   await page.getByTestId('email').fill('outsider@example.test');
   await page.getByTestId('password').fill('password1');
@@ -102,7 +102,7 @@ async function main() {
   );
 
   // Back to `owner` for the rest of the script.
-  await page.getByRole('button', { name: 'sign out' }).click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
   await page.waitForURL(/\/$/);
   await page.getByTestId('email').fill('owner@example.test');
   await page.getByTestId('password').fill('password1');

@@ -3,6 +3,20 @@ import { createCanvas } from '@napi-rs/canvas';
 import { ImageCache } from '../src/sheet/canvas/native/images.ts';
 import { renderFrame } from '../src/sheet/canvas/native/render.ts';
 import type { SceneElement } from '../src/sheet/canvas/types.ts';
+import type { Palette } from '../src/theme/palette.ts';
+
+// A dark edge on a white canvas, so dimming reads as lighter pixels.
+const PALETTE: Palette = {
+  canvas: '#ffffff',
+  accent: '#9a5a00',
+  textPrimary: '#1d1c1a',
+  line: '#dfdcd6',
+  lineStrong: '#c7c3bc',
+  claimOwn: '#1d7f5b',
+  claimEdge: '#2566a8',
+  textSecondary: '#555555',
+  placeholder: '#d6d3cd',
+};
 
 const edge: SceneElement = {
   id: 'edge-1',
@@ -45,6 +59,7 @@ function pixelForFilter(dimRelations: string | null) {
     selectedIds: new Set(),
     images: new ImageCache(),
     dimRelations,
+    palette: PALETTE,
   });
   return [...ctx.getImageData(50, 50, 1, 1).data];
 }

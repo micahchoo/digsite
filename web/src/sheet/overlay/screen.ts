@@ -20,6 +20,7 @@ import {
   type ForeignEdge,
   type ForeignRegion,
   type Fraction,
+  clipBetween,
   dataOf,
   fromFraction,
 } from '@digsite/shared';
@@ -310,6 +311,12 @@ export type ForeignShape =
       danglingEnd: boolean;
     };
 
+/** A foreign shape's id, from its claim row's id: what `tools.select`
+ * takes to select another sheet's claim. One spelling, used everywhere. */
+export function foreignShapeId(kind: 'region' | 'edge', rowId: string): string {
+  return `${kind}-${rowId}`;
+}
+
 /**
  * The pure heart of `tools.ts#copyForeign`: given a foreign row's fraction
  * and the image's rect NOW (never a rect cached from an earlier poll or an
@@ -349,16 +356,16 @@ export function foreignShapes(
     if (data?.kind === 'image') images.set(data.imageId, rectOf(el));
   }
 
-  const regionCenterByClaim = new Map<string, Point>();
+  const regionRectByClaim = new Map<string, Rect>();
   const shapes: ForeignShape[] = [];
 
   for (const r of rows.regions) {
     const image = images.get(r.imageId);
     if (!image) continue;
     const rect = fromFraction(r, image);
-    regionCenterByClaim.set(`${r.sheetId}:${r.sourceId}`, centerOf(rect));
+    regionRectByClaim.set(`${r.sheetId}:${r.sourceId}`, rect);
     shapes.push({
-      id: `region-${r.id}`,
+      id: foreignShapeId('region', r.id),
       kind: 'region',
       rect,
       label: r.label,
@@ -370,29 +377,33 @@ export function foreignShapes(
   function endpoint(
     edgeSheetId: string,
     end: EdgeEnd,
-  ): { point: Point; dangling: boolean } | null {
+  ): { point: Point; rect: Rect; dangling: boolean } | null {
     const image = images.get(end.imageId);
     if (!image) return null; // the image itself is gone from THIS scene: omitted, not an error
     if (end.regionSourceId) {
-      const claimed = regionCenterByClaim.get(
+      const claimed = regionRectByClaim.get(
         `${edgeSheetId}:${end.regionSourceId}`,
       );
-      if (claimed) return { point: claimed, dangling: false };
+      if (claimed)
+        return { point: centerOf(claimed), rect: claimed, dangling: false };
       // The region end vanished (or a poll race) — draw to the image's
       // rect instead, marked dangling for Overlay.tsx's hollow marker.
-      return { point: centerOf(image), dangling: true };
+      return { point: centerOf(image), rect: image, dangling: true };
     }
-    return { point: centerOf(image), dangling: false };
+    return { point: centerOf(image), rect: image, dangling: false };
   }
 
   for (const e of rows.edges) {
     const from = endpoint(e.sheetId, e.source);
     const to = endpoint(e.sheetId, e.target);
     if (!from || !to) continue; // an end's image is gone: tolerated by omission, not an error
+    // Border to border, never across its own ends: a line over an image it
+    // joins took the click meant for that image (@digsite/shared#clipBetween).
+    const drawn = clipBetween(from.point, to.point, from.rect, to.rect);
     shapes.push({
-      id: `edge-${e.id}`,
+      id: foreignShapeId('edge', e.id),
       kind: 'edge',
-      line: [from.point, to.point],
+      line: [drawn.start, drawn.end],
       danglingStart: from.dangling,
       danglingEnd: to.dangling,
       label: e.relation,

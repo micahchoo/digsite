@@ -5,9 +5,9 @@
    edge hex values into scene elements because canvas drawing cannot read a
    page's CSS variable. */
 :root {
-  --region-stroke: #1971c2;
-  --edge-stroke: #2f9e44;
-  --foreign-stroke: #868e96;
+  --region-stroke: var(--claim-own);
+  --edge-stroke: var(--claim-edge);
+  --foreign-stroke: var(--claim-foreign);
   --sheet-label-bg: var(--surface-raised);
   --sheet-label-border: var(--line);
 }
@@ -77,9 +77,119 @@
   }
 }
 
-.sheet-toolbar-hint {
+/* -- mode bar and keyboard panel (Toolbar.tsx, ShortcutsPanel.tsx) ---- */
+
+.sheet-mode-bar {
+  position: absolute;
+  z-index: 5;
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 54px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* Centred from left: 50%, a box shrinks to the half it starts in. */
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-s);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  animation: sheet-pop 140ms ease-out;
+}
+.sheet-mode-bar output {
+  text-wrap: balance;
+}
+.sheet-mode-bar button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding-inline: 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+}
+.sheet-mode-bar kbd,
+.sheet-shortcuts kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-s);
+  background: var(--surface-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.sheet-shortcuts {
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 64px));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-l);
+  color: var(--text-primary);
+}
+.sheet-shortcuts::backdrop {
+  background: color-mix(in srgb, var(--surface-app) 55%, transparent);
+}
+.sheet-shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.sheet-shortcuts-head h2 {
+  margin: 0;
+  font-size: var(--text-md);
+}
+.sheet-shortcuts-head button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: none;
   color: var(--text-secondary);
-  margin-left: 6px;
+}
+.sheet-shortcuts-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: var(--space-4) var(--space-6);
+  padding: var(--space-4);
+}
+.sheet-shortcuts h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sheet-shortcuts dl {
+  margin: 0;
+}
+.sheet-shortcuts-row {
+  display: grid;
+  grid-template-columns: minmax(7.5em, max-content) 1fr;
+  gap: var(--space-2);
+  padding-block: 3px;
+  font-size: var(--text-sm);
+}
+.sheet-shortcuts-row dt {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.sheet-shortcuts-row dd {
+  margin: 0;
+  color: var(--text-secondary);
 }
 
 .sheet-mobile-inspector-toggle,
@@ -106,7 +216,7 @@
 }
 
 .sheet-region-draft {
-  fill: rgba(25, 113, 194, 0.15);
+  fill: color-mix(in srgb, var(--region-stroke) 15%, transparent);
   stroke: var(--region-stroke);
   stroke-width: 1.5;
 }
@@ -119,8 +229,87 @@
 
 .sheet-label-input {
   position: absolute;
-  font-size: 12px;
   z-index: 6;
+}
+.sheet-label-input > input {
+  min-height: 32px;
+  box-shadow: var(--shadow-m);
+}
+
+/* -- connect in one gesture (ConnectLayer.tsx, RelationPicker.tsx) ------- */
+
+.sheet-connect-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.sheet-connect-handle {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  translate: -50% -50%;
+  border: 2px solid var(--surface-raised);
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  box-shadow: var(--shadow-m);
+  cursor: crosshair;
+  pointer-events: auto;
+  touch-action: none;
+  transition: scale 120ms ease-out;
+}
+.sheet-connect-handle:hover:not(:disabled) {
+  border-color: var(--surface-raised);
+  background: var(--accent-hover);
+  scale: 1.12;
+}
+.sheet-connect-target {
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.sheet-relation-picker {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-l);
+  animation: sheet-pop 140ms ease-out;
+}
+.sheet-relation-picker .term-input {
+  display: flex;
+}
+.sheet-relation-picker-row {
+  display: flex;
+}
+.sheet-relation-picker .segmented {
+  flex: 1;
+}
+.sheet-relation-picker .segmented > label {
+  flex: 1;
+}
+@keyframes sheet-pop {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet-relation-picker,
+  .sheet-mode-bar {
+    animation: none;
+  }
 }
 
 /* -- foreign overlay + presence (overlay/Overlay.tsx) ------------------ */
@@ -262,49 +451,289 @@
   font-weight: 700;
 }
 
-/* -- inspector (Inspector.tsx) ------------------------------------------ */
+/* -- inspector (Inspector.tsx): one view per selection, sections divided by
+   one rule, nothing is a card. -------------------------------------------- */
 
-.sheet-row-between {
+.sheet-side > [data-testid="inspector"] {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3) var(--space-3) var(--space-4);
+}
+.claim-empty {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.claim-empty p {
+  margin: 0 0 var(--space-2);
+  text-wrap: pretty;
+}
+.claim-empty kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-s);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+.claim {
   display: flex;
+  flex-direction: column;
+}
+.claim-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 32px;
+  margin-bottom: var(--space-2);
+}
+.claim-heading h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 650;
+}
+.claim-from {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+.claim-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+}
+.claim-section h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.claim-section .term-input {
+  display: flex;
+}
+.claim-section--row {
+  flex-direction: row;
+  align-items: center;
   justify-content: space-between;
 }
-
-.sheet-field {
-  margin-top: 6px;
+.claim-readonly {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
 }
-
-.sheet-field-lg {
-  margin-top: 10px;
+.claim-readonly--note {
+  white-space: pre-wrap;
+  text-wrap: pretty;
 }
-
-.sheet-prop-row {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  margin-top: 4px;
+.claim-note {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 64px;
+  padding: var(--space-2);
+  resize: vertical;
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.45;
 }
-
-.sheet-prop-key {
-  width: 70px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.claim-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
 }
-
-.sheet-prop-value {
-  width: 70px;
-}
-
-.sheet-prop-add {
-  display: flex;
-  gap: 4px;
-  margin-top: 6px;
-}
-
-.sheet-foreign-box {
-  margin-top: 10px;
-  padding: 6px;
+.claim-icon-button:hover:not(:disabled) {
+  border-color: transparent;
   background: var(--surface-sunken);
-  border: 1px dashed var(--line-strong);
+  color: var(--text-primary);
+}
+.claim-icon-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+/* evidence: the two ends side by side, what the connection rests on */
+.claim-evidence {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-l);
+  background: var(--surface-sunken);
+}
+.claim-evidence-arrow {
+  color: var(--claim-edge);
+}
+.claim-crop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+.claim-crop-image {
+  border-radius: var(--radius-m);
+  background-color: var(--placeholder);
+  background-repeat: no-repeat;
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-s);
+}
+.claim-crop figcaption {
+  max-width: 110px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* what other sheets say about the same pair */
+.claim-pair-summary {
+  display: inline-flex;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+.claim-pair-summary [data-agreement="agree"] {
+  color: var(--claim-own);
+}
+.claim-pair-summary [data-agreement="disagree"] {
+  color: var(--danger);
+}
+.claim-pair-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 calc(-1 * var(--space-2));
+  padding: 0;
+  list-style: none;
+}
+.claim-pair-item {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px var(--space-2);
+  width: 100%;
+  min-height: 0;
+  padding: 6px var(--space-2);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+.claim-pair-item:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-sunken);
+}
+.claim-pair-mark {
+  grid-row: span 2;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.claim-pair-item[data-agreement="agree"] .claim-pair-mark {
+  background: var(--claim-own);
+}
+.claim-pair-item[data-agreement="disagree"] .claim-pair-mark {
+  background: var(--danger);
+}
+.claim-pair-relation {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.claim-pair-meta {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+/* properties: name above value, like the board's image record */
+.claim-property {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  grid-template-areas:
+    "name remove"
+    "value value";
+  align-items: center;
+  gap: 2px var(--space-1);
+}
+.claim-property label {
+  grid-area: name;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.claim-property input {
+  grid-area: value;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.claim-property .claim-icon-button {
+  grid-area: remove;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+}
+.claim-property-add {
+  display: flex;
+  gap: 6px;
+}
+.claim-property-add input {
+  flex: 1;
+  min-width: 0;
+}
+.claim-property-add button {
+  box-shadow: none;
+}
+.claim-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.claim-actions button {
+  box-shadow: none;
+}
+.claim-link-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  text-decoration: none;
+}
+.claim-link-button:hover {
+  background: var(--surface-sunken);
 }
 
 /* -- a11y utility -------------------------------------------------------- */
@@ -388,6 +817,33 @@
   background: var(--surface-raised);
   box-shadow: var(--shadow-m);
   font-size: var(--text-sm);
+}
+
+/* Docked: when the sheet has the width, the details are a column beside
+   the canvas rather than a card over it. A floating card hid the pictures
+   the person was asking about (the right third of every sheet, found in
+   the 2026-09-23 claims walk), and "fit" framed pictures under it. The
+   container query measures the sheet, not the window, because the shell's
+   own columns take a varying share of the window. */
+.sheet-page {
+  container-type: inline-size;
+  container-name: sheet;
+}
+
+@container sheet (min-width: 900px) {
+  .sheet-side {
+    position: relative;
+    top: 0;
+    right: 0;
+    order: 2;
+    flex: 0 0 340px;
+    width: 340px;
+    max-height: none;
+    height: 100%;
+    border-width: 0 0 0 1px;
+    border-radius: 0;
+    box-shadow: none;
+  }
 }
 
 .sheet-header {
@@ -486,8 +942,7 @@
   font-size: var(--text-xs);
 }
 
-.sheet-dangling-title,
-.sheet-field-lg > div:first-child {
+.sheet-dangling-title {
   color: var(--text-faint);
   font-size: var(--text-2xs);
   font-weight: 650;
@@ -501,93 +956,6 @@
   padding-inline: 8px;
   color: var(--danger);
   font-size: var(--text-xs);
-}
-
-.sheet-side > [data-testid="inspector"] {
-  min-height: 0;
-  overflow: auto;
-  padding: 10px 12px 12px;
-}
-
-.sheet-side > [data-testid="inspector"].muted {
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-.sheet-side [data-testid="inspector-delete"] {
-  min-height: 29px;
-  padding-inline: 8px;
-  color: var(--danger);
-  font-size: var(--text-xs);
-}
-
-.sheet-field,
-.sheet-field-lg {
-  margin-top: 12px;
-}
-
-.sheet-field-lg {
-  padding-top: 11px;
-  border-top: 1px solid var(--line);
-}
-
-.sheet-field-lg > div:first-child {
-  margin-bottom: 7px;
-}
-
-.sheet-prop-row {
-  display: grid;
-  grid-template-columns: minmax(48px, 0.65fr) minmax(0, 1.35fr) auto auto;
-  gap: 5px;
-  align-items: center;
-  margin-top: 5px;
-}
-
-.sheet-prop-key {
-  min-width: 0;
-  width: auto;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-.sheet-prop-value {
-  min-width: 0;
-  width: 100%;
-}
-
-.sheet-prop-row select,
-.sheet-prop-row input,
-.sheet-prop-add input {
-  min-width: 0;
-  width: 100%;
-}
-
-.sheet-prop-row button,
-.sheet-prop-add button {
-  min-height: 31px;
-  padding-inline: 8px;
-  font-size: var(--text-xs);
-}
-
-.sheet-prop-add {
-  gap: 6px;
-  margin-top: 7px;
-}
-.sheet-prop-add input {
-  flex: 1 1 100px;
-}
-
-.sheet-foreign-box {
-  margin-top: 8px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
-  background: var(--surface-app);
-}
-
-.sheet-foreign-box a {
-  color: var(--accent);
-  font-weight: 600;
 }
 
 @media (max-width: 767px) {
@@ -682,5 +1050,127 @@
   .sheet-toolbar-btn {
     flex: 0 0 36px;
     padding-inline: 0;
+  }
+}
+
+/* -- reach (overlay/Reach.tsx): where this sheet's images lead elsewhere -- */
+
+.sheet-reach {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.sheet-reach-badge {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 8px 0 6px;
+  translate: -100% 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-s);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+.sheet-reach-badge:hover:not(:disabled),
+.sheet-reach-badge[aria-expanded="true"] {
+  border-color: var(--claim-foreign);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+.sheet-reach-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.sheet-reach-lines line {
+  stroke: var(--claim-foreign);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+.sheet-reach-fan {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 260px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: auto;
+  animation: sheet-pop 140ms ease-out;
+}
+.sheet-reach-card {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: 64px;
+  padding: 8px;
+  border: 1px dashed var(--claim-foreign);
+  border-radius: var(--radius-m);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-m);
+  text-align: left;
+}
+.sheet-reach-card:hover:not(:disabled) {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--surface-raised);
+}
+.sheet-reach-card img {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-s);
+  object-fit: cover;
+  background: var(--placeholder);
+}
+.sheet-reach-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sheet-reach-relation {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-reach-meta {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-reach-bring {
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sheet-reach-more {
+  padding-left: 8px;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet-reach-fan {
+    animation: none;
   }
 }

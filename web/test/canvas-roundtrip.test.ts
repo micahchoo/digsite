@@ -259,6 +259,8 @@ describe('native canvas persistence roundtrip', () => {
         direction: 'forward',
         relation: 'near',
         properties: { confidence: 'high' },
+        confidence: null,
+        note: '',
       },
     ]);
     expect(reloaded.find((el) => el.id === 'region-1')).toMatchObject({

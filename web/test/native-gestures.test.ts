@@ -9,6 +9,7 @@ import {
   type DragInput,
   type Mode,
   type PressInput,
+  cursorFor,
   dragBecomes,
   movedEnough,
   pressIntent,
@@ -113,5 +114,33 @@ describe('dragBecomes', () => {
         }
       }
     }
+  });
+});
+
+describe('cursorFor: the pointer says what a press would do', () => {
+  const at = (over: Partial<Parameters<typeof cursorFor>[0]> = {}) =>
+    cursorFor({
+      mode: 'select',
+      forcePan: false,
+      dragging: null,
+      target: 'empty',
+      grip: null,
+      ...over,
+    });
+  test('over a picture or region it moves; over a line it points', () => {
+    expect(at({ target: 'image' })).toBe('move');
+    expect(at({ target: 'region' })).toBe('move');
+    expect(at({ target: 'edge' })).toBe('pointer');
+    expect(at()).toBe('default');
+  });
+  test('a grip resizes along its own axis', () => {
+    expect(at({ target: 'region', grip: 'e' })).toBe('ew-resize');
+    expect(at({ grip: 'ne' })).toBe('nesw-resize');
+  });
+  test('panning grabs, and a held drag grabs harder', () => {
+    expect(at({ mode: 'pan', target: 'image' })).toBe('grab');
+    expect(at({ forcePan: true })).toBe('grab');
+    expect(at({ dragging: 'pan' })).toBe('grabbing');
+    expect(at({ dragging: 'marquee' })).toBe('crosshair');
   });
 });

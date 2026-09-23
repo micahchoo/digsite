@@ -226,9 +226,10 @@ async function main() {
     breadcrumbText.includes('First pass'),
     `breadcrumb missing the sheet name: "${breadcrumbText}"`,
   );
+  const separators = await page.getByTestId('shell-breadcrumb-sep').count();
   assert(
-    breadcrumbText.includes('›'),
-    `breadcrumb missing the board -> sheet separator: "${breadcrumbText}"`,
+    separators === 2,
+    `breadcrumb should read group › board › sheet, found ${separators} separators`,
   );
   console.log(`PASS: sheet breadcrumb reads "${breadcrumbText.trim()}"`);
 

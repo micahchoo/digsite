@@ -71,6 +71,9 @@ export interface Tools {
   getSelected: () => Selected | null;
   setProperty: (id: string, key: string, value: PropertyValue) => void;
   removeProperty: (id: string, key: string) => void;
+  /** Names every region (label) and edge (relation) in `ids` at once — one
+   * history entry, so one undo takes it back. */
+  setTermOn: (ids: readonly string[], term: string) => void;
   syncStatus: () => SyncStatus;
   // -- Toolbar + drawing (docs/phases/2-sheet.md section 1) -----------------
   setTool: (tool: Tool) => void;
@@ -97,7 +100,8 @@ export interface Tools {
   // -- rename (section 6) ---------------------------------------------------
   rename: (name: string) => Promise<void>;
   // -- view: the toolbar's "fit", so a test can bring a shape on screen ------
-  zoomToFit: () => void;
+  /** Fits every element, or only `ids` when given. */
+  zoomToFit: (ids?: string[]) => void;
 }
 
 export interface ToolsDeps {
@@ -340,6 +344,16 @@ export function createTools(deps: ToolsDeps): Tools {
       return;
     }
 
+    // First-class edge fields (CONTEXT.md "Confidence", "Note"), not
+    // properties. An empty value removes the field.
+    if (data.kind === 'edge' && (key === 'confidence' || key === 'note')) {
+      const next: Record<string, unknown> = { ...data };
+      if (value === '' || value === null) delete next[key];
+      else next[key] = value;
+      handle.apply([{ op: 'update', id, changes: { customData: next } }]);
+      return;
+    }
+
     if (
       (data.kind === 'region' && key === 'label') ||
       (data.kind === 'edge' && key === 'relation')
@@ -372,6 +386,35 @@ export function createTools(deps: ToolsDeps): Tools {
     handle.apply([
       { op: 'update', id, changes: { customData: { ...data, properties } } },
     ]);
+  }
+
+  function setTermOn(ids: readonly string[], term: string): void {
+    const handle = getHandle();
+    if (!handle) return;
+    const wanted = new Set(ids);
+    const ops: PatchOp[] = [];
+    for (const el of handle.elements()) {
+      if (el.isDeleted || !wanted.has(el.id)) continue;
+      const data = dataOf(el);
+      if (data?.kind !== 'region' && data?.kind !== 'edge') continue;
+      const key = data.kind === 'region' ? 'label' : 'relation';
+      ops.push({
+        op: 'update',
+        id: el.id,
+        changes: { customData: { ...data, [key]: term } },
+      });
+      const boundTextId = el.boundElements?.find((b) => b.type === 'text')?.id;
+      if (boundTextId) {
+        ops.push({
+          op: 'update',
+          id: boundTextId,
+          changes: {
+            text: data.kind === 'region' ? truncateLabel(term) : term,
+          },
+        });
+      }
+    }
+    if (ops.length) handle.apply(ops);
   }
 
   function removeProperty(id: string, key: string): void {
@@ -502,6 +545,7 @@ export function createTools(deps: ToolsDeps): Tools {
     getSelected,
     setProperty,
     removeProperty,
+    setTermOn,
     syncStatus,
     setTool,
     getTool,
@@ -510,7 +554,7 @@ export function createTools(deps: ToolsDeps): Tools {
     getDangling,
     removeDangling,
     rename,
-    zoomToFit: () => getHandle()?.zoomToFit(),
+    zoomToFit: (ids?: string[]) => getHandle()?.zoomToFit(ids),
   };
 }
 

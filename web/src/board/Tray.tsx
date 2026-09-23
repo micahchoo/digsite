@@ -8,6 +8,7 @@ import { SHEET_LIMIT } from '@digsite/shared';
 // §5.1's own "What a selection can become"); hover flashes the image's cell
 // on the map; click flies there; `×` removes just that one.
 import { useEffect, useRef, useState } from 'react';
+import { Icon } from '../components/Icon.tsx';
 import { type SheetSummaryWithStats, api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
 import type { SaveState } from './useSelection.ts';
@@ -127,7 +128,7 @@ export function Tray({
           data-testid="board-tray-collapse"
           onClick={() => setCollapsed((v) => !v)}
         >
-          {collapsed ? '▸' : '▾'}
+          <Icon name="chevronDown" size={16} data-collapsed={collapsed} />
         </button>
         <span data-testid="board-tray-count">
           {over
@@ -150,18 +151,22 @@ export function Tray({
         <span className="board-tray-spacer" />
         <button
           type="button"
+          className="board-quiet-button"
           data-testid="board-tray-invert"
+          title="Select every other image on the board"
           onClick={onInvert}
         >
           Invert
         </button>
         <button
           type="button"
+          className="board-icon-button board-icon-button--small"
           data-testid="board-tray-clear"
           aria-label="Clear selection"
+          title="Clear selection"
           onClick={onClear}
         >
-          ×
+          <Icon name="close" size={16} />
         </button>
       </div>
 
@@ -205,7 +210,7 @@ export function Tray({
                 title={img.name}
               >
                 {img.missing ? (
-                  <span className="board-tray-thumb-missing">(missing)</span>
+                  <span className="board-tray-thumb-missing">Missing</span>
                 ) : (
                   <img src={api.originalUrl(img.id)} alt="" />
                 )}
@@ -219,7 +224,7 @@ export function Tray({
                     onRemove(img.id);
                   }}
                 >
-                  ×
+                  <Icon name="close" size={12} strokeWidth={2} />
                 </button>
               </div>
             ))}
@@ -227,7 +232,10 @@ export function Tray({
 
           <div className="board-tray-actions">
             {naming ? (
-              <form className="row" onSubmit={(e) => void submitStartSheet(e)}>
+              <form
+                className="board-tray-name-form"
+                onSubmit={(e) => void submitStartSheet(e)}
+              >
                 <input
                   ref={nameInputRef}
                   data-testid="board-tray-sheet-name"
@@ -240,6 +248,7 @@ export function Tray({
                 />
                 <button
                   type="submit"
+                  className="board-primary-button"
                   data-testid="board-tray-sheet-create"
                   disabled={!sheetName.trim()}
                 >
@@ -252,6 +261,7 @@ export function Tray({
             ) : (
               <button
                 type="button"
+                className="board-primary-button"
                 data-testid="board-tray-start-sheet"
                 onClick={() => setNaming(true)}
               >
@@ -274,9 +284,9 @@ export function Tray({
                   data-testid="board-tray-add-picker"
                 >
                   {sheets.length === 0 && (
-                    <div className="muted" style={{ padding: 6 }}>
+                    <p className="board-tray-add-empty">
                       No sheets on this board yet.
-                    </div>
+                    </p>
                   )}
                   {sheets.map((s) => (
                     <button
@@ -289,33 +299,15 @@ export function Tray({
                         void onAddToSheet(s.id);
                       }}
                     >
-                      {s.name}{' '}
-                      <span className="muted">
-                        ({plural(s.imageCount, 'image')})
+                      <span>{s.name}</span>
+                      <span className="board-tray-add-count">
+                        {plural(s.imageCount, 'image')}
                       </span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              disabled
-              data-testid="board-tray-copy"
-              aria-disabled="true"
-              title="Copying images to another board is not available yet."
-            >
-              Copy to another board…
-            </button>
-            <button
-              type="button"
-              disabled
-              data-testid="board-tray-download"
-              aria-disabled="true"
-              title="Downloading selected originals is not available yet."
-            >
-              Download
-            </button>
           </div>
         </>
       )}

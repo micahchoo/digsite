@@ -84,7 +84,7 @@ async function main() {
   await page.waitForSelector('[data-testid="explore-panel"]');
   console.log('PASS: Explore panel opens from the detail panel');
 
-  await page.selectOption('[data-testid="explore-hops"]', '2');
+  await page.getByTestId('explore-hops-2').check();
   await page.click('[data-testid="explore-go"]');
   await page.waitForSelector('[data-testid="explore-result"]');
   const resultText = await page
@@ -133,7 +133,7 @@ async function main() {
     '[data-testid="selection-item"]:has(img[src*="/images/img-6/"])',
   );
   await page.waitForSelector('[data-testid="explore-panel"]');
-  await page.selectOption('[data-testid="explore-hops"]', '1');
+  await page.getByTestId('explore-hops-1').check();
 
   await page.click('[data-testid="explore-go"]');
   await page.waitForSelector('[data-testid="explore-selection-confirm"]');
@@ -181,7 +181,7 @@ async function main() {
 
   // Restore the full 3-image/2-edge result and selection so section 2 below
   // (unchanged from before this block existed) sees exactly what it expects.
-  await page.selectOption('[data-testid="explore-hops"]', '2');
+  await page.getByTestId('explore-hops-2').check();
   await page.click('[data-testid="explore-go"]');
   await page.waitForSelector('[data-testid="explore-selection-confirm"]');
   await page.click('[data-testid="explore-selection-replace"]');
@@ -239,7 +239,7 @@ async function main() {
   await page.waitForSelector('[data-testid="selection-item"]');
   await page.click('[data-testid="selection-item"]');
   await page.waitForSelector('[data-testid="explore-panel"]');
-  await page.selectOption('[data-testid="explore-hops"]', '2');
+  await page.getByTestId('explore-hops-2').check();
   await page.click('[data-testid="explore-go"]');
   await page.waitForSelector('[data-testid="explore-result"]');
   await page.check('[data-testid="explore-copy-connections"]');

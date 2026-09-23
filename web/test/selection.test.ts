@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test';
 import { SHEET_LIMIT } from '@digsite/shared';
 import {
   addRanks,
+  cellCorner,
   cellPolygon,
   rankRange,
   toggleRank,
@@ -73,5 +74,16 @@ describe('cellPolygon', () => {
   test('a rank in row 2 is offset by row * CELL', () => {
     const points = cellPolygon(16 * 2 + 3);
     expect(points[0]).toEqual([3 * 128, 2 * 128]);
+  });
+});
+
+describe('cellCorner', () => {
+  test("a triangle in the top-right corner of the rank's cell", () => {
+    // rank 17 is col 1, row 1: the cell spans x 128..256, y 128..256.
+    expect(cellCorner(17, 20)).toEqual([
+      [236, 128],
+      [256, 128],
+      [256, 148],
+    ]);
   });
 });

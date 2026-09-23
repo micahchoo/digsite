@@ -16,6 +16,7 @@ import {
   useImperativeHandle,
   useRef,
 } from 'react';
+import { usePalette } from '../../../theme/palette.ts';
 import type {
   CanvasHandle,
   CanvasProps,
@@ -36,6 +37,7 @@ import { type Point, type Rect, boundsOf, rectBetween } from './geometry.ts';
 import {
   type Mode,
   type Target,
+  cursorFor,
   dragBecomes,
   movedEnough,
   pressIntent,
@@ -50,6 +52,7 @@ import {
   type HandleId,
   type Hit,
   buildIndex,
+  gripsShown,
   hitAt,
   hitGrip,
   marqueeSelect,
@@ -110,7 +113,10 @@ function typing(): boolean {
 }
 
 export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
-  function NativeCanvas({ files, tool, onChange, dimRelations }, ref) {
+  function NativeCanvas(
+    { files, tool, onChange, dimRelations, captions },
+    ref,
+  ) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -148,6 +154,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
       return index;
     }, []);
 
+    const palette = usePalette();
     const draw = useCallback(() => {
       const ctx = ctxRef.current;
       if (!ctx) return;
@@ -167,8 +174,10 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         images: imagesRef.current,
         marquee,
         dimRelations,
+        captions,
+        palette,
       });
-    }, [dimRelations]);
+    }, [dimRelations, captions, palette]);
 
     const scheduleRender = useCallback(() => {
       if (rafRef.current !== null) return;
@@ -177,6 +186,11 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         draw();
       });
     }, [draw]);
+
+    // A new palette (theme change) or emphasis changes the frame, not the scene.
+    useEffect(() => {
+      scheduleRender();
+    }, [scheduleRender]);
 
     const emitChange = useCallback(() => {
       const change: SceneChange = {
@@ -263,7 +277,9 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         const forcePan = spaceHeldRef.current || e.button === 1;
         const regionRect = selectedRegionRect();
         const grip =
-          regionRect && !forcePan
+          regionRect &&
+          !forcePan &&
+          gripsShown(regionRect, viewportRef.current.zoom)
             ? hitGrip(
                 worldPt,
                 regionRect,
@@ -346,6 +362,44 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
       [selectedRegionRect],
     );
 
+    /** Says with the cursor what a press here would do. Set on the element,
+     * not through React, so a hover never re-renders. */
+    const showCursor = useCallback(
+      (worldPt: Point) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const mode: Mode = toolRef.current === 'pan' ? 'pan' : 'select';
+        const drag = dragRef.current;
+        let target: Target = 'empty';
+        let grip: string | null = null;
+        if (!drag && mode === 'select') {
+          const hit = hitAt(
+            worldPt,
+            elementsRef.current,
+            viewportRef.current.zoom,
+            spatialIndex(),
+          );
+          target = hit?.kind ?? 'empty';
+          const regionRect = selectedRegionRect();
+          if (regionRect && gripsShown(regionRect, viewportRef.current.zoom))
+            grip = hitGrip(
+              worldPt,
+              regionRect,
+              GRIP_REACH_PX / viewportRef.current.zoom,
+            );
+        }
+        const cursor = cursorFor({
+          mode,
+          forcePan: spaceHeldRef.current,
+          dragging: drag?.kind ?? null,
+          target,
+          grip: drag?.kind === 'resize' ? drag.handle : grip,
+        });
+        if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+      },
+      [selectedRegionRect, spatialIndex],
+    );
+
     const onPointerMove = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         const screenPt = canvasPoint(e.clientX, e.clientY);
@@ -353,10 +407,14 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
 
         if (!dragRef.current) {
           const pending = pendingRef.current;
-          if (!pending) return;
+          if (!pending) {
+            showCursor(worldPt);
+            return;
+          }
           if (!movedEnough(pending.screenStart, screenPt)) return;
           const mode: Mode = toolRef.current === 'pan' ? 'pan' : 'select';
           dragRef.current = beginDrag(pending, mode);
+          showCursor(worldPt);
         }
 
         const drag = dragRef.current;
@@ -399,7 +457,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           scheduleRender();
         }
       },
-      [beginDrag, canvasPoint, scheduleRender, emitChange],
+      [beginDrag, canvasPoint, scheduleRender, emitChange, showCursor],
     );
 
     const onPointerUp = useCallback(
@@ -409,6 +467,10 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         const pending = pendingRef.current;
         dragRef.current = null;
         pendingRef.current = null;
+        {
+          const p = canvasPoint(e.clientX, e.clientY);
+          showCursor(toWorld(viewportRef.current, p.x, p.y));
+        }
 
         if (drag?.kind === 'move' || drag?.kind === 'resize') {
           const { elements, entries } = finalizeDrag(
@@ -445,7 +507,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           );
         }
       },
-      [emitChange, scheduleRender, setSelection],
+      [canvasPoint, emitChange, scheduleRender, setSelection, showCursor],
     );
 
     const applyWheel = useCallback(
@@ -587,6 +649,16 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         wheel(input, point) {
           applyWheel(input, point);
         },
+        hitAt(client) {
+          const screen = canvasPoint(client.x, client.y);
+          const hit = hitAt(
+            toWorld(viewportRef.current, screen.x, screen.y),
+            elementsRef.current,
+            viewportRef.current.zoom,
+            spatialIndex(),
+          );
+          return hit ? { id: hit.id, kind: hit.kind } : null;
+        },
         zoomToFit(ids) {
           const wanted = ids && new Set(ids);
           const rects = elementsRef.current
@@ -641,7 +713,6 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
             display: 'block',
             width: '100%',
             height: '100%',
-            cursor: tool === 'pan' ? 'grab' : 'default',
             touchAction: 'none',
           }}
           onPointerDown={onPointerDown}

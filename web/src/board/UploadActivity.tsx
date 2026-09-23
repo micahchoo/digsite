@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from '../components/Icon.tsx';
 import {
   type UploadRow,
   type UploadSnapshot,
@@ -79,7 +80,7 @@ export function UploadActivity({
             data-testid="upload-close"
             onClick={() => dismissUploadActivity(boardId)}
           >
-            ×
+            <Icon name="close" size={16} />
           </button>
         )}
       </div>

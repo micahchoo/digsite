@@ -45,6 +45,9 @@ const SCRIPTS = [
   'scripts/smoke-threads.ts',
   // Slice 3 — sheet navigation, mobile details drawer, and relation emphasis.
   'scripts/smoke-sheet-surroundings.ts',
+  // CONTEXT.md "Making sense": vocabulary, one-gesture connect, evidence,
+  // agreement, reach, the keyboard loop and the board's Terms index.
+  'scripts/smoke-sense.ts',
 ];
 
 function log(msg: string): void {

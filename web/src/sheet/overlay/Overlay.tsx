@@ -4,8 +4,17 @@
 import { type Foreign, dataOf } from '@digsite/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SceneElement } from '../canvas/types.ts';
-import { relationOpacity } from '../connection-emphasis.ts';
+import {
+  type Focus,
+  connectionOpacity,
+  endImages,
+  focusOf,
+  inFocus,
+  relationOpacity,
+} from '../connection-emphasis.ts';
+import { regionChip, regionLabelOf, truncateLabel } from '../labels.ts';
 import type { PeerCursor } from '../presence.ts';
+import { edgePaths, midSegment } from '../routing.ts';
 import {
   type ConnectionLabelJob,
   type ContainerOffset,
@@ -28,7 +37,8 @@ interface Props {
   viewport: Viewport;
   offset: ContainerOffset;
   selectedId: string | null;
-  selectedOwnId: string | null;
+  /** Every selected own element: what the connections are dimmed around. */
+  selectedOwnIds: readonly string[];
   connectionRelation: string | null;
   onSelect: (id: string) => void;
   onSelectOwn: (id: string) => void;
@@ -40,7 +50,9 @@ interface EdgeLabel extends PlacedConnectionLabel {
   ignoreObstacleIds?: readonly string[];
   relation: string;
   foreign: boolean;
+  /** Dimmed because its relation is not the emphasised one. */
   dimmed: boolean;
+  opacity: number;
 }
 
 interface ForeignRegionLabel extends PlacedRegionLabel {
@@ -54,7 +66,7 @@ export function Overlay({
   viewport,
   offset,
   selectedId,
-  selectedOwnId,
+  selectedOwnIds,
   connectionRelation,
   onSelect,
   onSelectOwn,
@@ -66,6 +78,21 @@ export function Overlay({
     height: window.innerHeight,
   }));
   const shapes = useMemo(() => foreignShapes(rows, elements), [rows, elements]);
+  // What the connections are dimmed around: the own selection, or the one
+  // foreign claim selected and the two pictures it joins.
+  const focus = useMemo((): Focus | null => {
+    const own = focusOf(elements, selectedOwnIds);
+    if (own) return own;
+    const shape = selectedId
+      ? shapes.find((candidate) => candidate.id === selectedId)
+      : undefined;
+    if (!shape) return null;
+    const images =
+      shape.kind === 'edge'
+        ? [shape.row.source.imageId, shape.row.target.imageId]
+        : [shape.row.imageId];
+    return { ids: new Set([shape.id]), images: new Set(images) };
+  }, [elements, selectedOwnIds, selectedId, shapes]);
   const measureLabel = useMemo(() => {
     const ctx = document.createElement('canvas').getContext('2d');
     if (ctx) ctx.font = '11px system-ui, sans-serif';
@@ -90,7 +117,9 @@ export function Overlay({
       relation: string;
       foreign: boolean;
       dimmed: boolean;
+      opacity: number;
     })[] = [];
+    const paths = edgePaths(elements, viewport.zoom);
     const byId = new Map(elements.map((element) => [element.id, element]));
     const endpointImageId = (elementId: string | undefined): string | null => {
       if (!elementId) return null;
@@ -105,23 +134,19 @@ export function Overlay({
       if (element.isDeleted) continue;
       const data = dataOf(element);
       if (data?.kind !== 'edge' || !data.relation) continue;
-      const first = element.points[0] ?? [0, 0];
-      const last = element.points.at(-1) ?? first;
+      const path = paths.get(element.id);
+      if (!path) continue;
+      // On the segment half way along the path the canvas drew.
+      const [from, to] = midSegment(path);
       const relation = data.relation;
+      const focused = inFocus(focus, element.id, endImages(element, byId));
+      const opacity = connectionOpacity(relation, connectionRelation, focused);
       jobs.push({
         id: `own-${element.id}`,
         label: relation,
         line: [
-          sceneToScreen(
-            { x: element.x + first[0], y: element.y + first[1] },
-            viewport,
-            offset,
-          ),
-          sceneToScreen(
-            { x: element.x + last[0], y: element.y + last[1] },
-            viewport,
-            offset,
-          ),
+          sceneToScreen(from, viewport, offset),
+          sceneToScreen(to, viewport, offset),
         ],
         relation,
         foreign: false,
@@ -130,13 +155,14 @@ export function Overlay({
           endpointImageId(element.endBinding?.elementId),
         ].filter((imageId): imageId is string => imageId !== null),
         dimmed: relationOpacity(relation, connectionRelation) < 1,
+        opacity,
         priority:
-          (relationOpacity(relation, connectionRelation) === 1 ? 10 : 0) +
-          (selectedOwnId === element.id ? 100 : 0),
+          (opacity === 1 ? 10 : 0) + (focus?.ids.has(element.id) ? 100 : 0),
       });
     }
     for (const shape of shapes) {
       if (shape.kind !== 'edge' || !shape.label) continue;
+      const opacity = foreignEdgeOpacity(shape, connectionRelation, focus);
       jobs.push({
         id: shape.id,
         label: shape.label,
@@ -148,10 +174,9 @@ export function Overlay({
         foreign: true,
         ignoreObstacleIds: [shape.row.source.imageId, shape.row.target.imageId],
         dimmed: relationOpacity(shape.row.relation, connectionRelation) < 1,
+        opacity,
         priority:
-          (relationOpacity(shape.row.relation, connectionRelation) === 1
-            ? 10
-            : 0) + (selectedId === shape.id ? 100 : 0),
+          (opacity === 1 ? 10 : 0) + (selectedId === shape.id ? 100 : 0),
       });
     }
     const obstacles: LabelObstacle[] = elements.flatMap((element) => {
@@ -191,10 +216,10 @@ export function Overlay({
   }, [
     connectionRelation,
     elements,
+    focus,
     measureLabel,
     offset,
     selectedId,
-    selectedOwnId,
     shapes,
     size,
     viewport,
@@ -213,14 +238,12 @@ export function Overlay({
       ];
     });
     const byId = new Map(elements.map((element) => [element.id, element]));
+    // The chip render.ts draws above each own region's corner.
     const ownLabelObstacles: Rect[] = elements.flatMap((element) => {
       if (element.isDeleted) return [];
       const data = dataOf(element);
       if (data?.kind !== 'region') return [];
-      const textId = element.boundElements?.find(
-        (item) => item.type === 'text',
-      )?.id;
-      const label = (textId ? byId.get(textId)?.text : null) ?? '';
+      const label = regionLabelOf(element, byId);
       if (!label) return [];
       const rect = rectToScreen(
         {
@@ -232,14 +255,7 @@ export function Overlay({
         viewport,
         offset,
       );
-      return [
-        {
-          x: rect.x + 4,
-          y: rect.y + 3,
-          width: Math.min(measureLabel(label), Math.max(0, rect.width - 8)),
-          height: 14,
-        },
-      ];
+      return [regionChip(rect, measureLabel(truncateLabel(label)))];
     });
     const edgeLabelObstacles: Rect[] = labels.map(
       ({ x, y, width, height }) => ({
@@ -325,6 +341,8 @@ export function Overlay({
         const b = sceneToScreen(shape.line[1], viewport, offset);
         const dimmed =
           relationOpacity(shape.row.relation, connectionRelation) < 1;
+        const opacity =
+          0.7 * foreignEdgeOpacity(shape, connectionRelation, focus);
         return (
           <g key={shape.id}>
             <line
@@ -339,7 +357,7 @@ export function Overlay({
               stroke={stroke}
               strokeWidth={strokeWidth}
               strokeDasharray="6 4"
-              opacity={dimmed ? 0.12 : 0.7}
+              opacity={opacity}
               className="sheet-overlay-hit"
               onPointerDown={handlePointerDown}
             />
@@ -422,7 +440,6 @@ export function Overlay({
           data-connection-id={label.id}
           data-connection-source={label.foreign ? 'foreign' : 'own'}
           data-relation-dimmed={label.dimmed || undefined}
-          opacity={label.dimmed ? 0.12 : 1}
           pointerEvents="all"
           className="sheet-overlay-static"
           onPointerDown={(event) => {
@@ -459,7 +476,7 @@ export function Overlay({
                   label.foreign ? 'var(--foreign-stroke)' : 'var(--edge-stroke)'
                 }
                 strokeWidth={1}
-                opacity={label.dimmed ? 0.12 : 0.45}
+                opacity={label.opacity * 0.45}
               />
             ) : null;
           })()}
@@ -471,6 +488,7 @@ export function Overlay({
             rx={4}
             fill="var(--sheet-label-bg, #fff)"
             stroke="var(--sheet-label-border, #d0d7de)"
+            strokeOpacity={label.opacity}
           />
           <text
             x={label.x + label.width / 2}
@@ -481,6 +499,9 @@ export function Overlay({
             fill={
               label.foreign ? 'var(--foreign-stroke)' : 'var(--edge-stroke)'
             }
+            // A dimmed label fades its words, never its background: a
+            // see-through chip lets the line strike through the text.
+            fillOpacity={label.opacity}
             textLength={Math.min(label.width - 10, label.textWidth)}
             lengthAdjust="spacingAndGlyphs"
           >
@@ -538,5 +559,29 @@ export function Overlay({
         );
       })}
     </svg>
+  );
+}
+
+/** A foreign connection dims the same way an own one does, around the
+ * pictures it joins. */
+function foreignEdgeOpacity(
+  shape: {
+    id: string;
+    row: {
+      relation: string;
+      source: { imageId: string };
+      target: { imageId: string };
+    };
+  },
+  emphasisedRelation: string | null,
+  focus: Focus | null,
+): number {
+  return connectionOpacity(
+    shape.row.relation,
+    emphasisedRelation,
+    inFocus(focus, shape.id, [
+      shape.row.source.imageId,
+      shape.row.target.imageId,
+    ]),
   );
 }

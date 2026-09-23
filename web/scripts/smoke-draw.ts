@@ -223,11 +223,11 @@ async function main() {
   );
   console.log('PASS: edge connected by two clicks, endArrowhead === "arrow"');
 
-  // -- direction radio (the inspector's <select>) flips the arrowheads --------
+  // -- the inspector's direction radio group flips the arrowheads ------------
   await setTool('select');
   await page.evaluate((id: string) => window.__digsite.select(id), e67.id);
   await page.waitForSelector('[data-testid="inspector-direction"]');
-  await page.selectOption('[data-testid="inspector-direction"]', 'both');
+  await page.getByTestId('inspector-direction-both').check();
   await page.waitForTimeout(150);
   const flipped = await page.evaluate(
     (id: string) =>

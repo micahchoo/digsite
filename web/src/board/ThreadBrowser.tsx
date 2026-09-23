@@ -5,6 +5,7 @@ import { api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
 import './threads.css';
+import { Icon } from '../components/Icon.tsx';
 
 export function ThreadBrowser({
   groupId,
@@ -102,7 +103,7 @@ export function ThreadBrowser({
             aria-label="Close sheet browser"
             onClick={() => setOpen(false)}
           >
-            ×
+            <Icon name="close" size={16} />
           </button>
         </header>
         <div className="thread-browser-filters">

@@ -2,15 +2,15 @@
 // debug status line), `Dangling` (the "remove dangling" list) and
 // `Inspector`, composed in one file per docs/phases/2-sheet.md section 7.
 // Styling is `sheet.css` classes only — no inline styles.
-import type { PropertyValue } from '@digsite/shared';
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router';
+import { Icon } from '../components/Icon.tsx';
 import { RenameInline } from '../components/RenameInline.tsx';
 import { plural } from '../lib/plural.ts';
-import { Inspector } from './Inspector.tsx';
+import { Inspector, type InspectorProps } from './Inspector.tsx';
 import { colorForUser, namedPeers } from './presence.ts';
 import type { Peer, RoomStatus } from './room.ts';
-import type { DanglingEdge, Selected } from './tools.ts';
+import type { DanglingEdge } from './tools.ts';
 
 interface SheetNeighbor {
   id: string;
@@ -91,7 +91,7 @@ function Header({
               if (previousSheet) onNavigateSheet(previousSheet.id);
             }}
           >
-            <span aria-hidden="true">←</span>
+            <Icon name="arrowLeft" size={16} />
           </button>
           <button
             type="button"
@@ -104,7 +104,7 @@ function Header({
               if (nextSheet) onNavigateSheet(nextSheet.id);
             }}
           >
-            <span aria-hidden="true">→</span>
+            <Icon name="arrowRight" size={16} />
           </button>
         </div>
         <button
@@ -114,7 +114,7 @@ function Header({
           aria-label="Close sheet details"
           onClick={onCloseMobile}
         >
-          <span aria-hidden="true">×</span>
+          <Icon name="close" size={16} />
         </button>
       </div>
       <RenameInline name={name} onRename={onRename} testId="sheet-name" />
@@ -212,11 +212,7 @@ export interface SidePanelProps {
   header: HeaderProps;
   dangling: DanglingEdge[];
   onRemoveDangling: () => void;
-  selected: Selected | null;
-  onSetProperty: (id: string, key: string, value: PropertyValue) => void;
-  onRemoveProperty: (id: string, key: string) => void;
-  onCopyForeign: (id: string) => void;
-  onDeleteSelected: () => void;
+  inspector: InspectorProps;
   mobileOpen: boolean;
   onFocusToggle: () => void;
 }
@@ -225,11 +221,7 @@ export function SidePanel({
   header,
   dangling,
   onRemoveDangling,
-  selected,
-  onSetProperty,
-  onRemoveProperty,
-  onCopyForeign,
-  onDeleteSelected,
+  inspector,
   mobileOpen,
   onFocusToggle,
 }: SidePanelProps) {
@@ -280,13 +272,7 @@ export function SidePanel({
     >
       <Header {...header} />
       <Dangling items={dangling} onRemove={onRemoveDangling} />
-      <Inspector
-        selected={selected}
-        onSetProperty={onSetProperty}
-        onRemoveProperty={onRemoveProperty}
-        onCopyForeign={onCopyForeign}
-        onDeleteSelected={onDeleteSelected}
-      />
+      <Inspector {...inspector} />
     </aside>
   );
 }

@@ -75,3 +75,35 @@ export function dragBecomes(input: DragInput): 'pan' | 'move' {
   if (input.over === 'image' || input.over === 'region') return 'move';
   return 'pan';
 }
+
+/** The cursor that says what a press here would do, before the press:
+ * image-graph's rule that the pointer warns before it acts. `grip` is the
+ * selected region's grip under the pointer, if any. */
+export function cursorFor(input: {
+  mode: Mode;
+  forcePan: boolean;
+  dragging: 'pan' | 'move' | 'resize' | 'marquee' | null;
+  target: Target;
+  grip: string | null;
+}): string {
+  if (input.dragging === 'pan') return 'grabbing';
+  if (input.dragging === 'move') return 'grabbing';
+  if (input.dragging === 'marquee') return 'crosshair';
+  if (input.dragging === 'resize' || (input.grip && input.mode === 'select'))
+    return GRIP_CURSOR[input.grip ?? ''] ?? 'nwse-resize';
+  if (input.mode === 'pan' || input.forcePan) return 'grab';
+  if (input.target === 'edge') return 'pointer';
+  if (input.target === 'image' || input.target === 'region') return 'move';
+  return 'default';
+}
+
+const GRIP_CURSOR: Record<string, string> = {
+  nw: 'nwse-resize',
+  se: 'nwse-resize',
+  ne: 'nesw-resize',
+  sw: 'nesw-resize',
+  n: 'ns-resize',
+  s: 'ns-resize',
+  e: 'ew-resize',
+  w: 'ew-resize',
+};

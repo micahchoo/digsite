@@ -64,7 +64,7 @@ async function main() {
   console.log(`PASS: invite created, url shows ${inviteUrl}`);
 
   // sign out, then follow the link as a signed-out visitor
-  await page.locator('button:has-text("sign out")').click();
+  await page.locator('button:has-text("Sign out")').click();
   await page.waitForURL(`${WEB}/`);
   await page.goto(`${WEB}/join/${invitationId}`);
   await page.waitForSelector('[data-testid="join-status"]');
@@ -102,7 +102,7 @@ async function main() {
   );
 
   // -- 1b. a closed invitation shows one message, signed out -----------------
-  await page.locator('button:has-text("sign out")').click();
+  await page.locator('button:has-text("Sign out")').click();
   await page.waitForURL(`${WEB}/`);
   await page.goto(`${WEB}/join/inv-closed`);
   await page.waitForSelector('[data-testid="join-status"]');
@@ -268,7 +268,7 @@ async function main() {
     () =>
       document
         .querySelector('[data-testid="selection-item"]')
-        ?.textContent?.includes('(missing)'),
+        ?.textContent?.includes('Missing'),
     undefined,
     { timeout: 3000 },
   );
