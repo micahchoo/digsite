@@ -40,6 +40,11 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: 'Move around',
     shortcuts: [
+      { keys: ['Arrow keys'], does: 'Go to the next picture that way' },
+      {
+        keys: ['Shift', 'arrow'],
+        does: 'Add the next picture to the selection',
+      },
       { keys: ['Space', 'drag'], does: 'Pan with any tool' },
       { keys: ['0'], does: 'Fit every picture in view' },
       { keys: ['+'], does: 'Zoom in' },

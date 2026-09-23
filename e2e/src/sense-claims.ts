@@ -829,6 +829,40 @@ async function main(): Promise<void> {
     );
     await M.open(firstPass.id);
 
+    // -- 14. Arrow keys walk from picture to picture; a reader hears where ---
+    await m.evaluate(
+      (id) => (window as unknown as SheetWindow).__digsite.select(id),
+      (await M.imageEl(4)).id,
+    );
+    await m.locator('.digsite-canvas canvas').focus();
+    await m.keyboard.press('ArrowRight');
+    const announcer = m.getByTestId('announcer');
+    await m.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="announcer"]')
+          ?.textContent?.startsWith('image-5.png selected'),
+      undefined,
+      { timeout: 5000 },
+    );
+    const heard = await announcer.innerText();
+    assert(
+      /image-5\.png selected\. \d+ connection/.test(heard),
+      `after ArrowRight from image 4 a reader hears "${heard}"`,
+    );
+    await m.keyboard.press('Shift+ArrowRight');
+    await m.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="announcer"]')?.textContent ===
+        '2 selected.',
+      undefined,
+      { timeout: 5000 },
+    );
+    await m.keyboard.press('Escape');
+    pass(
+      '14. arrow keys walk picture to picture and Shift adds; a screen reader hears what was chosen and its connections',
+    );
+
     // -- 10. Discuss a claim: across two people and two sheets --------------
     // The member answers on their own 10 -> 11 "same place"; the listed user
     // reads it on Faces, where it shows as First pass's claim, and replies.

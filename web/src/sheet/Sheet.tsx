@@ -27,6 +27,8 @@ import { ConnectLayer } from './ConnectLayer.tsx';
 import { DrawLayer } from './DrawLayer.tsx';
 import { RelationPicker } from './RelationPicker.tsx';
 import { SidePanel } from './SidePanel.tsx';
+import { describeSelection } from './announce.ts';
+import { type Direction, nextInDirection } from './arrow-walk.ts';
 import { besideSpot } from './beside.ts';
 import { Canvas } from './canvas/Canvas.tsx';
 import type {
@@ -44,6 +46,7 @@ import { Reach } from './overlay/Reach.tsx';
 import { screenToScene } from './overlay/screen.ts';
 import { usePolled } from './overlay/usePolled.ts';
 import { peerCursors } from './presence.ts';
+import { nextImage } from './reading-order.ts';
 import { type ReportClaim, buildReport } from './report.ts';
 import { useRoom } from './room.ts';
 import { reconcileLocalChange } from './scene-diff.ts';
@@ -643,6 +646,75 @@ export function Sheet() {
   // Shift+F10 and the Menu key open it on the selection, as a right-click
   // on it would.
   const openMenuRef = useRef(openMenu);
+  /**
+   * Arrow keys walk from picture to picture (arrow-walk.ts); Shift adds the
+   * next one to the selection. The picture walked to is brought into view
+   * when it is off screen. Read through a ref so the key listener, bound
+   * once, always sees this render's state.
+   */
+  function walk(direction: Direction, add: boolean) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const pictures = canvas
+      .elements()
+      .filter((el) => !el.isDeleted && dataOf(el)?.kind === 'image');
+    if (!pictures.length) return;
+    const held = canvas.selectedIds();
+    const fromId = [...held]
+      .reverse()
+      .find((id) => pictures.some((p) => p.id === id));
+    const nextId = fromId
+      ? nextInDirection(pictures, fromId, direction)
+      : (nextImage(pictures, null, 1)?.id ?? null);
+    if (!nextId) return;
+    canvas.select(add ? [...new Set([...held, nextId])] : [nextId]);
+    const el = pictures.find((p) => p.id === nextId);
+    const area = document
+      .querySelector('.sheet-canvas-area')
+      ?.getBoundingClientRect();
+    if (el && area) {
+      const vp = canvas.viewport();
+      const left = (el.x + vp.scrollX) * vp.zoom;
+      const top = (el.y + vp.scrollY) * vp.zoom;
+      const off =
+        left < 0 ||
+        top < 0 ||
+        left + el.width * vp.zoom > area.width ||
+        top + el.height * vp.zoom > area.height;
+      if (off)
+        canvas.setViewport({
+          scrollX: area.width / 2 / vp.zoom - (el.x + el.width / 2),
+          scrollY: area.height / 2 / vp.zoom - (el.y + el.height / 2),
+        });
+    }
+    rerender();
+  }
+  const walkRef = useRef(walk);
+  walkRef.current = walk;
+  useEffect(() => {
+    const ARROWS: Record<string, Direction> = {
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+    };
+    function onKeyDown(e: KeyboardEvent) {
+      const direction = ARROWS[e.key];
+      if (!direction || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest(
+          'input, textarea, select, [contenteditable="true"], dialog, [role="menu"], [role="radiogroup"]',
+        )
+      )
+        return;
+      e.preventDefault();
+      walkRef.current(direction, e.shiftKey);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   openMenuRef.current = openMenu;
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -819,6 +891,20 @@ export function Sheet() {
             onClose={() => setWebRoots(null)}
           />
         )}
+        {/* What a screen reader hears when the selection changes. A live
+            region speaks only when its words change, so this is said once
+            per selection, never mid-gesture (announce.ts). */}
+        <output className="visually-hidden" data-testid="announcer">
+          {describeSelection(
+            selected?.kind === 'own'
+              ? selected.elements.map((el) => el.id)
+              : [],
+            sceneElements,
+            (imageId) =>
+              sheetInfo.images.find((img) => img.id === imageId)?.name ??
+              'a picture',
+          )}
+        </output>
         {working && (
           <output className="sheet-working" data-testid="sheet-working">
             {working}
