@@ -86,3 +86,39 @@ image-graph are mapped per horizon in `ux/image-graph-patterns.md`.
 | 4 | The machine suggests, never decides | suggested connections, labels and near-duplicates from embeddings, each accepted by a person | open; needs the embedding routes (digsite-1b) |
 | 5 | Show the work | stable links to a claim or a view, a read-only view, a citable export | open |
 | 6 | The quality floor | dark mode, phone width, arrow keys and an announcer, screenshots and the claims walk in CI | open |
+
+## Server — next (2026-09-23)
+
+Stages 1–6 of the first server roadmap are done
+(`measurements/server-roadmap-2026-09-23.md`). Each item below has a test
+that says it is done. Order: 1 and 3 first (correctness and an open
+promise), then 2, 5, 4, then the rest.
+
+| # | item | done when | status |
+| --- | --- | --- | --- |
+| 1 | Sheets across processes | sheet rooms live in one API process; share them over Postgres. Two API processes behind one proxy, two editors on one sheet, the edit-conflict tests pass | open |
+| 2 | Narrow find at a million | a narrow query scans every property with `jsonb_each_text` (~1.2 s); index name and property text together. Narrow find under 100 ms at 1M | open |
+| 3 | Compact grid at a million | the scale run from roadmap item 1, repeated on the 16-column layout: materialise time, pan p95, memory | open |
+| 4 | Near-duplicates | from embeddings; 20 repeated captures in the owner's screenshots found, no false positives on the test set. Shared with Making sense horizon 4 | open |
+| 5 | Meaning for a million photos | 75 ms per image is 21 h per worker; batch inference and more workers by default. 20,000 photos searchable in under 10 min | open |
+| 6 | A map arranged by meaning | a sort that places similar images together; needs a new sort kind in the web. Maps cluster with maps on the owner's screenshots | open |
+| 7 | Cacheable tiles | tile URLs carry the order's version; a repeat visit makes no tile request | open |
+| 8 | Camera formats | HEIC and RAW through the folder import: a phone folder imports with no skip, or each skip explained | open |
+| 9 | Restores, proven | a monthly drill restores the newest backup into a scratch database and passes a smoke test | open |
+
+### Correctness investigations
+
+Each is a suspicion with the cheapest test that would settle it. The
+first two are confirmed by reading the code and need a failing test before
+a fix; the rest are unproven.
+
+| # | suspicion | cheapest test | fix if it holds |
+| --- | --- | --- | --- |
+| C1 | **Materialise stamps a rebuild it did not draw.** `materialiseSort` sets `materialised_at = now()` at the end whatever order it read; a rebuild during the run is marked materialised, and old coarse tiles are served until the next materialise. Confirmed in code. | hold a materialise open, rebuild the sort, release it; the stamped version differs from the drawn one | stamp only `WHERE built_at` is still the version it read |
+| C2 | **A composed tile outlives its invalidation.** `tileFor` composes from order v1, a rebuild publishes v2 and clears the cache, then the v1 tile is stored under the same URL. Confirmed in code. | delay a compose, invalidate during it, request again; old pixels return | key composed tiles by order version (with item 7) |
+| C3 | **One view mixes answers from two builds.** find, sections, search and tiles each read the order at their own moment; during a rebuild the map can dim ranks that moved. | rebuild during a find plus a tile burst; compare the ranks each used | every rank answer returns its order version; the client refetches on change |
+| C4 | **A lease expires under a stalled event loop.** Renewal is a timer every 20 s; a synchronous stretch past 60 s (the materialise scatter at a million?) lets a second worker take the same job. | `monitorEventLoopDelay` in the worker through a 1M materialise; max stall against 20 s | yield inside the scatter, or renew from the work loop |
+| C5 | **HNSW misses true neighbours.** The index is approximate. | on real embeddings, top-20 from the index against an exact scan | raise `ef_search` until recall is 0.95 or better |
+| C6 | **Importing a folder twice duplicates every image.** Storage dedupes the bytes; `uploadOne` still makes a new row. | import the same folder twice; count rows | a product decision: skip files already on the board, or say so |
+| C7 | **Two canvas defects are fenced, not understood.** Resizing an encoded page canvas leaked 1.1 MB per image; the decoder rejects some valid PNGs. | minimal repros against the latest `@napi-rs/canvas`; the second has a fixture | report upstream; remove the fences if fixed |
+| C8 | **One supervisor test failure, seen once.** 748 ms, not reproduced in three reruns. | run `supervisor.test.ts` 200 times; keep the failing assertion | whatever the assertion shows |
