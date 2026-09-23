@@ -327,6 +327,8 @@ async function scatterSize(
  * S3 PUT would mean constructing (and authenticating) an S3Client per
  * thread for no benefit, so the I/O moved here, onto the one Storage the
  * rest of the process already shares. */
+const YIELD_EVERY = 16;
+
 class EncodePool {
   private workers: Worker[];
 
@@ -340,6 +342,12 @@ class EncodePool {
     const puts: Promise<void>[] = [];
     let next = 0;
     let failure: unknown;
+    // Worker replies arrive back to back while eight threads encode, and a
+    // run of message events never lets the timer phase in: a million-image
+    // materialise held timers off for 11 s — the worker's lease renewal
+    // among them (roadmap C4). Every YIELD_EVERY-th dispatch waits one
+    // timer turn.
+    let handled = 0;
 
     const runWorker = (w: Worker) =>
       new Promise<void>((resolve, reject) => {
@@ -403,7 +411,8 @@ class EncodePool {
                 .finally(() => budget.release(png.byteLength)),
             );
           }
-          dispatchNext();
+          if (++handled % YIELD_EVERY === 0) setTimeout(dispatchNext, 0);
+          else dispatchNext();
         };
 
         w.addEventListener('message', onMessage);
