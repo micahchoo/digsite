@@ -27,6 +27,7 @@ import {
   worldExtent,
 } from '@digsite/shared/board/grid';
 import { chromium } from 'playwright';
+import { materialisedTileKey } from '../src/boards/tiles.ts';
 import { pool } from '../src/db/pool.ts';
 import { env } from '../src/env.ts';
 
@@ -371,7 +372,8 @@ async function cmdMaterialise(boardId: string): Promise<void> {
       for (let y = 0; y < ny; y++) {
         for (let x = 0; x < nx; x++) {
           expected++;
-          const path = `${env.DATA_DIR}/boards/${boardId}/tiles/${TILE_SORT}/${z}/${x}-${y}.png`;
+          // The one spelling of a coarse tile's key (layout-versioned).
+          const path = `${env.DATA_DIR}/${materialisedTileKey(boardId, TILE_SORT, z, x, y)}`;
           if (existsSync(path)) present++;
         }
       }

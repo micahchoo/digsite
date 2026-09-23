@@ -14,7 +14,7 @@ import { pool } from '../db/pool.ts';
 import { storageFromEnv } from '../storage/index.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { getResidentTile, loadResidentSortFromDisk } from './coarse-cache.ts';
-import { withPage } from './ladder.ts';
+import { getPage, withPage } from './ladder.ts';
 import { coarseTilesPrefix } from './paths.ts';
 import { ensureRank, slotsForTile } from './ranks.ts';
 import {
@@ -116,6 +116,18 @@ async function composeTileInner(
   try {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, TILE, TILE);
+
+    // Load every page this tile needs at once, then draw. Awaited one per
+    // cell, a cold z=-2 tile on a million-image board waited for 64 page
+    // loads in a row (~100 ms); getPage bounds how many run together and
+    // shares a load already in flight. Drawing still goes through withPage,
+    // which reloads a page evicted in between.
+    const pages = new Set<number>();
+    for (const slot of slots) {
+      if (slot !== null && slot !== undefined && !pendingSlots.has(slot))
+        pages.add(ladderAddress(slot, s).page);
+    }
+    await Promise.all([...pages].map((page) => getPage(boardId, s, page)));
 
     for (let idx = 0; idx < slots.length; idx++) {
       const slot = slots[idx];
