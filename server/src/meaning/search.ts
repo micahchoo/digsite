@@ -7,12 +7,11 @@
 // `limit` results from THIS board, so a small board among large ones is not
 // starved. Iterative results come back roughly in order, and are sorted
 // here by score.
+import type { MeaningMatch } from '@digsite/shared/api';
 import type { Sort } from '@digsite/shared/board/sort';
 import { rankOf, rankOrder } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 import { MODEL, toVectorText } from './model.ts';
-
-export type Match = { imageId: string; rank: number; score: number };
 
 /** `limit` best matches for `queryExpr`, a SQL expression producing a
  * halfvec, whose own parameters start at $5. */
@@ -23,7 +22,7 @@ async function nearestBy(
   params: unknown[],
   limit: number,
   exclude: string | null,
-): Promise<Match[]> {
+): Promise<MeaningMatch[]> {
   const client = await pool.connect();
   let rows: { image_id: string; slot: number; score: number }[];
   try {
@@ -66,7 +65,7 @@ export function nearest(
   sort: Sort,
   query: Float32Array,
   limit: number,
-): Promise<Match[]> {
+): Promise<MeaningMatch[]> {
   return nearestBy(
     boardId,
     sort,
@@ -84,7 +83,7 @@ export async function similarTo(
   imageId: string,
   sort: Sort,
   limit: number,
-): Promise<Match[] | null> {
+): Promise<MeaningMatch[] | null> {
   const { rows } = await pool.query(
     'SELECT 1 FROM image_embeddings WHERE image_id = $1 AND model = $2',
     [imageId, MODEL],
@@ -106,7 +105,7 @@ export async function searchText(
   text: string,
   sort: Sort,
   limit: number,
-): Promise<Match[]> {
+): Promise<MeaningMatch[]> {
   const { embedText } = await import('./clip.ts');
   return nearest(boardId, sort, await embedText(text), limit);
 }

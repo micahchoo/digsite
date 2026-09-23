@@ -8,6 +8,7 @@
 // takes the same path as a browser upload: validateUpload, then uploadOne.
 import { readdir, realpath } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
+import type { FolderImport } from '@digsite/shared/api';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
 import { StorageFull } from '../storage/room.ts';
@@ -63,16 +64,6 @@ export async function listImages(folder: string): Promise<string[]> {
   }
   return files.sort();
 }
-
-export type FolderImport = {
-  id: string;
-  path: string;
-  total: number;
-  imported: number;
-  skipped: number;
-  skips: { file: string; reason: string }[];
-  state: 'running' | 'done';
-};
 
 /** Records the import with its file list and queues its first batch. */
 export async function startFolderImport(

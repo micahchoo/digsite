@@ -11,6 +11,7 @@ import type {
   CreateBoardRequest,
   CreateBoardResponse,
   FindBoardResponse,
+  FolderImport,
   GetBoardAllowlistResponse,
   GetBoardResponse,
   GetBoardSelectionResponse,
@@ -21,6 +22,7 @@ import type {
   ListBoardImagesResponse,
   ListBoardsResponse,
   ListJobsResponse,
+  MeaningResponse,
   PutAliasRequest,
   PutBoardSelectionRequest,
   PutBoardSelectionResponse,
@@ -32,6 +34,7 @@ import type {
   SelectionRangeRequest,
   SelectionRangeResponse,
   SortableKey,
+  StartFolderImportRequest,
   UpdateBoardRequest,
   UpdateBoardResponse,
   UpdateImagePropertiesRequest,
@@ -1401,7 +1404,8 @@ export function registerBoardRoutes(router: Router) {
     if (matches === null) {
       return json(ctx.res, 409, { error: 'image is not embedded yet' });
     }
-    return json(ctx.res, 200, { matches });
+    const response: MeaningResponse = { matches };
+    return json(ctx.res, 200, response);
   });
 
   router.get('/boards/:id/search', async (ctx) => {
@@ -1416,8 +1420,10 @@ export function registerBoardRoutes(router: Router) {
       return json(ctx.res, 400, { error: 'text must be 1 to 200 characters' });
     }
     const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
-    const matches = await searchText(boardId, text, sort, meaningLimit(ctx));
-    return json(ctx.res, 200, { matches });
+    const response: MeaningResponse = {
+      matches: await searchText(boardId, text, sort, meaningLimit(ctx)),
+    };
+    return json(ctx.res, 200, response);
   });
 
   // POST /boards/:id/imports {path} and GET /boards/:id/imports/:importId
@@ -1428,12 +1434,18 @@ export function registerBoardRoutes(router: Router) {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
     await boardForUploading(userId, boardId);
-    const body = (await readJsonBody(ctx.req)) as { path?: unknown };
+    const body = (await readJsonBody(ctx.req)) as
+      | Partial<StartFolderImportRequest>
+      | undefined;
     if (typeof body?.path !== 'string' || !body.path.trim()) {
       return json(ctx.res, 400, { error: 'path is required' });
     }
     try {
-      const started = await startFolderImport(boardId, userId, body.path);
+      const started: FolderImport = await startFolderImport(
+        boardId,
+        userId,
+        body.path,
+      );
       return json(ctx.res, 202, started);
     } catch (err) {
       if (err instanceof ImportRefused) {
@@ -1447,7 +1459,10 @@ export function registerBoardRoutes(router: Router) {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
     await boardForViewing(userId, boardId);
-    const found = await folderImport(boardId, param(ctx, 'importId'));
+    const found: FolderImport | null = await folderImport(
+      boardId,
+      param(ctx, 'importId'),
+    );
     if (!found) return json(ctx.res, 404, { error: 'no such import' });
     return json(ctx.res, 200, found);
   });
