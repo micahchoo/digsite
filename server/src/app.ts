@@ -104,7 +104,8 @@ export function createHttpServer(opts: HttpServerOptions = {}): Server {
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Expose-Headers': 'X-Request-Id, Retry-After',
+    'Access-Control-Expose-Headers':
+      'X-Request-Id, Retry-After, X-Order-Version',
   };
 
   const httpServer = createServer(async (req, res) => {

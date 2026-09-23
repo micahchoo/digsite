@@ -117,6 +117,7 @@ import {
   imageIdsInRankRange,
   imagesInRankOrder,
   markBoardRanksStale,
+  orderToken,
   rankOf,
   rankOrder,
 } from './ranks.ts';
@@ -1119,11 +1120,25 @@ export function registerBoardRoutes(router: Router) {
     );
     recordTileCache(result.cache);
 
+    // Roadmap item 7: `?v=` names the order build the client is showing.
+    // When the served pixels are that build's and final, the browser keeps
+    // them for good: the next build is a new token and so a new URL. Any
+    // other `v` is a tile from a different build than the client asked
+    // for, and must not be kept under that URL.
+    const token = orderToken(result.version);
+    const asked = ctx.url.searchParams.get('v');
+    const cacheControl =
+      asked === null
+        ? 'private, max-age=60'
+        : asked === token && result.final
+          ? 'private, max-age=31536000, immutable'
+          : 'no-store';
     ctx.res.writeHead(200, {
       'Content-Type': 'image/png',
       'X-Cache': result.cache,
+      'X-Order-Version': token,
       'Server-Timing': `rank;dur=${result.rankMs.toFixed(2)}, compose;dur=${result.composeMs.toFixed(2)}`,
-      'Cache-Control': 'private, max-age=60',
+      'Cache-Control': cacheControl,
     });
     ctx.res.end(result.png);
   });
