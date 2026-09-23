@@ -11,6 +11,8 @@ import { createHttpServer } from '../app.ts';
 import { paintLadder } from '../boards/ladder.ts';
 import { markBoardRanksStale } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
+import { env } from '../env.ts';
+import { MODEL, toVectorText } from '../meaning/model.ts';
 
 let server: Server;
 let base = '';
@@ -144,5 +146,41 @@ describe('tile cache policy', () => {
     expect(stale.headers.get('x-order-version')).not.toBe(token);
     // Without `v` the old behaviour stands: resolved against the current build.
     expect((await request('POST', range, body)).status).toBe(200);
+  });
+
+  test('answers by meaning name the build too', async () => {
+    const boardId = await boardWithOneImage();
+    const { rows } = await pool.query(
+      'SELECT id FROM images WHERE board_id = $1',
+      [boardId],
+    );
+    const imageId = rows[0].id as string;
+    const vector = new Float32Array(512);
+    vector[0] = 1;
+    await pool.query(
+      `INSERT INTO image_embeddings (image_id, model, board_id, slot, embedding)
+       VALUES ($1, $2, $3, 0, $4::halfvec)`,
+      [imageId, MODEL, boardId, toVectorText(vector)],
+    );
+    const tile = await request(
+      'GET',
+      `/boards/${boardId}/tiles/uploaded_at.desc/0/0/0.png`,
+    );
+    const token = tile.headers.get('x-order-version');
+    const embeddings = env.EMBEDDINGS;
+    env.EMBEDDINGS = true;
+    try {
+      for (const route of ['similar', 'duplicates']) {
+        const res = await request(
+          'GET',
+          `/boards/${boardId}/${route}?image=${imageId}&sort=uploaded_at.desc`,
+        );
+        expect([route, res.status, res.headers.get('x-order-version')]).toEqual(
+          [route, 200, token],
+        );
+      }
+    } finally {
+      env.EMBEDDINGS = embeddings;
+    }
   });
 });

@@ -1468,13 +1468,18 @@ export function registerBoardRoutes(router: Router) {
   for (const [path, find] of [
     [
       '/boards/:id/similar',
-      (boardId: string, image: string, sort: Sort, ctx: { url: URL }) =>
-        similarTo(boardId, image, sort, meaningLimit(ctx)),
+      (
+        boardId: string,
+        image: string,
+        sort: Sort,
+        order: RankOrder,
+        ctx: { url: URL },
+      ) => similarTo(boardId, image, sort, meaningLimit(ctx), order),
     ],
     [
       '/boards/:id/duplicates',
-      (boardId: string, image: string, sort: Sort) =>
-        duplicatesOf(boardId, image, sort),
+      (boardId: string, image: string, sort: Sort, order: RankOrder) =>
+        duplicatesOf(boardId, image, sort, order),
     ],
   ] as const) {
     router.get(path, async (ctx) => {
@@ -1495,7 +1500,9 @@ export function registerBoardRoutes(router: Router) {
         return json(ctx.res, 400, { error: 'image is not on this board' });
       }
       const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
-      const matches = await find(boardId, image, sort, ctx);
+      const order = await rankOrder(boardId, sort);
+      sayOrder(ctx.res, order);
+      const matches = await find(boardId, image, sort, order, ctx);
       if (matches === null) {
         return json(ctx.res, 409, { error: 'image is not embedded yet' });
       }
@@ -1545,8 +1552,10 @@ export function registerBoardRoutes(router: Router) {
       return json(ctx.res, 400, { error: 'text must be 1 to 200 characters' });
     }
     const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
+    const order = await rankOrder(boardId, sort);
+    sayOrder(ctx.res, order);
     const response: MeaningResponse = {
-      matches: await searchText(boardId, text, sort, meaningLimit(ctx)),
+      matches: await searchText(boardId, text, sort, meaningLimit(ctx), order),
     };
     return json(ctx.res, 200, response);
   });

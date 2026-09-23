@@ -10,7 +10,7 @@
 // expression no index answers, so rows come from the board and are sorted.
 import type { MeaningMatch } from '@digsite/shared/api';
 import type { Sort } from '@digsite/shared/board/sort';
-import { rankOf, rankOrder } from '../boards/ranks.ts';
+import { type RankOrder, rankOf, rankOrder } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 import { MODEL, toVectorText } from './model.ts';
 
@@ -20,6 +20,7 @@ async function nearestText(
   query: string,
   limit: number,
   exclude: string | null,
+  given?: RankOrder,
 ): Promise<MeaningMatch[]> {
   const { rows } = await pool.query<{
     image_id: string;
@@ -33,7 +34,7 @@ async function nearestText(
      LIMIT $5`,
     [boardId, MODEL, query, exclude, limit],
   );
-  const order = await rankOrder(boardId, sort);
+  const order = given ?? (await rankOrder(boardId, sort));
   return rows
     .map((row) => ({
       imageId: row.image_id,
@@ -48,8 +49,9 @@ export function nearest(
   sort: Sort,
   query: Float32Array,
   limit: number,
+  given?: RankOrder,
 ): Promise<MeaningMatch[]> {
-  return nearestText(boardId, sort, toVectorText(query), limit, null);
+  return nearestText(boardId, sort, toVectorText(query), limit, null, given);
 }
 
 /** Images that look like this one, best first; the image itself left out.
@@ -59,6 +61,7 @@ export async function similarTo(
   imageId: string,
   sort: Sort,
   limit: number,
+  given?: RankOrder,
 ): Promise<MeaningMatch[] | null> {
   const { rows } = await pool.query(
     'SELECT embedding::text AS v FROM image_embeddings WHERE image_id = $1 AND model = $2',
@@ -66,7 +69,7 @@ export async function similarTo(
   );
   const v = rows[0]?.v as string | undefined;
   if (!v) return null;
-  return nearestText(boardId, sort, v, limit, imageId);
+  return nearestText(boardId, sort, v, limit, imageId, given);
 }
 
 /** Images that match words, best first. */
@@ -75,7 +78,8 @@ export async function searchText(
   text: string,
   sort: Sort,
   limit: number,
+  given?: RankOrder,
 ): Promise<MeaningMatch[]> {
   const { embedText } = await import('./clip.ts');
-  return nearest(boardId, sort, await embedText(text), limit);
+  return nearest(boardId, sort, await embedText(text), limit, given);
 }

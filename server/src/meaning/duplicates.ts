@@ -19,6 +19,7 @@ import type { MeaningMatch } from '@digsite/shared/api';
 import { LADDER, ladderAddress } from '@digsite/shared/board/ladder';
 import type { Sort } from '@digsite/shared/board/sort';
 import { withPage } from '../boards/ladder.ts';
+import type { RankOrder } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 import { similarTo } from './search.ts';
 
@@ -70,8 +71,9 @@ export async function duplicatesOf(
   boardId: string,
   imageId: string,
   sort: Sort,
+  given?: RankOrder,
 ): Promise<MeaningMatch[] | null> {
-  const near = await similarTo(boardId, imageId, sort, CANDIDATES);
+  const near = await similarTo(boardId, imageId, sort, CANDIDATES, given);
   if (near === null) return null;
   const candidates = near.filter((m) => m.score >= MIN_SIMILARITY);
   if (candidates.length === 0) return [];
