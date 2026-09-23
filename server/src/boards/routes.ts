@@ -9,6 +9,7 @@ import type {
   BoardImage,
   BoardImageWithRank,
   BoardSummary,
+  CopyImagesResponse,
   CreateBoardRequest,
   CreateBoardResponse,
   DuplicateGroupsResponse,
@@ -105,6 +106,7 @@ import { QuotaExceeded, quotaRefusal, release } from '../storage/quota.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
+import { COPY_MAX, examineCopies } from './copy.ts';
 import { extractRegion, parseFraction } from './extract.ts';
 import type { FilterClause } from './filter.ts';
 import { FIND_WINDOW_MAX, findRanks } from './find.ts';
@@ -138,8 +140,11 @@ import {
   putAlias,
   vocabularyOf,
 } from './vocabulary.ts';
+import { ZipWriter, uniqueNames } from './zip.ts';
 
 const SELECTION_CAP = 5000;
+const DOWNLOAD_MAX_FILES = 500;
+const DOWNLOAD_MAX_BYTES = 2e9;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -677,6 +682,127 @@ export function registerBoardRoutes(router: Router) {
     });
     const response: AllowlistResponse = await allowlistOf(board.team_id);
     json(ctx.res, 200, response);
+  });
+
+  // POST /boards/:id/images/copy {fromBoardId, imageIds}: pictures of a
+  // board the viewer can see become images of this one (copy.ts): names,
+  // properties and kept camera sources, never claims. Answers like an
+  // upload: 202 with the new images, plus what was skipped and why; the
+  // quota's 413 names what was stored before it.
+  router.post('/boards/:id/images/copy', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForUploading(userId, boardId);
+    const body = (await readJsonBody(ctx.req)) as {
+      fromBoardId?: unknown;
+      imageIds?: unknown;
+    };
+    const ids = body.imageIds;
+    if (
+      typeof body.fromBoardId !== 'string' ||
+      !Array.isArray(ids) ||
+      ids.length === 0 ||
+      !ids.every((id) => typeof id === 'string')
+    ) {
+      return json(ctx.res, 400, {
+        error: 'fromBoardId and a list of imageIds are required',
+      });
+    }
+    if (ids.length > COPY_MAX) {
+      return json(ctx.res, 413, {
+        error: `copy at most ${COPY_MAX} images at once`,
+      });
+    }
+    await boardForViewing(userId, body.fromBoardId);
+    const limit = checkLimit('upload', userId, ids.length);
+    if (!limit.allowed) {
+      return tooManyRequests(ctx.res, 'upload', limit.retryAfter);
+    }
+    const { ready, skipped } = await examineCopies(
+      body.fromBoardId,
+      boardId,
+      ids as string[],
+    );
+    const images: UploadImagesResponse = [];
+    for (const file of ready) {
+      try {
+        images.push(await store(boardId, userId, file));
+      } catch (error) {
+        if (!(error instanceof QuotaExceeded)) throw error;
+        return json(ctx.res, 413, {
+          ...quotaRefusal(error),
+          accepted: images.map((image, i) => ({
+            name: ready[i]?.name,
+            id: image.id,
+          })),
+        });
+      }
+    }
+    const response: CopyImagesResponse = { images, skipped };
+    return json(ctx.res, 202, response);
+  });
+
+  // GET /boards/:id/images/download?ids=a,b,... or ?selection=1: those
+  // images' originals as one zip, stored as they are. `selection=1` takes
+  // the caller's stored selection (board_selections): a few hundred ids do
+  // not fit in a URL (501 of them: 431 from the HTTP server), and a link
+  // keeps the browser's own download. Checked before the first byte is
+  // sent, because an error cannot follow a started download: at most
+  // DOWNLOAD_MAX_FILES files and DOWNLOAD_MAX_BYTES, else 413 with both.
+  router.get('/boards/:id/images/download', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    const board = await boardForViewing(userId, boardId);
+    let ids = (ctx.url.searchParams.get('ids') ?? '')
+      .split(',')
+      .filter(Boolean);
+    if (ctx.url.searchParams.get('selection') === '1') {
+      const { rows: selected } = await pool.query(
+        'SELECT image_ids FROM board_selections WHERE user_id = $1 AND board_id = $2',
+        [userId, boardId],
+      );
+      ids = (selected[0]?.image_ids as string[] | undefined) ?? [];
+    }
+    if (ids.length === 0) {
+      return json(ctx.res, 400, {
+        error: 'ids, or selection=1 with a selection, is required',
+      });
+    }
+    const refuse = () =>
+      json(ctx.res, 413, {
+        error: 'too many images or bytes for one download',
+        reason: 'download',
+        maxFiles: DOWNLOAD_MAX_FILES,
+        maxBytes: DOWNLOAD_MAX_BYTES,
+      });
+    if (ids.length > DOWNLOAD_MAX_FILES) return refuse();
+    const { rows } = await pool.query(
+      `SELECT id, name, sha256, bytes FROM images
+       WHERE board_id = $1 AND id = ANY($2::uuid[]) AND NOT missing`,
+      [boardId, ids],
+    );
+    const known = rows.reduce((sum, r) => sum + Number(r.bytes ?? 0), 0);
+    if (known > DOWNLOAD_MAX_BYTES) return refuse();
+    const byId = new Map(rows.map((r) => [r.id as string, r]));
+    const chosen = ids.flatMap((id) => {
+      const row = byId.get(id);
+      return row ? [row] : [];
+    });
+    const names = uniqueNames(chosen.map((r) => r.name as string));
+    const file = `${board.name.replace(/[^\p{L}\p{N} ._-]/gu, '') || 'images'}.zip`;
+    ctx.res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file)}`,
+      'Cache-Control': 'private, no-store',
+    });
+    const zip = new ZipWriter((chunk) => ctx.res.write(chunk));
+    const storage = storageFromEnv();
+    for (const [i, row] of chosen.entries()) {
+      const bytes = await storage.get(originalKey(boardId, row.sha256));
+      if (bytes) zip.add(names[i] as string, bytes);
+    }
+    zip.finish();
+    ctx.res.end();
   });
 
   router.post('/boards/:id/images', async (ctx) => {

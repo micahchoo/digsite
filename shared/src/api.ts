@@ -252,6 +252,14 @@ export type UploadImagesResponse = {
   slot: number;
   status: 'ready' | 'pending' | 'failed';
 }[];
+/** POST /boards/:id/images/copy {fromBoardId, imageIds}: the new images,
+ * and each picture not copied with why (not on the source board, deleted,
+ * already on this board as ..., its original missing). */
+export type CopyImagesRequest = { fromBoardId: string; imageIds: string[] };
+export type CopyImagesResponse = {
+  images: UploadImagesResponse;
+  skipped: { id: string; reason: string }[];
+};
 
 export type BoardImage = {
   id: string;

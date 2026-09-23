@@ -28,6 +28,10 @@ export type Offered = {
   name: string;
   bytes: Uint8Array;
   properties?: Record<string, unknown>;
+  /** An image's original already (a copy from another board): the bytes
+   * are never converted again, and its kept camera source, if any, comes
+   * with it. */
+  asStored?: { source?: Source };
 };
 
 export type Examined = {
@@ -51,8 +55,8 @@ export async function examine(
 ): Promise<Examined | Refused> {
   const properties = { ...(offered.properties ?? {}) };
   let bytes = offered.bytes;
-  let source: Source | undefined;
-  if (isCameraFile(offered.name)) {
+  let source: Source | undefined = offered.asStored?.source;
+  if (!offered.asStored && isCameraFile(offered.name)) {
     const converted = await fromCamera(offered.name, bytes);
     if (!converted.ok)
       return { ok: false, status: 415, reason: converted.reason };
