@@ -102,6 +102,13 @@ it, into a database and a `DATA_DIR` that must both already be empty —
 see that script's header. `e2e/src/backup-restore.ts` exercises the whole
 round trip against the dev stack (`bun run backup-restore` from `e2e/`).
 
+A backup is proven only when it restores. Once a month, run
+`deploy/restore-drill.sh ./backups` with the same `PG_CONTAINER` and
+`STORAGE`. It restores the newest backup into a scratch database, checks
+that every table holds the rows the dump carried, and checks that a
+sample of originals and ladder pages exists. Then it drops the scratch
+copy. It exits non-zero on a failure, so cron mails the reason.
+
 ## Upgrading
 
 ```

@@ -104,7 +104,7 @@ promise), then 2, 5, 4, then the rest.
 | 6 | A map arranged by meaning | a sort that places similar images together; needs a new sort kind in the web. Maps cluster with maps on the owner's screenshots | open |
 | 7 | Cacheable tiles | tile URLs carry the order's version; a repeat visit makes no tile request | open |
 | 8 | Camera formats | HEIC and RAW through the folder import: a phone folder imports with no skip, or each skip explained | open |
-| 9 | Restores, proven | a monthly drill restores the newest backup into a scratch database and passes a smoke test | open |
+| 9 | Restores, proven | a monthly drill restores the newest backup into a scratch database and passes a smoke test | DONE 2026-09-23: `deploy/restore-drill.sh`. Row counts against the dump, then a sample of originals and ladder pages. Fails and names the file when an original is missing. It starts no server; the walk is `e2e/src/backup-restore.ts` |
 
 ### Correctness investigations
 
