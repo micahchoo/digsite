@@ -154,7 +154,7 @@ export async function loadResidentSortFromDisk(
 }
 
 /** Drops a board's resident sorts — every one, since staleness
- * (`markBoardRanksStale`) applies to the whole board and a targeted rebuild
+ * (change.ts#boardChanged) applies to the whole board and a targeted rebuild
  * (`forceRebuildRank`) doesn't know which sorts had files materialised.
  * Mirrors `tiles-cache.ts#invalidateComposedTiles`'s board-wide sweep. */
 /** Drops every resident sort, for a process that may have missed

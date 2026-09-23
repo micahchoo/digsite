@@ -8,8 +8,8 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import sharp from 'sharp';
 import { createHttpServer } from '../app.ts';
+import { boardChanged } from '../boards/change.ts';
 import { paintLadder } from '../boards/ladder.ts';
-import { markBoardRanksStale } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
 import { MODEL, toVectorText } from '../meaning/model.ts';
@@ -101,7 +101,7 @@ describe('tile cache policy', () => {
 
     // A new build: the old token now names pixels this server no longer
     // draws, so that URL must not be kept.
-    await markBoardRanksStale(boardId);
+    await boardChanged(boardId);
     const old = await request('GET', `${tile}?v=${token}`);
     expect(old.headers.get('cache-control')).toBe('no-store');
     const next = old.headers.get('x-order-version');
@@ -140,7 +140,7 @@ describe('tile cache policy', () => {
       ((await current.json()) as { imageIds: string[] }).imageIds,
     ).toHaveLength(1);
 
-    await markBoardRanksStale(boardId);
+    await boardChanged(boardId);
     const stale = await request('POST', range, { ...body, v: token });
     expect(stale.status).toBe(409);
     expect(stale.headers.get('x-order-version')).not.toBe(token);

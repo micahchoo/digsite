@@ -3,6 +3,15 @@ scope: [server/src/boards/**, server/src/worker/**, server/src/meaning/**]
 tags: [tiles, cache, ranks, invalidation, http]
 priority: high
 source: hand-written
+checks:
+  - forbid: 'SET stale = true'
+    in: server/src/**
+    except: [server/src/boards/change.ts, server/src/test/**, server/src/db/migrations/**]
+    message: mark ranks stale only through boards/change.ts#boardChanged
+  - forbid: "kind: 'page'"
+    in: server/src/**
+    except: [server/src/boards/change.ts, server/src/boards/invalidation.ts, server/src/test/**]
+    message: publish a repainted page only through boards/change.ts#pagesRepainted
 ---
 
 # server: anything that changes a tile's pixels makes a new order build
@@ -15,12 +24,12 @@ take it back.
 
 ## What must stay true
 
-- **Every change to what a tile draws marks ranks stale.** Today: an
-  upload (`upload.ts`), a paint (`jobs.ts#runLadderGroup`), a ladder job
-  that fails for good (`jobs.ts#onJobFailedFinal`, the pending
-  placeholder goes), a property edit. A new writer of ladder pages, of
-  `status`, or of anything `composeTile` reads calls `markBoardRanksStale`
-  after the write.
+- **Every change to what a tile draws goes through `boards/change.ts`.**
+  `pagesRepainted` right after a ladder page is written, `boardChanged`
+  after everything else the change touches. Today's callers: an upload,
+  a paint, a ladder job that fails for good (the pending placeholder
+  goes), a property edit, an arrangement. The seam lint above fails the
+  build on a stale mark or a page event anywhere else.
 - **Publish the page event before the stale mark.** NOTIFY delivers in
   commit order. `invalidation.ts#catchUp`, which `rankOrder` runs on its
   first sight of a build, relies on that order. It is how a process that

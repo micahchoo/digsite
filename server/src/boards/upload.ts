@@ -1,7 +1,7 @@
 // One upload (CONTEXT.md "Image", "Slot"): the request does the cheap,
 // synchronous part only — sha256, store the raw original, assign the next
-// slot and insert a `pending` row in one transaction that also marks every
-// rank stale — then enqueues the `ladder` job. See docs/phases/1-map.md
+// slot and insert a `pending` row in one transaction, then says the board
+// changed (change.ts) and enqueues the `ladder` job. See docs/phases/1-map.md
 // "Upload as a worker": decoding, the 4096-px cap, and painting the ladder
 // all moved to worker/jobs.ts#runLadderJob. Both the multipart route
 // (boards/routes.ts) and the tus `onUploadFinish` hook (boards/tus.ts) call
@@ -15,7 +15,7 @@ import { pool } from '../db/pool.ts';
 import { storageFromEnv } from '../storage/index.ts';
 import { ensureRoomFor } from '../storage/room.ts';
 import { enqueueLadderJob } from '../worker/jobs.ts';
-import { invalidate } from './invalidation.ts';
+import { boardChanged } from './change.ts';
 import { originalKey } from './paths.ts';
 
 export type UploadedImage = { id: string; slot: number; status: 'pending' };
@@ -56,10 +56,6 @@ export async function uploadOne(
       [boardId, slot, sha256, filename, userId, JSON.stringify(properties)],
     );
     imageId = insRes.rows[0].id;
-    await client.query(
-      'UPDATE board_rank_state SET stale = true WHERE board_id = $1',
-      [boardId],
-    );
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -68,7 +64,9 @@ export async function uploadOne(
     client.release();
   }
 
-  await invalidate({ kind: 'ranks', boardId });
+  // After the commit: a build made in between lacks this row, and is
+  // still one whole build under its own token.
+  await boardChanged(boardId);
   await enqueueLadderJob(boardId, imageId);
 
   return { id: imageId, slot, status: 'pending' };

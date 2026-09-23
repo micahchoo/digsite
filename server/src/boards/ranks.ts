@@ -148,14 +148,6 @@ export async function sweepStaleRanks(
   return { sorts: rows.length };
 }
 
-export async function markBoardRanksStale(boardId: string): Promise<void> {
-  await pool.query(
-    'UPDATE board_rank_state SET stale = true WHERE board_id = $1',
-    [boardId],
-  );
-  await invalidate({ kind: 'ranks', boardId });
-}
-
 /** Unconditionally rebuilds (board, sort) — `ensureRank` checks `stale`
  * first; this is for a caller that wants a rebuild regardless (the manual
  * `POST /boards/:id/sort/:sortId/rebuild` route). */

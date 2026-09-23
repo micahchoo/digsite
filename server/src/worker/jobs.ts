@@ -7,11 +7,11 @@
 // them; it does not know what a job means.
 import { LADDER, type LadderSize, perPage } from '@digsite/shared/board/ladder';
 import { parseSortId, sortId as toSortId } from '@digsite/shared/board/sort';
-import { publish } from '../boards/invalidation.ts';
+import { boardChanged, pagesRepainted } from '../boards/change.ts';
 import { type LadderPaint, paintLadderMany } from '../boards/ladder.ts';
 import { materialiseSort } from '../boards/materialise.ts';
 import { originalKey } from '../boards/paths.ts';
-import { ensureRank, markBoardRanksStale } from '../boards/ranks.ts';
+import { ensureRank } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
 import { MODEL, toVectorText } from '../meaning/model.ts';
@@ -135,9 +135,7 @@ export async function runLadderGroup(
       ready.map((p) => p.paint),
     );
     // This process holds the new pages; any other holds old pixels.
-    for (const { s, page } of painted) {
-      await publish({ kind: 'page', boardId, s, page });
-    }
+    await pagesRepainted(boardId, painted);
     // Captured properties go UNDER the image's own: in `a || b` the right
     // side wins, so anything already set is kept.
     await pool.query(
@@ -153,7 +151,7 @@ export async function runLadderGroup(
         ready.map((p) => JSON.stringify(p.captured)),
       ],
     );
-    await markBoardRanksStale(boardId);
+    await boardChanged(boardId);
     await enqueueRankRebuildDebounced(boardId);
     if (env.EMBEDDINGS) {
       await enqueueJob('embed', { boardId, imageIds: ready.map((p) => p.id) });
@@ -340,5 +338,5 @@ export async function onJobFailedFinal(
   );
   // A pending cell was drawn as a placeholder and a failed one is not: the
   // pixels changed, so the order's version must (roadmap item 7).
-  if (rows[0]) await markBoardRanksStale(rows[0].board_id);
+  if (rows[0]) await boardChanged(rows[0].board_id);
 }

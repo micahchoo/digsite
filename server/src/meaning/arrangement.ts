@@ -9,7 +9,7 @@
 // worker's `arrange` job, 30 s after the last embed job of a burst, and
 // ends by marking ranks stale. The positions changed, so the tiles must
 // be a new build (.claude/rules/tile-pixels-change-the-build.md).
-import { markBoardRanksStale } from '../boards/ranks.ts';
+import { boardChanged } from '../boards/change.ts';
 import { pool } from '../db/pool.ts';
 import { arrange } from './arrange.ts';
 import { MODEL } from './model.ts';
@@ -119,7 +119,7 @@ export async function arrangeBoard(
                        WHERE e.image_id = i.id AND e.model = $2)`,
     [boardId, MODEL],
   );
-  await markBoardRanksStale(boardId);
+  await boardChanged(boardId);
   return { placed: placed.length, ms: performance.now() - start };
 }
 

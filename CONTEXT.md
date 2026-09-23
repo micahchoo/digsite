@@ -33,8 +33,9 @@ line here before it gets a file.
   reused, never renumbered. The image's *address* in the ladder.
 - **Ladder** — the image's pixels at 8, 32 and 128 px square, stored in
   512 px **pages** keyed by slot. Built once, at upload.
-- **Sort** — an ordering of a board's images: by `name`, `uploaded_at` or a
-  typed property, ascending or descending. Each viewer chooses; the board
+- **Sort** — an ordering of a board's images: by `name`, `uploaded_at`,
+  `meaning` (the **arrangement**) or a typed property, ascending or
+  descending. Each viewer chooses; the board
   has a **default sort**. Images without the sort's value come last.
 - **Rank** — an image's position under one sort: `0..N-1`. Held per
   `(board, sort)` as one **order**: every slot in rank order
@@ -43,6 +44,10 @@ line here before it gets a file.
   row, row-major. `col = rank % 16`, `row = rank / 16`.
 - **Tile** — a 256 px PNG of the cells in one square of the map at one
   **zoom** `z ∈ {0..−5}`. Composed on request from the ladder, cached.
+- **Board change** — anything that alters what a board's tiles draw (a
+  picture added, painted, failed, edited, moved). It always ends in a new
+  build, and it goes through one module (`boards/change.ts`), which
+  publishes repainted pages before it marks the orders stale.
 - **Build token** — which build of an order an answer used: a tile, or
   any answer in ranks, names it in `X-Order-Version`. A tile URL that
   carries its build's token (`?v=`) is cached by the browser for good;

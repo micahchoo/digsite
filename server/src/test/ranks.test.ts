@@ -169,7 +169,7 @@ describe('ranks', () => {
     // backdate only the stale sort's last_requested_at past the threshold —
     // touchLastRequested (ranks.ts) is throttled to update on read, so a
     // test exercising the sweep itself has to set the clock back directly,
-    // the same way markBoardRanksStale's own caller (upload) sets `stale`
+    // the same way change.ts#boardChanged (upload's caller) sets `stale`
     // directly rather than going through a request.
     await pool.query(
       `UPDATE board_rank_state SET last_requested_at = now() - interval '10 days'

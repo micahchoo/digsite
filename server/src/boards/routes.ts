@@ -101,6 +101,7 @@ import {
 } from '../storage/index.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { enqueueMaterialiseJob } from '../worker/jobs.ts';
+import { boardChanged } from './change.ts';
 import { extractRegion, parseFraction } from './extract.ts';
 import type { FilterClause } from './filter.ts';
 import { findRanks } from './find.ts';
@@ -119,7 +120,6 @@ import {
   imageIdsInRankBand,
   imageIdsInRankRange,
   imagesInRankOrder,
-  markBoardRanksStale,
   orderToken,
   rankOf,
   rankOrder,
@@ -1070,10 +1070,6 @@ export function registerBoardRoutes(router: Router) {
         [JSON.stringify(body.properties), image.id],
       );
       properties = updated.rows[0].properties;
-      await client.query(
-        'UPDATE board_rank_state SET stale = true WHERE board_id = $1',
-        [image.board_id],
-      );
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -1081,7 +1077,7 @@ export function registerBoardRoutes(router: Router) {
     } finally {
       client.release();
     }
-    await markBoardRanksStale(image.board_id);
+    await boardChanged(image.board_id);
     const response: UpdateImagePropertiesResponse = {
       properties: properties as UpdateImagePropertiesResponse['properties'],
     };
