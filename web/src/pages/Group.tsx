@@ -390,29 +390,7 @@ export function Group() {
                               : 'group-access'
                           }
                         >
-                          <svg
-                            aria-hidden="true"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                          >
-                            {b.open ? (
-                              <>
-                                <circle cx="8" cy="8" r="5.25" />
-                                <path d="M5.7 8h4.6" />
-                              </>
-                            ) : (
-                              <>
-                                <rect
-                                  x="3.2"
-                                  y="6.6"
-                                  width="9.6"
-                                  height="7"
-                                  rx="1.5"
-                                />
-                                <path d="M5.4 6.6V5a2.6 2.6 0 0 1 5.2 0v1.6" />
-                              </>
-                            )}
-                          </svg>
+                          <Icon name={b.open ? 'open' : 'lock'} size={13} />
                           {b.open ? 'Open' : 'Private'}
                         </span>
                         <span className="group-board-activity">
@@ -421,13 +399,7 @@ export function Group() {
                             : 'No activity yet'}
                         </span>
                         <span className="group-board-arrow" aria-hidden="true">
-                          <svg
-                            aria-hidden="true"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                          >
-                            <path d="M4 12 12 4M5 4h7v7" />
-                          </svg>
+                          <Icon name="arrowUpRight" size={14} />
                         </span>
                       </span>
                     </Link>
@@ -455,10 +427,7 @@ export function Group() {
                   <li key={s.id}>
                     <Link to={`/s/${s.id}`}>
                       <span className="group-sheet-glyph" aria-hidden="true">
-                        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
-                          <path d="M5 3.5h7l3 3v10H5z" />
-                          <path d="M12 3.5v3h3M7.5 10h5M7.5 13h5" />
-                        </svg>
+                        <Icon name="sheet" size={16} />
                       </span>
                       <span className="group-recent-copy">
                         <span className="group-recent-title">{s.name}</span>

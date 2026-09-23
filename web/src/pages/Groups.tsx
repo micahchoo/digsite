@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
+import { Icon } from '../components/Icon.tsx';
 import { ApiError, api } from '../lib/api.ts';
 import './groups.css';
 
@@ -89,14 +90,11 @@ export function Groups() {
                       <span className="groups-item-hint">Open workspace</span>
                     </span>
                     <span className="groups-role">{g.role}</span>
-                    <svg
+                    <Icon
+                      name="arrowRight"
+                      size={16}
                       className="groups-arrow"
-                      aria-hidden="true"
-                      viewBox="0 0 20 20"
-                      fill="none"
-                    >
-                      <path d="M4 10h11m-4-4 4 4-4 4" />
-                    </svg>
+                    />
                   </Link>
                   <button
                     className="groups-invite-toggle"
@@ -144,9 +142,7 @@ export function Groups() {
           ) : (
             <div className="groups-empty">
               <span className="groups-empty-mark" aria-hidden="true">
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                  <path d="m3 11 9-7 9 7M5.5 9.5v10h13v-10M9.5 19.5v-6h5v6" />
-                </svg>
+                <Icon name="home" size={21} />
               </span>
               <h3>No workspaces yet</h3>
               <p>Create one for your team, or join with an invitation.</p>

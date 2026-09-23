@@ -665,12 +665,6 @@
   background: rgba(166, 213, 216, 0.18);
   border-color: rgba(166, 213, 216, 0.55);
 }
-.shell-rail-brand svg {
-  width: 21px;
-  height: 21px;
-  stroke: currentColor;
-  stroke-width: 1.5;
-}
 .shell-rail-brand:focus-visible {
   outline-color: var(--focus-navigation);
 }
@@ -780,12 +774,6 @@
   box-shadow: none;
 }
 .shell-board-toggle svg {
-  width: 13px;
-  height: 13px;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
   transition: rotate 130ms ease-out;
 }
 .shell-board-toggle[aria-expanded="true"] svg {

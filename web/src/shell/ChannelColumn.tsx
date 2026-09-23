@@ -79,9 +79,7 @@ function BoardRow({
           }
           data-testid={`shell-board-toggle-${board.id}`}
         >
-          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none">
-            <path d="m5.5 3.5 5 4.5-5 4.5" />
-          </svg>
+          <Icon name="chevronRight" size={13} />
         </button>
         <Link
           to={`/b/${board.id}`}

@@ -27,12 +27,7 @@ export function GroupRail({ groups, activeGroupId }: Props) {
         aria-label="Digsite workspaces"
         title="Digsite workspaces"
       >
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-          <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
-          <rect x="13.5" y="3.5" width="7" height="7" rx="2" />
-          <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
-          <path d="M13.5 17h7M17 13.5v7" />
-        </svg>
+        <Icon name="groups" size={21} />
       </Link>
       <ul className="shell-rail-list">
         {groups.map((g) => (

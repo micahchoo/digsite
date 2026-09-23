@@ -54,6 +54,15 @@ const PATHS = {
   zoomOut: 'M14 8.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0ZM6 8.5h5m1.5 4 4 4',
   undo: 'M7 7 3.5 10.5 7 14M4 10.5h6a5 5 0 0 1 5 5',
   redo: 'm13 7 3.5 3.5L13 14m3-3.5h-6a5 5 0 0 0-5 5',
+  // Where a person starts: the workspaces, before any group.
+  home: 'm2.5 9.2 7.5-5.8 7.5 5.8M4.6 7.9v8.3h10.8V7.9M7.9 16.2v-5h4.2v5',
+  // A sheet: a page with its corner folded.
+  sheet: 'M5 3.5h7l3 3v10H5zM12 3.5v3h3M7.5 10h5M7.5 13h5',
+  // A board open to the whole group; `lock` is a private one.
+  open: 'M16.56 10a6.56 6.56 0 1 1-13.12 0 6.56 6.56 0 0 1 13.12 0ZM7.12 10h5.76',
+  // Groups, and one more: the rail's way back to every workspace.
+  groups:
+    'M4.59 2.92h2.49a1.67 1.67 0 0 1 1.67 1.67v2.49a1.67 1.67 0 0 1-1.67 1.67H4.59a1.67 1.67 0 0 1-1.67-1.67V4.59a1.67 1.67 0 0 1 1.67-1.67ZM12.92 2.92h2.49a1.67 1.67 0 0 1 1.67 1.67v2.49a1.67 1.67 0 0 1-1.67 1.67h-2.49a1.67 1.67 0 0 1-1.67-1.67V4.59a1.67 1.67 0 0 1 1.67-1.67ZM4.59 11.25h2.49a1.67 1.67 0 0 1 1.67 1.67v2.49a1.67 1.67 0 0 1-1.67 1.67H4.59a1.67 1.67 0 0 1-1.67-1.67v-2.49a1.67 1.67 0 0 1 1.67-1.67ZM11.25 14.17h5.83M14.17 11.25v5.83',
   keyboard:
     'M3.5 5.5h13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM6 8.5h.01M9 8.5h.01M12 8.5h.01M15 8.5h.01M7 11.5h6',
 } as const;

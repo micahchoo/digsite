@@ -175,18 +175,13 @@
 }
 
 .groups-arrow {
-  width: 16px;
-  height: 16px;
-  stroke: var(--text-faint);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: translate 130ms ease-out, stroke 130ms ease-out;
+  color: var(--text-faint);
+  transition: translate 130ms ease-out, color 130ms ease-out;
 }
 
 .groups-item-main:hover .groups-arrow {
   translate: 2px 0;
-  stroke: var(--accent);
+  color: var(--accent);
 }
 
 .groups-invite-toggle {
@@ -243,15 +238,6 @@
   border-radius: 14px;
   background: color-mix(in srgb, var(--accent) 9%, var(--surface-raised));
   color: var(--accent);
-}
-
-.groups-empty-mark svg {
-  width: 21px;
-  height: 21px;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .groups-empty h3 {
