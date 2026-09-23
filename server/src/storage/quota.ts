@@ -8,6 +8,7 @@
 // the bytes of each object written or deleted. `reserve` claims bytes in
 // one conditional UPDATE, so two uploads at once cannot both slip past the
 // quota; a caller that ends up writing nothing gives them back.
+import type { Pool, PoolClient } from 'pg';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
 
@@ -84,8 +85,18 @@ export async function reserve(boardId: string, bytes: number): Promise<void> {
 /** Gives back bytes: an object deleted, or a reservation not written. */
 export async function release(boardId: string, bytes: number): Promise<void> {
   if (bytes <= 0) return;
-  const orgId = await groupOfBoard(boardId);
-  await pool.query(
+  await releaseFromGroup(pool, await groupOfBoard(boardId), bytes);
+}
+
+/** Gives back a group's bytes inside the caller's transaction — for a
+ * removal whose board row is gone by the time it commits. */
+export async function releaseFromGroup(
+  db: Pool | PoolClient,
+  orgId: string,
+  bytes: number,
+): Promise<void> {
+  if (bytes <= 0) return;
+  await db.query(
     `UPDATE group_storage SET used_bytes = GREATEST(0, used_bytes - $2)
      WHERE org_id = $1`,
     [orgId, bytes],

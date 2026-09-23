@@ -97,12 +97,8 @@ import { suggestLabels, suggestRegionLabels } from '../meaning/labels.ts';
 import { searchText, similarTo } from '../meaning/search.ts';
 import { duplicateGroups } from '../meaning/sweep.ts';
 import { recordTileCache } from '../metrics.ts';
-import {
-  deletePrefix,
-  presignedGetUrl,
-  storageFromEnv,
-} from '../storage/index.ts';
-import { QuotaExceeded, quotaRefusal, release } from '../storage/quota.ts';
+import { presignedGetUrl, storageFromEnv } from '../storage/index.ts';
+import { QuotaExceeded, quotaRefusal } from '../storage/quota.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
@@ -131,6 +127,7 @@ import {
   orderToken,
   rankOf,
 } from './ranks.ts';
+import { removeBoard, removeImage } from './removal.ts';
 import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
 import { detectImageType } from './validate.ts';
@@ -486,67 +483,15 @@ export function registerBoardRoutes(router: Router) {
     json(ctx.res, 400, { error: 'nothing to update' });
   });
 
-  // DELETE /boards/:id (docs/phases/3-groups.md section 4): every row that
-  // names this board, in the doc's own order (children before the parents
-  // that FK to them — board_rank_state, which holds each sort's whole order
-  // since 0017_rank_order.sql, keeps its FK), in one
-  // transaction; the private board's team (best-effort — see below) and a
-  // best-effort sweep of its files, after the transaction commits.
+  // DELETE /boards/:id (docs/phases/3-groups.md section 4): removal.ts
+  // takes the rows, the files and the group's bytes; the private board's
+  // team is removed here, best-effort, because it needs the session.
   router.del('/boards/:id', async (ctx) => {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
     const board = await boardForDeleting(userId, boardId);
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        'DELETE FROM edges WHERE sheet_id IN (SELECT id FROM sheets WHERE board_id = $1)',
-        [boardId],
-      );
-      await client.query(
-        'DELETE FROM regions WHERE sheet_id IN (SELECT id FROM sheets WHERE board_id = $1)',
-        [boardId],
-      );
-      await client.query(
-        'DELETE FROM sheet_snapshots WHERE sheet_id IN (SELECT id FROM sheets WHERE board_id = $1)',
-        [boardId],
-      );
-      await client.query(
-        'DELETE FROM sheet_reads WHERE sheet_id IN (SELECT id FROM sheets WHERE board_id = $1)',
-        [boardId],
-      );
-      await client.query(
-        'DELETE FROM sheet_images WHERE sheet_id IN (SELECT id FROM sheets WHERE board_id = $1)',
-        [boardId],
-      );
-      await client.query('DELETE FROM sheets WHERE board_id = $1', [boardId]);
-      await client.query('DELETE FROM board_rank_state WHERE board_id = $1', [
-        boardId,
-      ]);
-      await client.query('DELETE FROM term_aliases WHERE board_id = $1', [
-        boardId,
-      ]);
-      await client.query('DELETE FROM board_selections WHERE board_id = $1', [
-        boardId,
-      ]);
-      await client.query(
-        'DELETE FROM board_property_indexes WHERE board_id = $1',
-        [boardId],
-      );
-      await client.query('DELETE FROM activity WHERE board_id = $1', [boardId]);
-      await client.query(`DELETE FROM jobs WHERE payload->>'boardId' = $1`, [
-        boardId,
-      ]);
-      await client.query('DELETE FROM images WHERE board_id = $1', [boardId]);
-      await client.query('DELETE FROM boards WHERE id = $1', [boardId]);
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    await removeBoard(boardId);
 
     // The plugin refuses to remove an organization's LAST team
     // (UNABLE_TO_REMOVE_LAST_TEAM, crud-team.mjs) unless
@@ -568,21 +513,6 @@ export function registerBoardRoutes(router: Router) {
       } catch {
         // orphaned team, see above — not reported to the caller.
       }
-    }
-
-    // Best-effort file sweep (docs/phases/3-groups.md section 4, made
-    // adapter-agnostic by docs/phases/5-hardening.md section 5's
-    // `Storage.list`): every storage key for this board's originals, ladder
-    // pages and tiles lives under this one prefix (paths.ts, ladder.ts,
-    // materialise.ts, coarse-cache.ts, tiles.ts all key off `boards/<id>/`).
-    // Runs on fs and s3 alike now; still best-effort — a failure here never
-    // fails the response, since the DB rows are already gone regardless,
-    // and this exercises the same sweep the load run in
-    // docs/measurements/phase-5.md deletes its boards through.
-    try {
-      await deletePrefix(storageFromEnv(), `boards/${boardId}/`);
-    } catch {
-      // best-effort — the DB rows are already gone regardless.
     }
 
     json(ctx.res, 200, {});
@@ -1256,51 +1186,12 @@ export function registerBoardRoutes(router: Router) {
     json(ctx.res, 200, response);
   });
 
-  // DELETE /images/:id (docs/phases/3-groups.md section 4): sets
-  // `missing = true` and removes the original file; the row, the slot and
-  // every claim on it stay — there is no hard delete of an image in this
-  // phase. `uploadOne` dedupes an original by sha256 WITHIN a board, so two
-  // images can share one file on disk; only unlink it when no other
-  // non-missing image on the board still points at the same sha256.
+  // DELETE /images/:id (docs/phases/3-groups.md section 4): the image goes
+  // missing and keeps its slot and its claims (removal.ts#removeImage).
   router.del('/images/:id', async (ctx) => {
     const userId = requireAuth(ctx);
     const imageId = param(ctx, 'id');
-    const image = await imageForDeleting(userId, imageId);
-    if (!image.missing) {
-      const { rows } = await pool.query(
-        `SELECT 1 FROM images
-         WHERE board_id = $1 AND sha256 = $2 AND id != $3 AND missing = false
-         LIMIT 1`,
-        [image.board_id, image.sha256, image.id],
-      );
-      if (rows.length === 0) {
-        // storage.delete is force-delete on both adapters (fs.ts, s3.ts) —
-        // "already gone, or never written" needs no separate catch here.
-        await storageFromEnv().delete(
-          originalKey(image.board_id, image.sha256),
-        );
-        await release(image.board_id, Number(image.bytes ?? 0));
-      }
-      // A kept camera source goes the same way, unless another image
-      // still on the board came from the same file.
-      if (image.source_sha256) {
-        const { rows: sharing } = await pool.query(
-          `SELECT 1 FROM images
-           WHERE board_id = $1 AND source_sha256 = $2 AND id != $3 AND missing = false
-           LIMIT 1`,
-          [image.board_id, image.source_sha256, image.id],
-        );
-        if (sharing.length === 0) {
-          await storageFromEnv().delete(
-            sourceKey(image.board_id, image.source_sha256),
-          );
-          await release(image.board_id, Number(image.source_bytes ?? 0));
-        }
-      }
-    }
-    await pool.query('UPDATE images SET missing = true WHERE id = $1', [
-      imageId,
-    ]);
+    await removeImage(await imageForDeleting(userId, imageId));
     json(ctx.res, 200, {});
   });
 

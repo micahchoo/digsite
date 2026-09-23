@@ -36,6 +36,7 @@ import {
   sheetForDiscussing,
   sheetForEditing,
 } from '../access/index.ts';
+import { removeSheet } from '../boards/removal.ts';
 import { pool } from '../db/pool.ts';
 import { recordActivity } from '../groups/activity.ts';
 import {
@@ -567,28 +568,7 @@ export function registerSheetRoutes(router: Router) {
   router.del('/sheets/:id', async (ctx) => {
     const userId = requireAuth(ctx);
     const sheet = await sheetForDeleting(userId, param(ctx, 'id'));
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('DELETE FROM edges WHERE sheet_id = $1', [sheet.id]);
-      await client.query('DELETE FROM regions WHERE sheet_id = $1', [sheet.id]);
-      await client.query('DELETE FROM sheet_snapshots WHERE sheet_id = $1', [
-        sheet.id,
-      ]);
-      await client.query('DELETE FROM sheet_reads WHERE sheet_id = $1', [
-        sheet.id,
-      ]);
-      await client.query('DELETE FROM sheet_images WHERE sheet_id = $1', [
-        sheet.id,
-      ]);
-      await client.query('DELETE FROM sheets WHERE id = $1', [sheet.id]);
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    await removeSheet(sheet.id);
     json(ctx.res, 200, {});
   });
 
