@@ -62,6 +62,10 @@ line here before it gets a file.
   the whole question.
 - **Missing** — an image whose original is gone. Kept as a row, shown as
   such, never deleted by the system.
+- **Removal** — a person taking away an image, a sheet or a board, and
+  everything that goes with it: rows, stored objects, and the group's
+  **storage quota** paid back. An image removed goes **missing**; a sheet
+  or a board is deleted. One module (`boards/removal.ts`).
 - **Captured properties** — properties the worker reads from an
   original's EXIF once (`taken`, `taken_at`, `camera`, `lens`, `focal_mm`,
   `iso`, `aperture`, `exposure_s`, `latitude`, `longitude`). Merged under
