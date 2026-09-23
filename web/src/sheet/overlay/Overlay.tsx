@@ -14,7 +14,7 @@ import {
 } from '../connection-emphasis.ts';
 import { regionChip, regionLabelOf, truncateLabel } from '../labels.ts';
 import type { PeerCursor } from '../presence.ts';
-import { edgePaths, midSegment } from '../routing.ts';
+import { edgePaths, foreignPaths, midSegment } from '../routing.ts';
 import {
   type ConnectionLabelJob,
   type ContainerOffset,
@@ -78,6 +78,13 @@ export function Overlay({
     height: window.innerHeight,
   }));
   const shapes = useMemo(() => foreignShapes(rows, elements), [rows, elements]);
+  const foreignLines = useMemo(
+    () => shapes.flatMap((shape) => (shape.kind === 'edge' ? [shape] : [])),
+    [shapes],
+  );
+  // What each foreign line is drawn along: the same rule as this sheet's
+  // own (routing.ts), so the label, the stroke and the click agree.
+  const drawn = foreignPaths(foreignLines, elements, viewport.zoom);
   // What the connections are dimmed around: the own selection, or the one
   // foreign claim selected and the two pictures it joins.
   const focus = useMemo((): Focus | null => {
@@ -163,12 +170,15 @@ export function Overlay({
     for (const shape of shapes) {
       if (shape.kind !== 'edge' || !shape.label) continue;
       const opacity = foreignEdgeOpacity(shape, connectionRelation, focus);
+      const path = drawn.get(shape.id);
+      if (!path) continue;
+      const [from, to] = midSegment(path);
       jobs.push({
         id: shape.id,
         label: shape.label,
         line: [
-          sceneToScreen(shape.line[0], viewport, offset),
-          sceneToScreen(shape.line[1], viewport, offset),
+          sceneToScreen(from, viewport, offset),
+          sceneToScreen(to, viewport, offset),
         ],
         relation: shape.row.relation,
         foreign: true,
@@ -215,6 +225,7 @@ export function Overlay({
     });
   }, [
     connectionRelation,
+    drawn,
     elements,
     focus,
     measureLabel,
@@ -337,23 +348,25 @@ export function Overlay({
           );
         }
 
-        const a = sceneToScreen(shape.line[0], viewport, offset);
-        const b = sceneToScreen(shape.line[1], viewport, offset);
+        const path = (drawn.get(shape.id) ?? []).map((p) =>
+          sceneToScreen(p, viewport, offset),
+        );
+        const a = path[0];
+        const b = path[path.length - 1];
+        if (!a || !b) return null;
         const dimmed =
           relationOpacity(shape.row.relation, connectionRelation) < 1;
         const opacity =
           0.7 * foreignEdgeOpacity(shape, connectionRelation, focus);
         return (
           <g key={shape.id}>
-            <line
+            <polyline
               data-testid="foreign-shape"
               data-foreign-id={shape.id}
               data-foreign-kind="edge"
               data-relation-dimmed={dimmed || undefined}
-              x1={a.x}
-              y1={a.y}
-              x2={b.x}
-              y2={b.y}
+              points={path.map((p) => `${p.x},${p.y}`).join(' ')}
+              fill="none"
               stroke={stroke}
               strokeWidth={strokeWidth}
               strokeDasharray="6 4"

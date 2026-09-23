@@ -8,7 +8,8 @@
 // (`canvas/native/render.ts`), the hit test measures it
 // (`canvas/native/scene.ts#hitAt`), and the overlay puts the relation label
 // on it (`overlay/Overlay.tsx`). All three ask `edgePaths`, so none can
-// draw one line and answer for another
+// draw one line and answer for another. Other sheets' connections take the
+// same way round through `foreignPaths`
 // (../../../.claude/rules/image-graph-hit-what-was-drawn.md in the notebook).
 import { clipPath, dataOf } from '@digsite/shared';
 
@@ -337,6 +338,35 @@ export function routes(scale: number, edgeCount: number): boolean {
   return scale > ROUTE_MIN_SCALE && edgeCount <= ROUTE_LIMIT;
 }
 
+/**
+ * The way from one rectangle's centre to another's around every picture in
+ * between, or null when the two touch, nothing is in the way, or no way
+ * round is short enough. `hosts` are the pictures the two ends belong to:
+ * a connection never goes around its own. Unclipped; the caller trims it
+ * out of its ends.
+ */
+function routeAround(
+  fromRect: Rect,
+  toRect: Rect,
+  hosts: readonly (string | null)[],
+  images: readonly { imageId: string; rect: Rect }[],
+): Point[] | null {
+  if (overlaps(fromRect, toRect)) return null;
+  const start = centre(fromRect);
+  const end = centre(toRect);
+  const ends = new Set(hosts);
+  const span = {
+    x: Math.min(start.x, end.x) - LANE * 2,
+    y: Math.min(start.y, end.y) - LANE * 2,
+    width: Math.abs(start.x - end.x) + LANE * 4,
+    height: Math.abs(start.y - end.y) + LANE * 4,
+  };
+  const obstacles = images
+    .filter((i) => !ends.has(i.imageId) && overlaps(i.rect, span))
+    .map((i) => i.rect);
+  return obstacles.length ? routeOrthogonal(start, end, obstacles) : null;
+}
+
 const cache = new WeakMap<readonly Boxed[], Map<string, Point[]>>();
 const straightCache = new WeakMap<readonly Boxed[], Map<string, Point[]>>();
 
@@ -385,27 +415,66 @@ export function edgePaths<T extends Boxed>(
     const [a, b] = storedEnds(el);
     const fromRect = from ? rectOf(from) : null;
     const toRect = to ? rectOf(to) : null;
-    let path: Point[] = [a, b];
-    if (routed && fromRect && toRect && !overlaps(fromRect, toRect)) {
-      const start = centre(fromRect);
-      const end = centre(toRect);
-      const ends = new Set([hostOf(from), hostOf(to)]);
-      const span = {
-        x: Math.min(start.x, end.x) - LANE * 2,
-        y: Math.min(start.y, end.y) - LANE * 2,
-        width: Math.abs(start.x - end.x) + LANE * 4,
-        height: Math.abs(start.y - end.y) + LANE * 4,
-      };
-      const obstacles = images
-        .filter((i) => !ends.has(i.imageId) && overlaps(i.rect, span))
-        .map((i) => i.rect);
-      const around = obstacles.length
-        ? routeOrthogonal(start, end, obstacles)
+    const around =
+      routed && fromRect && toRect
+        ? routeAround(fromRect, toRect, [hostOf(from), hostOf(to)], images)
         : null;
-      if (around) path = around;
-    }
-    out.set(el.id, clipPath(path, fromRect, toRect));
+    out.set(el.id, clipPath(around ?? [a, b], fromRect, toRect));
   }
   store.set(elements, out);
+  return out;
+}
+
+/** A connection another sheet made, as the overlay has it: its two ends'
+ * rectangles on this sheet and the pictures they belong to. */
+export interface ForeignLine {
+  id: string;
+  from: Rect;
+  to: Rect;
+  hosts: readonly [string, string];
+}
+
+const foreignCache = new WeakMap<
+  readonly ForeignLine[],
+  { elements: readonly Boxed[]; routed: boolean; out: Map<string, Point[]> }
+>();
+
+/**
+ * Other sheets' connections, drawn by the same rule as this sheet's own:
+ * around the pictures between their ends when `routes` says so, trimmed out
+ * of both ends. Keyed by the foreign shape's id; cached per lines and scene.
+ */
+export function foreignPaths(
+  lines: readonly ForeignLine[],
+  elements: readonly Boxed[],
+  scale: number,
+): ReadonlyMap<string, Point[]> {
+  const routed = routes(scale, lines.length);
+  const held = foreignCache.get(lines);
+  if (held && held.elements === elements && held.routed === routed)
+    return held.out;
+  const images: { imageId: string; rect: Rect }[] = [];
+  if (routed)
+    for (const el of elements) {
+      if (el.isDeleted) continue;
+      const data = dataOf(el);
+      if (data?.kind === 'image')
+        images.push({ imageId: data.imageId, rect: rectOf(el) });
+    }
+  const out = new Map<string, Point[]>();
+  for (const line of lines) {
+    const around = routed
+      ? routeAround(line.from, line.to, line.hosts, images)
+      : null;
+    out.set(
+      line.id,
+      clipPath(
+        around ?? [centre(line.from), centre(line.to)],
+        line.from,
+        line.to,
+      ),
+    );
+  }
+  foreignCache.set(lines, { elements, routed, out });
   return out;
 }

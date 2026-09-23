@@ -5,6 +5,7 @@ import {
   LANE,
   type Point,
   distanceToPath,
+  foreignPaths,
   midSegment,
   routeOrthogonal,
   simplify,
@@ -155,5 +156,48 @@ describe('orthogonal routing', () => {
     for (let i = 0; i < 30; i++)
       routeOrthogonal({ x: 0, y: i * 7 }, { x: 1300, y: 900 }, obstacles);
     expect((performance.now() - started) / 30).toBeLessThan(6);
+  });
+});
+
+describe("other sheets' connections", () => {
+  // A picture of this sheet, as the scene holds it.
+  const picture = (imageId: string, r: Rect) => ({
+    id: `el-${imageId}`,
+    ...r,
+    customData: { kind: 'image', imageId },
+  });
+  const a = box(0, 0);
+  const b = box(600, 0);
+  const between = box(300, 0);
+  const elements = [picture('a', a), picture('b', b), picture('mid', between)];
+  const line = {
+    id: 'foreign-edge-1',
+    from: a,
+    to: b,
+    hosts: ['a', 'b'] as const,
+  };
+
+  test('go around the pictures between their ends, like this sheet’s own', () => {
+    const path = foreignPaths([line], elements, 1).get(line.id);
+    if (!path) throw new Error('no path');
+    expect(path.length).toBeGreaterThan(2);
+    expect(orthogonal(path)).toBe(true);
+    expect(enters(path, between, 0)).toBe(false);
+    // Trimmed out of both ends: it starts on a's border, not inside it.
+    const start = path[0] as Point;
+    const onBorder =
+      start.x === a.x ||
+      start.x === a.x + a.width ||
+      start.y === a.y ||
+      start.y === a.y + a.height;
+    expect(onBorder).toBe(true);
+  });
+
+  test('are straight when zoomed out past routing, as own lines are', () => {
+    const path = foreignPaths([line], elements, 0.01).get(line.id);
+    expect(path).toEqual([
+      { x: 100, y: 50 },
+      { x: 600, y: 50 },
+    ]);
   });
 });

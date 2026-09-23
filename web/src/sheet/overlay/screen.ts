@@ -20,7 +20,6 @@ import {
   type ForeignEdge,
   type ForeignRegion,
   type Fraction,
-  clipBetween,
   dataOf,
   fromFraction,
 } from '@digsite/shared';
@@ -296,7 +295,14 @@ export type ForeignShape =
   | {
       id: string;
       kind: 'edge';
-      line: [Point, Point];
+      /** The two ends on this sheet. What is drawn between them is
+       * routing.ts#foreignPaths: around the pictures in between, like this
+       * sheet's own connections, and trimmed out of both ends. */
+      from: Rect;
+      to: Rect;
+      /** The pictures the two ends belong to, which the line never goes
+       * around. */
+      hosts: readonly [string, string];
       label: string;
       sheetName: string;
       row: ForeignEdge;
@@ -332,10 +338,6 @@ export function foreignCopyRect(row: Fraction, imageRectNow: Rect): Rect {
 
 function rectOf(el: ElementLike): Rect {
   return { x: el.x, y: el.y, width: el.width, height: el.height };
-}
-
-function centerOf(r: Rect): Point {
-  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 }
 
 /**
@@ -377,33 +379,31 @@ export function foreignShapes(
   function endpoint(
     edgeSheetId: string,
     end: EdgeEnd,
-  ): { point: Point; rect: Rect; dangling: boolean } | null {
+  ): { rect: Rect; dangling: boolean } | null {
     const image = images.get(end.imageId);
     if (!image) return null; // the image itself is gone from THIS scene: omitted, not an error
     if (end.regionSourceId) {
       const claimed = regionRectByClaim.get(
         `${edgeSheetId}:${end.regionSourceId}`,
       );
-      if (claimed)
-        return { point: centerOf(claimed), rect: claimed, dangling: false };
+      if (claimed) return { rect: claimed, dangling: false };
       // The region end vanished (or a poll race) — draw to the image's
       // rect instead, marked dangling for Overlay.tsx's hollow marker.
-      return { point: centerOf(image), rect: image, dangling: true };
+      return { rect: image, dangling: true };
     }
-    return { point: centerOf(image), rect: image, dangling: false };
+    return { rect: image, dangling: false };
   }
 
   for (const e of rows.edges) {
     const from = endpoint(e.sheetId, e.source);
     const to = endpoint(e.sheetId, e.target);
     if (!from || !to) continue; // an end's image is gone: tolerated by omission, not an error
-    // Border to border, never across its own ends: a line over an image it
-    // joins took the click meant for that image (@digsite/shared#clipBetween).
-    const drawn = clipBetween(from.point, to.point, from.rect, to.rect);
     shapes.push({
       id: foreignShapeId('edge', e.id),
       kind: 'edge',
-      line: [drawn.start, drawn.end],
+      from: from.rect,
+      to: to.rect,
+      hosts: [e.source.imageId, e.target.imageId],
       danglingStart: from.dangling,
       danglingEnd: to.dangling,
       label: e.relation,

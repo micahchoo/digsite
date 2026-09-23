@@ -44,8 +44,11 @@ because the in-memory order was still right.
   puts the relation label on its middle segment. Cached per elements
   array, so a pan computes nothing. Its A* search state is a node AND the
   axis it arrived on; keyed by node alone it returned three bends where two
-  do. Other sheets' lines (`overlay/screen.ts#foreignShapes`) are still
-  straight, clipped with `clipBetween`.
+  do. Other sheets' lines go around by the same rule through
+  `routing.ts#foreignPaths` (both call `routeAround`); the overlay draws
+  that polyline and puts the label on its middle segment, so the SVG's own
+  hit area is what was drawn. `foreignShapes` carries the ends' rects and
+  no line of its own.
 - **The merge never reorders by id.** Unindexed elements keep their stored
   order and new ones follow (the sort is stable). An element with an index
   still sorts by it.

@@ -1,4 +1,3 @@
-// Pure tests, no DOM or canvas — see ../src/sheet/overlay/screen.ts.
 import { describe, expect, test } from 'bun:test';
 import type { Foreign } from '@digsite/shared';
 import {
@@ -18,6 +17,8 @@ import {
   sceneToScreen,
   screenToScene,
 } from '../src/sheet/overlay/screen.ts';
+// Pure tests, no DOM or canvas — see ../src/sheet/overlay/screen.ts.
+import { foreignPaths } from '../src/sheet/routing.ts';
 
 describe('sceneToScreen', () => {
   test('matches the sheet scene-to-viewport coordinate formula', () => {
@@ -288,9 +289,12 @@ describe('foreignShapes: dangling from a vanished foreign region (docs/phases/2-
       throw new Error('expected an edge shape');
     expect(edge.danglingStart).toBe(true);
     expect(edge.danglingEnd).toBe(false);
-    // drawn to the image, same as a plain image end: stopping at its border
-    // (clipBetween), so the line never covers the picture it joins.
-    expect(edge.line[0]).toEqual({ x: 200, y: 100 });
+    // drawn to the image, same as a plain image end: stopping at its border,
+    // so the line never covers the picture it joins (routing.ts).
+    expect(foreignPaths([edge], elements, 1).get(edge.id)?.[0]).toEqual({
+      x: 200,
+      y: 100,
+    });
   });
 
   test('an edge end whose region IS among the current foreign regions is not dangling', () => {
