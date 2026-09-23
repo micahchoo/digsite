@@ -115,6 +115,7 @@ interface DigsiteTools {
   copyForeign: (foreignShapeId: string) => string | null;
   select: (id: string) => void;
   deleteSelected: () => void;
+  getSelected: () => { kind: string } | null;
   setProperty: (id: string, key: string, value: unknown) => void;
   getElements: () => ElementLike[];
   getForeign: () => ForeignShapeLike[];
@@ -374,6 +375,78 @@ async function main() {
     sheetId: facesId,
     images: facesImages,
   };
+
+  await scenario(
+    0,
+    'a rapid Excalidraw delete removes its projected server row',
+    async () => {
+      const imageId = firstPassImages[0];
+      if (!imageId) fail('the first pass sheet has no test image');
+      const regionId = await workerA.page.evaluate((id) => {
+        return (window as unknown as DigsiteWindow).__digsite?.drawRegion(
+          id,
+          { fx: 0.1, fy: 0.1, fw: 0.2, fh: 0.2 },
+          'delete-check',
+        );
+      }, imageId);
+      if (!regionId) fail('could not create the test region');
+
+      const rowId = `${firstPassId}:${regionId}`;
+      const deadline = Date.now() + 7000;
+      let exists = false;
+      while (Date.now() < deadline) {
+        const rows = await member.get<{ regions: RegionRowLike[] }>(
+          `/sheets/${firstPassId}/rows`,
+        );
+        exists = rows.json.regions.some((row) => row.id === rowId);
+        if (exists) break;
+        await sleep(100);
+      }
+      if (!exists) fail('the created region was not projected to the server');
+
+      await workerA.page.evaluate(async (id) => {
+        const digsite = (window as unknown as DigsiteWindow).__digsite;
+        if (!digsite) return;
+        digsite.select(id);
+        const selectionDeadline = Date.now() + 2000;
+        while (
+          Date.now() < selectionDeadline &&
+          digsite.getSelected()?.kind !== 'own'
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        digsite.deleteSelected();
+      }, regionId);
+
+      // Check the live scene immediately, then let the socket debounce and
+      // projection run. The endpoint is checked separately so a stale
+      // Excalidraw callback cannot leave a server-only claim behind.
+      const clientHasRegion = await workerA.page.evaluate((id) => {
+        return Boolean(
+          (window as unknown as DigsiteWindow).__digsite
+            ?.getElements()
+            .some((element) => element.id === id),
+        );
+      }, regionId);
+      if (clientHasRegion)
+        fail('the Excalidraw delete did not remove the region');
+
+      const deleteDeadline = Date.now() + 7000;
+      let serverHasRegion = true;
+      while (Date.now() < deleteDeadline) {
+        const rows = await member.get<{ regions: RegionRowLike[] }>(
+          `/sheets/${firstPassId}/rows`,
+        );
+        serverHasRegion = rows.json.regions.some((row) => row.id === rowId);
+        if (!serverHasRegion) break;
+        await sleep(100);
+      }
+      if (serverHasRegion)
+        fail('the deleted region remains in server projection');
+      return 'client tombstone reached the server projection';
+    },
+  );
+
   // Reference kept so a future action set (e.g. targeting a specific
   // imageId by id lookup) has it on hand without re-querying the DOM.
   void ownImageElId;

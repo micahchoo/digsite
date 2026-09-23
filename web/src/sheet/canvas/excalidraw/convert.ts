@@ -73,6 +73,23 @@ export function toSceneElements(
   return els.map(toSceneElement);
 }
 
+/** Excalidraw may report an onChange from the pre-update scene while an
+ * updateScene commit is still pending. Keep the applied scene as the winner
+ * until the callback contains every applied element version. */
+export function sceneForCanvasChange<T extends { id: string; version: number }>(
+  pending: readonly T[] | null,
+  reported: readonly T[],
+): readonly T[] {
+  if (!pending) return reported;
+  const seen = new Map(
+    reported.map((element) => [element.id, element.version]),
+  );
+  const caughtUp = pending.every(
+    (element) => (seen.get(element.id) ?? -1) >= element.version,
+  );
+  return caughtUp ? reported : pending;
+}
+
 /** The inverse projection: every SETTABLE field of `changes` mapped onto
  * `newElementWith`'s patch shape. Only fields `UpdateOp` ever carries. */
 function excalidrawPatch(

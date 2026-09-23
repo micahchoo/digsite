@@ -41,7 +41,7 @@ import {
   requireAuth,
 } from '../http.ts';
 import { neighbourhoodFrom } from './neighbourhood.ts';
-import { roomStats } from './room.ts';
+import { broadcastSheetScene, roomStats } from './room.ts';
 import { toEdgeRow, toRegionRow } from './rows.ts';
 import {
   getSnapshotElements,
@@ -473,8 +473,17 @@ export function registerSheetRoutes(router: Router) {
           [sheet.id, img.id],
         );
       }
-      await saveSnapshotAndProjectInTransaction(client, sheet.id, newElements);
+      const saved = await saveSnapshotAndProjectInTransaction(
+        client,
+        sheet.id,
+        newElements,
+      );
       await client.query('COMMIT');
+
+      // The snapshot is committed before the room sees the same full merged
+      // scene. Clients and the later room debounce use the normal version
+      // merge path, so a stale peer scene cannot remove these additions.
+      broadcastSheetScene(sheet.id, saved.elements, userId);
 
       const response: AddImagesToSheetResponse = {
         added: toAdd.map((img) => img.id),

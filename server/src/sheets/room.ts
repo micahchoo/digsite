@@ -74,6 +74,20 @@ const pending = new Map<
   { timer: ReturnType<typeof setTimeout>; latest: unknown[] }
 >();
 
+const roomServers = new Set<SocketIOServer>();
+
+/** Publish an HTTP-authored scene change to the same `scene` channel used by
+ * live edits. The snapshot is already committed when callers invoke this. */
+export function broadcastSheetScene(
+  sheetId: string,
+  elements: unknown[],
+  from: string,
+): void {
+  const out: SceneServerPayload = { elements, from };
+  for (const io of roomServers) io.to(sheetId).emit('scene', out);
+  if (roomServers.size) roomStats.broadcasts++;
+}
+
 function scheduleSnapshot(sheetId: string, elements: unknown[]): void {
   const entry = pending.get(sheetId);
   if (entry) clearTimeout(entry.timer);
@@ -93,6 +107,8 @@ export function mountSheetRoom(httpServer: HttpServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     cors: { origin: env.WEB_ORIGIN, credentials: true },
   });
+  roomServers.add(io);
+  httpServer.once('close', () => roomServers.delete(io));
 
   io.on('connection', (socket: Socket) => {
     socket.on('join', async (payload: JoinPayload) => {

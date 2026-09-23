@@ -24,7 +24,7 @@ export default defineConfig({
   },
   resolve: {
     alias: [
-      { find: '@digsite/shared', replacement: `${sharedSrc}/index.ts` },
+      { find: /^@digsite\/shared$/, replacement: `${sharedSrc}/index.ts` },
       { find: /^@digsite\/shared\/(.*)$/, replacement: `${sharedSrc}/$1.ts` },
     ],
   },

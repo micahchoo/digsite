@@ -11,6 +11,7 @@ import {
   fitViewport,
   orderByIndex,
   repairBoundTextOrder,
+  sceneForCanvasChange,
   toSceneElement,
   zoomBy,
 } from '../src/sheet/canvas/excalidraw/convert.ts';
@@ -49,6 +50,26 @@ function fakeExcalidrawElement(partial: Record<string, unknown>) {
     // biome-ignore lint/suspicious/noExplicitAny: a hand-built element for a test fixture, not a real Excalidraw type
   } as any;
 }
+
+describe('Excalidraw onChange commit ordering', () => {
+  test('a rapid stale callback cannot replace an applied delete tombstone', () => {
+    const deleted = [
+      { id: 'region-1', version: 8, isDeleted: true },
+      { id: 'image-1', version: 1, isDeleted: false },
+    ];
+    const stale = [
+      { id: 'region-1', version: 7, isDeleted: false },
+      { id: 'image-1', version: 1, isDeleted: false },
+    ];
+    const caughtUp = [
+      { id: 'region-1', version: 8, isDeleted: true },
+      { id: 'image-1', version: 1, isDeleted: false },
+    ];
+
+    expect(sceneForCanvasChange(deleted, stale)).toBe(deleted);
+    expect(sceneForCanvasChange(deleted, caughtUp)).toBe(caughtUp);
+  });
+});
 
 describe('toSceneElement', () => {
   test('round-trips every field the product reads off a scene element', () => {

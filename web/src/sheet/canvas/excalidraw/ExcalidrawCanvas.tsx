@@ -50,6 +50,7 @@ import {
   applyToApi,
   fitViewport,
   reconcileRemote,
+  sceneForCanvasChange,
   toSceneElements,
   zoomBy as zoomByFactor,
 } from './convert.ts';
@@ -255,17 +256,18 @@ export const ExcalidrawCanvas = forwardRef<CanvasHandle, CanvasProps>(
     const onChangeInternal = useCallback(
       (elements: readonly ExcalidrawElement[], appState: AppState) => {
         // onChange also fires for unrelated state while an updateScene is
-        // still pending; only a report that carries every applied element
-        // at its applied version means the scene has caught up.
+        // still pending. Do not send that stale scene to the room: it could
+        // replace a pending delete with the pre-delete live element during
+        // the room's outbound debounce.
         const pending = lastApplied.current;
-        if (pending) {
-          const seen = new Map(elements.map((e) => [e.id, e.version]));
-          if (pending.every((p) => (seen.get(p.id) ?? -1) >= p.version))
-            lastApplied.current = null;
-        }
+        const effectiveElements = sceneForCanvasChange(pending, elements);
+        if (pending && effectiveElements === elements)
+          lastApplied.current = null;
         const ids = appState.selectedElementIds;
         onChange({
-          elements: toSceneElements(elements),
+          elements: toSceneElements(
+            effectiveElements as readonly ExcalidrawElement[],
+          ),
           viewport: viewportOf(appState),
           selectedIds: Object.keys(ids).filter((id) => ids[id]),
         });

@@ -12,6 +12,7 @@ import { type Socket, io } from 'socket.io-client';
 import { SERVER_ORIGIN } from '../lib/api.ts';
 import type { CanvasHandle, SceneElement } from './canvas/types.ts';
 import { canSendPointer } from './presence.ts';
+import { RemoteSceneBuffer } from './remote-scenes.ts';
 import { isSyncable, signature } from './sync.ts';
 
 export interface Peer {
@@ -85,6 +86,105 @@ export function useRoom(deps: RoomDeps): Room {
     let cancelled = false;
     const socket = io(SERVER_ORIGIN, { withCredentials: true });
     socketRef.current = socket;
+    const loadedImageIds = new Set<string>();
+    const pendingScenes = new RemoteSceneBuffer();
+    let processingScenes = false;
+    let pendingSceneCount = 0;
+    let pendingLastRecvAt: number | null = null;
+    let pendingJoinedPeers: string[] | null = null;
+    let receivedPeerRoster = false;
+
+    const drainRemoteScenes = () => {
+      if (processingScenes || cancelled) return;
+      processingScenes = true;
+      void (async () => {
+        let elements = pendingScenes.take();
+        while (elements && !cancelled) {
+          const imageIds = new Set<string>();
+          for (const el of elements as {
+            customData?: { kind?: string; imageId?: string };
+          }[]) {
+            if (
+              el.customData?.kind === 'image' &&
+              el.customData.imageId &&
+              !loadedImageIds.has(el.customData.imageId)
+            ) {
+              imageIds.add(el.customData.imageId);
+            }
+          }
+          if (imageIds.size) {
+            try {
+              await loadImages([...imageIds]);
+              for (const imageId of imageIds) loadedImageIds.add(imageId);
+            } catch (err) {
+              console.error('remote sheet image load failed', err);
+            }
+          }
+          if (cancelled) return;
+
+          // Fold any scenes received during the asset load into this one.
+          // Recheck assets after merging because the newer scene may add an
+          // image that was not in the scene whose load just completed.
+          const later = pendingScenes.take();
+          if (later) {
+            pendingScenes.enqueue(elements);
+            pendingScenes.enqueue(later);
+            elements = pendingScenes.take();
+            continue;
+          }
+
+          getHandle()?.applyRemote(elements);
+          lastEmittedSig.current = signature(
+            (getHandle()?.elements() ?? []).filter(isSyncable),
+          );
+
+          if (pendingJoinedPeers !== null) {
+            if (!receivedPeerRoster) {
+              const joinedAsPeers = pendingJoinedPeers.map((id) => ({
+                id,
+                name: '',
+              }));
+              setPeers(joinedAsPeers);
+              statusRef.current = {
+                ...statusRef.current,
+                peers: joinedAsPeers,
+              };
+            }
+            pendingJoinedPeers = null;
+          }
+          if (pendingSceneCount > 0) {
+            statusRef.current = {
+              ...statusRef.current,
+              lastRecvAt: pendingLastRecvAt,
+              recvs: statusRef.current.recvs + pendingSceneCount,
+            };
+            pendingSceneCount = 0;
+            pendingLastRecvAt = null;
+          }
+          onRemoteChange();
+          rerender();
+          elements = pendingScenes.take();
+        }
+      })()
+        .catch((err) => console.error('remote sheet scene failed', err))
+        .finally(() => {
+          processingScenes = false;
+          if (pendingScenes.hasPending() && !cancelled) drainRemoteScenes();
+        });
+    };
+
+    const queueRemoteScene = (
+      elements: unknown[],
+      opts: { joinedPeers?: string[]; scene?: boolean } = {},
+    ) => {
+      pendingScenes.enqueue(elements);
+      if (opts.joinedPeers) pendingJoinedPeers = opts.joinedPeers;
+      if (opts.scene) {
+        pendingSceneCount++;
+        pendingLastRecvAt = Date.now();
+      }
+      drainRemoteScenes();
+    };
 
     socket.on('join-denied', ({ reason }: { reason: string }) => {
       if (cancelled) return;
@@ -94,37 +194,14 @@ export function useRoom(deps: RoomDeps): Room {
 
     socket.on(
       'joined',
-      async ({
+      ({
         elements,
         peers: joinedPeers,
       }: { elements: unknown[]; peers: string[] }) => {
         if (cancelled) return;
-        const imageIds = new Set<string>();
-        for (const el of elements as {
-          customData?: { kind?: string; imageId?: string };
-        }[]) {
-          if (el.customData?.kind === 'image' && el.customData.imageId) {
-            imageIds.add(el.customData.imageId);
-          }
-        }
-        await loadImages([...imageIds]);
-        if (cancelled) return;
-        getHandle()?.applyRemote(elements);
-        lastEmittedSig.current = signature(
-          (getHandle()?.elements() ?? []).filter(isSyncable),
-        );
-        // 'joined' carries ids only (the stub, and the real room.ts, send
-        // names on the very next 'peers' broadcast — the same tick this
-        // socket just joined into). docs/ux/audit.md #11: a raw user id
-        // ("YbFKWrYrhDdOtPZSUKVNJerfMTQzjSCE") used to stand in as the name
-        // for that brief window — name stays blank instead, so nothing
-        // ever shows an id as if it were a name; SidePanel.tsx's presence
-        // strip skips a peer with no name yet rather than rendering one.
-        const joinedAsPeers = joinedPeers.map((id) => ({ id, name: '' }));
-        setPeers(joinedAsPeers);
-        statusRef.current = { ...statusRef.current, peers: joinedAsPeers };
-        onRemoteChange();
-        rerender();
+        // joined carries ids only; the named peers event can arrive while
+        // image files load, so its roster must win over these blank names.
+        queueRemoteScene(elements, { joinedPeers });
       },
     );
 
@@ -139,6 +216,7 @@ export function useRoom(deps: RoomDeps): Room {
         ? payload.peers
         : payload.users.map((u) => ({ id: u, name: u }));
       const asPeers = list.map((p) => ({ id: p.id, name: p.name || p.id }));
+      receivedPeerRoster = true;
       setPeers(asPeers);
       statusRef.current = { ...statusRef.current, peers: asPeers };
       const live = new Set(list.map((p) => p.id));
@@ -158,23 +236,14 @@ export function useRoom(deps: RoomDeps): Room {
 
     socket.on('scene', ({ elements: remote }: { elements: unknown[] }) => {
       if (cancelled) return;
-      getHandle()?.applyRemote(remote);
-      lastEmittedSig.current = signature(
-        (getHandle()?.elements() ?? []).filter(isSyncable),
-      );
-      statusRef.current = {
-        ...statusRef.current,
-        lastRecvAt: Date.now(),
-        recvs: statusRef.current.recvs + 1,
-      };
-      onRemoteChange();
-      rerender();
+      queueRemoteScene(remote, { scene: true });
     });
 
     socket.emit('join', { sheetId });
 
     return () => {
       cancelled = true;
+      pendingScenes.take();
       socket.disconnect();
       socketRef.current = null;
     };
