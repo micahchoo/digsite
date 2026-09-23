@@ -569,6 +569,21 @@
 }
 
 /* evidence: the two ends side by side, what the connection rests on */
+.claim-evidence-block {
+  margin-bottom: var(--space-3);
+}
+.claim-evidence-block .claim-evidence {
+  margin-bottom: var(--space-2);
+}
+.claim-compare {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 32px;
+  font-size: var(--text-sm);
+}
 .claim-evidence {
   display: flex;
   align-items: center;

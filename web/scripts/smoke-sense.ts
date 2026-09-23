@@ -485,6 +485,17 @@ async function main() {
   });
   console.log('PASS: "More like this" on an image finds the pictures like it');
 
+  await page.evaluate(() =>
+    (
+      window as unknown as { __digsiteBoard: { select: (r: number) => void } }
+    ).__digsiteBoard.select(1),
+  );
+  await page.getByTestId('board-tray-compare').click();
+  await page.getByTestId('compare').waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('compare').waitFor({ state: 'detached' });
+  console.log('PASS: two selected pictures open side by side from the tray');
+
   await browser.close();
   console.log('smoke-sense: all assertions passed');
 }

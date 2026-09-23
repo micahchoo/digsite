@@ -4,11 +4,13 @@ import { type GetSheetReachResponse, dataOf, fileId } from '@digsite/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { ContextMenu, type MenuSection } from '../board/ContextMenu.tsx';
+import { Compare, type CompareEnd } from '../components/Compare.tsx';
 import {
   ErrorState,
   type ErrorStateInfo,
   fromCaught,
 } from '../components/ErrorState.tsx';
+import { WHOLE } from '../components/compare-view.ts';
 import { api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
 import { useVocabulary, withLocalTerms } from '../lib/vocabulary.ts';
@@ -91,6 +93,11 @@ export function Sheet() {
     sections: MenuSection[];
   } | null>(null);
   const [help, setHelp] = useState(false);
+  const [comparing, setComparing] = useState<{
+    a: CompareEnd;
+    b: CompareEnd;
+    title: string;
+  } | null>(null);
   const [, bumpTick] = useState(0);
   const rerender = useCallback(() => bumpTick((n) => n + 1), []);
   const loadImages = useCallback(async (imageIds: string[]) => {
@@ -568,6 +575,14 @@ export function Sheet() {
           </svg>
           <span>Details</span>
         </button>
+        {comparing && (
+          <Compare
+            a={comparing.a}
+            b={comparing.b}
+            title={comparing.title}
+            onClose={() => setComparing(null)}
+          />
+        )}
         {menu && (
           <ContextMenu
             x={menu.x}
@@ -635,6 +650,21 @@ export function Sheet() {
           },
           onCopyForeign: (fid) => tools.copyForeign(fid),
           onDeleteSelected: () => tools.deleteSelected(),
+          onCompare: ([a, b], relation) => {
+            const end = (e: typeof a): CompareEnd => ({
+              src: api.originalUrl(e.imageId),
+              name:
+                sheetInfo.images.find((img) => img.id === e.imageId)?.name ??
+                'Picture',
+              label: e.label,
+              focus: e.fraction ?? WHOLE,
+            });
+            setComparing({
+              a: end(a),
+              b: end(b),
+              title: relation || 'Unnamed connection',
+            });
+          },
           onSelectClaim: (id) => {
             tools.select(id);
             rerender();

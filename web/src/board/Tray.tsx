@@ -29,6 +29,8 @@ interface Props {
   onInvert: () => void;
   onStartSheet: (name: string) => Promise<void> | void;
   onAddToSheet: (sheetId: string) => Promise<void> | void;
+  /** Two selected: open them side by side. */
+  onCompare?: () => void;
   startRequested?: boolean;
   onStartRequested?: () => void;
   addRequested?: boolean;
@@ -47,6 +49,7 @@ export function Tray({
   onInvert,
   onStartSheet,
   onAddToSheet,
+  onCompare,
   startRequested = false,
   onStartRequested,
   addRequested = false,
@@ -268,6 +271,15 @@ export function Tray({
                 {over
                   ? `Start a sheet with the first ${startCount} of ${items.length}`
                   : 'Start a sheet'}
+              </button>
+            )}
+            {items.length === 2 && onCompare && (
+              <button
+                type="button"
+                data-testid="board-tray-compare"
+                onClick={onCompare}
+              >
+                Compare
               </button>
             )}
             <div className="board-tray-add-wrap">

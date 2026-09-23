@@ -626,6 +626,66 @@ async function main(): Promise<void> {
     pass(
       '6d. names under pictures; Shift-click groups two; the cursor says move',
     );
+
+    // -- 6e. Check a claim: its two ends side by side, one zoom for both -----
+    await m.keyboard.press('Escape');
+    const e45c = await M.edgeBetween(4, 5);
+    assert(e45c, 'the 4 -> 5 connection is gone');
+    await m.evaluate(
+      (id) => (window as unknown as SheetWindow).__digsite.select(id),
+      e45c.id,
+    );
+    await m.getByTestId('inspector-compare').click();
+    const compare = m.getByTestId('compare');
+    await compare.waitFor({ timeout: 5000 });
+    const widths = () =>
+      m.evaluate(() =>
+        ['a', 'b'].map((w) => {
+          const img = document.querySelector<HTMLImageElement>(
+            `[data-testid="compare-picture-${w}"]`,
+          );
+          return img && img.naturalWidth > 0
+            ? img.getBoundingClientRect().width
+            : 0;
+        }),
+      );
+    await m.waitForFunction(
+      () => {
+        const imgs = Array.from(
+          document.querySelectorAll<HTMLImageElement>('.compare-picture'),
+        );
+        return (
+          imgs.length === 2 &&
+          imgs.every(
+            (img) => img.naturalWidth > 0 && img.style.visibility !== 'hidden',
+          )
+        );
+      },
+      undefined,
+      { timeout: 10_000 },
+    );
+    const [a0 = 0, b0 = 0] = await widths();
+    const paneA = await m.getByTestId('compare-pane-a').boundingBox();
+    assert(paneA, 'no left pane');
+    await m.mouse.move(paneA.x + paneA.width / 2, paneA.y + paneA.height / 2);
+    await m.mouse.wheel(0, -600);
+    await m.waitForTimeout(200);
+    const [a1 = 0, b1 = 0] = await widths();
+    assert(
+      a0 > 0 && a1 > a0 * 1.5 && b1 > b0 * 1.5,
+      `one wheel on the left should zoom both: ${a0}->${a1}, ${b0}->${b1}`,
+    );
+    await m.screenshot({ path: `${SHOTS}6e-compare.png` });
+    await m.keyboard.press('3');
+    await m.getByTestId('compare-difference').check();
+    await m.screenshot({ path: `${SHOTS}6e-compare-difference.png` });
+    await m.keyboard.press('2');
+    await m.getByTestId('compare-divider').waitFor();
+    await m.keyboard.press('Escape');
+    await compare.waitFor({ state: 'detached', timeout: 3000 });
+    pass(
+      '6e. a connection opens side by side; one wheel zooms both; swipe and difference; Esc closes',
+    );
     await m.keyboard.press('Escape');
     await m.waitForTimeout(3500); // let First pass save before the board reads it
 

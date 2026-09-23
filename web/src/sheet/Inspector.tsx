@@ -58,6 +58,8 @@ export interface InspectorProps {
   onDeleteSelected: () => void;
   /** Selects a claim listed on the same pair: an element or a foreign id. */
   onSelectClaim: (id: string) => void;
+  /** Opens the two ends of a connection side by side, to check the claim. */
+  onCompare?: (ends: [EvidenceEnd, EvidenceEnd], relation: string) => void;
 }
 
 export function Inspector(props: InspectorProps) {
@@ -110,10 +112,12 @@ function Evidence({
   ends,
   imageSrc,
   direction,
+  onCompare,
 }: {
   ends: [EvidenceEnd, EvidenceEnd];
   imageSrc: (imageId: string) => string;
   direction: ElementDataEdge['direction'];
+  onCompare?: () => void;
 }) {
   const icon =
     direction === 'forward'
@@ -124,10 +128,23 @@ function Evidence({
           ? 'arrowBoth'
           : 'minus';
   return (
-    <div className="claim-evidence" data-testid="inspector-evidence">
-      <Crop end={ends[0]} src={imageSrc(ends[0].imageId)} size={104} />
-      <Icon name={icon} size={16} className="claim-evidence-arrow" />
-      <Crop end={ends[1]} src={imageSrc(ends[1].imageId)} size={104} />
+    <div className="claim-evidence-block">
+      <div className="claim-evidence" data-testid="inspector-evidence">
+        <Crop end={ends[0]} src={imageSrc(ends[0].imageId)} size={104} />
+        <Icon name={icon} size={16} className="claim-evidence-arrow" />
+        <Crop end={ends[1]} src={imageSrc(ends[1].imageId)} size={104} />
+      </div>
+      {onCompare && (
+        <button
+          type="button"
+          className="claim-compare"
+          data-testid="inspector-compare"
+          onClick={onCompare}
+        >
+          <Icon name="panel" size={15} />
+          Compare side by side
+        </button>
+      )}
     </div>
   );
 }
@@ -369,7 +386,16 @@ function OwnClaim(
     <div data-testid="inspector" className="claim">
       <Heading title="Connection" onDelete={onDeleteSelected} />
       {ends && (
-        <Evidence ends={ends} imageSrc={imageSrc} direction={data.direction} />
+        <Evidence
+          ends={ends}
+          imageSrc={imageSrc}
+          direction={data.direction}
+          onCompare={
+            props.onCompare
+              ? () => props.onCompare?.(ends, data.relation)
+              : undefined
+          }
+        />
       )}
       <section className="claim-section">
         <h3>Relation</h3>
@@ -483,7 +509,16 @@ function ForeignClaim(props: InspectorProps) {
   return (
     <div data-testid="inspector" className="claim claim--foreign">
       <Heading title="Connection" from={shape.sheetName} />
-      <Evidence ends={ends} imageSrc={imageSrc} direction={row.direction} />
+      <Evidence
+        ends={ends}
+        imageSrc={imageSrc}
+        direction={row.direction}
+        onCompare={
+          props.onCompare
+            ? () => props.onCompare?.(ends, row.relation)
+            : undefined
+        }
+      />
       <section className="claim-section">
         <h3>Relation</h3>
         <p className="claim-readonly">{row.relation || 'Unnamed'}</p>

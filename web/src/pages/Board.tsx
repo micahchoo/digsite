@@ -91,6 +91,8 @@ import {
   subscribeUploadQueue,
 } from '../board/upload.ts';
 import { useSelection } from '../board/useSelection.ts';
+import { Compare, type CompareEnd } from '../components/Compare.tsx';
+import { WHOLE } from '../components/compare-view.ts';
 import '../board/board.css';
 import { Confirm } from '../components/Confirm.tsx';
 import {
@@ -294,6 +296,9 @@ export function Board() {
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
   const [folderImport, setFolderImport] = useState(false);
+  const [comparing, setComparing] = useState<[CompareEnd, CompareEnd] | null>(
+    null,
+  );
   const [fileDragActive, setFileDragActive] = useState(false);
   const [, forceRender] = useState(0);
 
@@ -2635,6 +2640,16 @@ export function Board() {
         onInvert={() => void invertSelection()}
         onStartSheet={startSheetFromTray}
         onAddToSheet={addSelectionToSheet}
+        onCompare={() => {
+          const [first, second] = selectedImages;
+          if (!first || !second) return;
+          const end = (img: BoardImage): CompareEnd => ({
+            src: api.originalUrl(img.id),
+            name: img.name,
+            focus: WHOLE,
+          });
+          setComparing([end(first), end(second)]);
+        }}
         startRequested={startSheetRequested}
         onStartRequested={() => setStartSheetRequested(false)}
         addRequested={addSheetRequested}
@@ -2642,6 +2657,13 @@ export function Board() {
       />
 
       {selectionNote && <output className="board-note">{selectionNote}</output>}
+      {comparing && (
+        <Compare
+          a={comparing[0]}
+          b={comparing[1]}
+          onClose={() => setComparing(null)}
+        />
+      )}
 
       {contextMenu && (
         <ContextMenu
