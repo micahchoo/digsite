@@ -1,8 +1,40 @@
 # HANDOFF — digsite product repo
 
-Updated 2026-09-22 after the native-canvas and bulk-upload Luna pass.
+Updated 2026-09-22 after the upload-throughput and interface Luna pass.
 The product repository is `app/`; roadmap: `docs/roadmap.md`.
 Nothing was deployed. The isolated functional preview uses ports 5292/8892.
+
+## Latest usability pass
+
+The real upload log showed 77 rate-limited responses among 164 requests.
+The old 120-files/minute default made a 20,000-file import take nearly three
+hours. Defaults are now 6,000 files/minute and 600 Tus creations/minute;
+explicit deployment overrides still win. The worker runs bounded batches
+continuously while busy instead of starting another batch every 500 ms.
+It no longer overlaps slow batches. The same 120-image processing workload
+fell from 15.10 s to 1.90 s; 1,200 images processed in 21.36 s at 425 MB peak
+RSS. See `docs/measurements/bulk-upload-throughput.md` for workload limits.
+Multipart requests are bounded before parsing (100 MiB by default and at
+most 100 files). Oversized declared and chunked bodies return JSON 413;
+normal browser batches stay below these bounds.
+
+The board map now has 16 fixed columns instead of 1,024. A 61-image board
+forms four rows. Existing ranks, slots and selection IDs are unchanged.
+Browser tile URLs and stored coarse tiles carry layout version 2. Old tiles
+are ignored and reclaimed on the next materialisation; originals and ladder
+pages remain valid. Rectangle dragging now selects only cells inside its
+row/column bounds; Shift-click remains a linear range. The earlier million-
+image performance results used the wide layout and must not be presented
+as a new scale measurement of this compact layout.
+
+Upload activity can collapse its file list while retaining counts and the
+stop control. Metadata updates preserve the Deck instance and camera;
+ready-image updates reload tiles while keeping their previous bitmaps.
+File drops can enqueue uploads directly on the board. The shell and group
+overview have clearer navigation, spacing,
+typography and board previews. Sheet authoring now supports additive and
+band selection, moving selected images together, and navigation gestures
+through the drawing overlay. See the current browser acceptance checks.
 
 ## Current result
 
@@ -59,19 +91,24 @@ and `docs/ux/interface-direction.md` before more visual work.
 
 ## Verification
 
-- Isolated server suite: 87 passed, one skipped, no failures.
-- Web unit suite: 142 passed, no failures.
-- Shared unit suite: 51 passed; script tests: 4 passed.
+- Isolated server suite: 95 passed, one skipped, no failures.
+- Web unit suite: 146 passed, no failures.
+- Shared unit suite: 53 passed; script tests: 4 passed in the preceding pass.
 - Fresh real-server suites: mixed multipart/resumable uploads, board
   selection/live additions/archive, 10/10 core scenarios, 9/9 group lifecycle,
   and 9/9 collaborative-sheet checks including delayed metadata hydration.
 - Two 20,000-file browser selections: 80 mounted rows, two held upload
   requests, feedback within 142 ms and 119 ms of input change. This checks
   browser queue behavior, not storage ingestion of 40,000 images.
-- Real mixed upload test: 13 small images and one image over 8 MiB reached
-  ready exactly once. Status/auth/Tus logging tests pass.
-- All 13 registered browser smoke scripts pass. Typechecks, Biome, seam
-  checks and the production build pass.
+- Real mixed upload test: 133 small images and one image over 8 MiB reached
+  ready exactly once without rate-limit pauses. Status/auth/Tus logging tests pass.
+- The 20,000-file responsiveness smoke checks panning, collapse/reopen,
+  a fast chooser event, camera continuity on metadata refresh, retained
+  pixels during delayed tile responses, and changed pixels afterward.
+- All 14 browser smoke scripts pass: 12 in the full run, then the remaining
+  two on focused rerun after correcting cell-boundary and optional-layer
+  assumptions in the tests. Typechecks, Biome, seam checks and the production
+  build pass.
 
 Fresh test databases are created and dropped by `scripts/e2e-fresh.ts`.
 It accepts selected suite paths, for example `src/upload-queue.ts`.
@@ -84,7 +121,7 @@ Database: `digsite_preview_1790122818`.
 Storage: `../.preview/digsite_preview_1790122818/data`.
 Persistent logs: `/tmp/digsite-preview-server.log` and
 `/tmp/digsite-preview-web.log`. Request diagnostics are enabled.
-The latest read-only database check found 104 ready images and no jobs.
+The latest read-only database check found 1,034 ready images and no jobs.
 Neither historical 20,000-file attempt could be traced conclusively.
 Final browser verification opened the real board, Find controls and native
 sheet with no runtime errors; the 390px layout had no horizontal overflow.

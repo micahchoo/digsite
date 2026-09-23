@@ -18,6 +18,16 @@ Sequence: 1 before 2, because the map is where the design could still be
 wrong and the sheet is assembled from parts that already work. 3 and 4
 can run beside 2.
 
+The latest usability pass adds a compact 16-column board map, rectangular
+drag selection, uninterrupted map updates during imports, bounded upload
+requests, faster worker scheduling, native sheet group selection/panning,
+and a polished shell with board previews. The five fresh-database acceptance
+suites and all 14 browser smoke scripts pass. See
+`measurements/bulk-upload-throughput.md` and `../HANDOFF.md` for measurements
+and remaining work. The earlier million-image results used the 1,024-column
+layout; repeat that scale run for the compact layout before calling scale
+closeout complete.
+
 ## Phase 1 — make the map real
 
 - Upload as a worker: the request stores the file and the row; a worker
