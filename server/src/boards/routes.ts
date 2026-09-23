@@ -11,6 +11,7 @@ import type {
   BoardSummary,
   CreateBoardRequest,
   CreateBoardResponse,
+  DuplicateGroupsResponse,
   FindBoardResponse,
   FolderImport,
   GetBoardAllowlistResponse,
@@ -93,6 +94,7 @@ import { arrangementOf } from '../meaning/arrangement.ts';
 import { duplicatesOf } from '../meaning/duplicates.ts';
 import { suggestLabels } from '../meaning/labels.ts';
 import { searchText, similarTo } from '../meaning/search.ts';
+import { duplicateGroups } from '../meaning/sweep.ts';
 import { recordTileCache } from '../metrics.ts';
 import {
   deletePrefix,
@@ -1576,6 +1578,18 @@ export function registerBoardRoutes(router: Router) {
       return json(ctx.res, 200, response);
     });
   }
+
+  // GET /boards/:id/duplicate-groups (meaning/sweep.ts): every group of
+  // near-duplicates on the board, from the last sweep, largest first.
+  // `complete` is false until the board has been swept once.
+  router.get('/boards/:id/duplicate-groups', async (ctx) => {
+    const asked = await askMeaning(ctx, false);
+    if (!asked) return;
+    const response: DuplicateGroupsResponse = await duplicateGroups(
+      asked.boardId,
+    );
+    return json(ctx.res, 200, response);
+  });
 
   // GET /boards/:id/label-suggestions?image=&limit= (meaning/labels.ts):
   // the board's own label terms that best describe the image, best first,

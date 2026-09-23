@@ -26,6 +26,8 @@ const KINDS = {
   'rank-rebuild': { coalesce: { settle: '2 seconds' } },
   // 0025_meaning_pos.sql: jobs_arrange_pending_board
   arrange: { coalesce: { settle: '30 seconds' } },
+  // 0030_duplicate_sweep.sql: jobs_duplicate_sweep_pending_board
+  'duplicate-sweep': { coalesce: { settle: '30 seconds' } },
 } as const satisfies Record<string, KindRule>;
 
 export type JobKind = keyof typeof KINDS;

@@ -33,7 +33,10 @@ const CANDIDATES = 20;
 const CELL = Math.max(...LADDER) as 128;
 
 /** Grey levels of an image's 128-px ladder cell. */
-async function cellGrey(boardId: string, slot: number): Promise<Uint8Array> {
+export async function cellGrey(
+  boardId: string,
+  slot: number,
+): Promise<Uint8Array> {
   const { page, x, y } = ladderAddress(slot, CELL);
   return withPage(boardId, CELL, page, (canvas) => {
     const rgba = canvas.getContext('2d').getImageData(x, y, CELL, CELL).data;

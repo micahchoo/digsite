@@ -143,6 +143,10 @@ export type MeaningResponse = { matches: MeaningMatch[] };
 // scored against the picture by CLIP, best first. Only words people
 // already use; never a new one. Statuses as /similar.
 export type LabelSuggestion = { term: string; score: number };
+/** GET /boards/:id/duplicate-groups: the board's near-duplicates, each
+ * group a list of image ids, largest first; `complete` is false until the
+ * board has been swept once (after its first arrangement). */
+export type DuplicateGroupsResponse = { groups: string[][]; complete: boolean };
 export type LabelSuggestionsResponse = { suggestions: LabelSuggestion[] };
 
 // Import a folder the server can read: POST /boards/:id/imports {path}

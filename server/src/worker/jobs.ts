@@ -274,7 +274,15 @@ const RUNNERS: Record<JobKind, (payload: Payload) => Promise<void>> = {
   embed: runEmbedJob,
   arrange: async (payload) => {
     const { arrangeBoard } = await import('../meaning/arrangement.ts');
-    await arrangeBoard(payload.boardId as string);
+    const arranged = await arrangeBoard(payload.boardId as string);
+    // Near-duplicates are found along the arrangement (meaning/sweep.ts).
+    if (arranged.mode !== 'none') {
+      await schedule('duplicate-sweep', { boardId: payload.boardId });
+    }
+  },
+  'duplicate-sweep': async (payload) => {
+    const { sweepDuplicates } = await import('../meaning/sweep.ts');
+    await sweepDuplicates(payload.boardId as string);
   },
   // Dynamic: boards/folder-import.ts reaches this file through intake.
   'folder-import': async (payload) => {
