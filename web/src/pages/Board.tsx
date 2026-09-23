@@ -1661,6 +1661,15 @@ export function Board() {
 
   function flyToImage(imgId: string) {
     const img = selectedImages.find((i) => i.id === imgId);
+    // An image uploaded after the last rank build has no cell yet: open it,
+    // and say so, rather than ignore the click.
+    if (img && typeof img.rank !== 'number') {
+      setFocusedImageId(imgId);
+      setSelectionNote(
+        'This image is not on the map yet. It appears after the next arrangement.',
+      );
+      return;
+    }
     if (!img || typeof img.rank !== 'number' || !deckRef.current) return;
     const { col, row } = cellOf(img.rank);
     const cx = col * CELL + CELL / 2;
