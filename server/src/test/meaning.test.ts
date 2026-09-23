@@ -54,10 +54,8 @@ function pick(ids: string[], at: number[]): string[] {
 
 describe('meaning', () => {
   test('a small board among a large one still gets all its matches', async () => {
-    // The HNSW index spans boards. At this size the planner filters by
-    // board and never starves; the starving case, and the iterative scan
-    // that prevents it, are measured at a million vectors
-    // (docs/measurements/server-roadmap-2026-09-23.md, stage 4).
+    // Search is scoped to one board: the large board's closer vectors must
+    // never crowd out, or leak into, the small board's answer.
     await boardWith(Array.from({ length: 300 }, (_, i) => [1, i / 3000, 0]));
     const { boardId, ids } = await boardWith([
       [0, 1, 0],
