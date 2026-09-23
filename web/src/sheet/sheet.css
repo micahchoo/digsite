@@ -80,6 +80,12 @@
   margin-left: 6px;
 }
 
+.sheet-mobile-inspector-toggle,
+.sheet-mobile-inspector-backdrop,
+.sheet-mobile-inspector-close {
+  display: none;
+}
+
 /* -- drawing (DrawLayer.tsx) ------------------------------------------ */
 
 .sheet-draw-layer {
@@ -159,6 +165,40 @@
   padding: 8px;
   border-bottom: 1px solid var(--line);
   font-size: var(--text-sm);
+}
+
+.sheet-header-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  margin-bottom: 5px;
+}
+
+.sheet-sheet-navigation {
+  display: flex;
+  gap: 4px;
+}
+
+.sheet-sheet-navigation button,
+.sheet-mobile-inspector-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: var(--radius-s);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+}
+
+.sheet-sheet-navigation button:disabled {
+  opacity: 0.45;
+}
+
+.sheet-mobile-inspector-close {
+  display: none;
 }
 
 .sheet-header-meta {
@@ -350,6 +390,33 @@
   font-weight: 600;
 }
 
+.sheet-foreign-relation-filter {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.sheet-foreign-relation-filter label {
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+}
+
+.sheet-foreign-relation-filter select {
+  width: 100%;
+  min-height: 30px;
+  padding-inline: 7px;
+  font-size: var(--text-xs);
+}
+
+.sheet-foreign-relation-filter small {
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .sheet-presence {
   gap: 5px;
   margin: 7px 0 4px;
@@ -494,6 +561,66 @@
 @media (max-width: 767px) {
   .sheet-side {
     display: none;
+  }
+
+  .sheet-side.sheet-side--mobile-open {
+    display: flex;
+    top: 8px;
+    right: 8px;
+    bottom: auto;
+    height: fit-content;
+    width: min(340px, calc(100% - 16px));
+    max-height: calc(100% - 92px);
+    z-index: 12;
+  }
+
+  .sheet-mobile-inspector-toggle {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 11;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 36px;
+    padding-inline: 10px;
+    border-color: var(--line);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-m);
+    font-size: var(--text-xs);
+    font-weight: 600;
+  }
+
+  .sheet-mobile-inspector-toggle svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+
+  .sheet-mobile-inspector-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgba(17, 24, 32, 0.12);
+    box-shadow: none;
+  }
+
+  .sheet-mobile-inspector-backdrop:hover {
+    background: rgba(17, 24, 32, 0.18);
+  }
+
+  .sheet-mobile-inspector-close {
+    display: grid;
   }
 
   .sheet-toolbar {

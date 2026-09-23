@@ -60,6 +60,7 @@ import {
 } from '../board/ContextMenu.tsx';
 import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
+import { ThreadBrowser } from '../board/ThreadBrowser.tsx';
 import { Tray } from '../board/Tray.tsx';
 import { ZoomControl, zoomIn, zoomOut } from '../board/ZoomControl.tsx';
 import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
@@ -1452,6 +1453,11 @@ export function Board() {
           requestBoardRefresh();
         }
       });
+      if (result.confirmationUnavailable && isCurrentUpload()) {
+        setUploadNote(
+          'Couldn’t confirm processing for accepted images. Refresh the board to check their status.',
+        );
+      }
       if (result.timedOut && isCurrentUpload()) {
         setUploadNote(
           'Couldn’t confirm every image. The board may still be processing some.',
@@ -1602,6 +1608,11 @@ export function Board() {
                 Sheets <span>{sheets.length}</span>
               </h4>
             </div>
+            <ThreadBrowser
+              groupId={board.groupId}
+              boardId={boardId}
+              onChanged={refreshSheets}
+            />
           </div>
           <ul
             data-testid="sheet-list"
@@ -1710,6 +1721,10 @@ export function Board() {
     s.cacheTotal === 0
       ? '-'
       : `${((s.cacheHits / s.cacheTotal) * 100).toFixed(1)}%`;
+
+  const failedUploadCount = uploadRows.filter(
+    (row) => row.status === 'error' || row.status === 'failed',
+  ).length;
 
   return (
     // Fills the shell's page outlet (shell/shell.css's `.shell-page`) —
@@ -2068,9 +2083,21 @@ export function Board() {
                     : ''}
                 </span>
                 <span className="board-upload-state">{r.status}</span>
+                {(r.status === 'error' || r.status === 'failed') && r.error && (
+                  <span className="board-upload-reason">{r.error}</span>
+                )}
               </div>
             ))}
           </div>
+          {failedUploadCount > 0 && (
+            <output className="board-upload-failures" aria-live="polite">
+              {failedUploadCount}{' '}
+              {failedUploadCount === 1
+                ? 'image could not be added.'
+                : 'images could not be added.'}{' '}
+              Check the failed rows before trying again.
+            </output>
+          )}
           {uploadNote && <div className="muted">{uploadNote}</div>}
         </section>
       )}

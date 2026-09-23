@@ -121,25 +121,49 @@ async function uploadMultipartBatches(
  * happens server-side after the protocol's PATCH completes). Server agent:
  * if the tus completion can echo the created image id back some other way,
  * this name match goes away. */
-async function pollUntilReady(
+export async function pollUntilReady(
   boardId: string,
   rows: UploadRow[],
   emit: () => void,
-): Promise<boolean> {
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  options: {
+    timeoutMs?: number;
+    intervalMs?: number;
+    now?: () => number;
+    wait?: (ms: number) => Promise<void>;
+    listImages?: typeof api.listBoardImages;
+  } = {},
+): Promise<{ timedOut: boolean; confirmationUnavailable: boolean }> {
+  const now = options.now ?? Date.now;
+  const deadline = now() + (options.timeoutMs ?? POLL_TIMEOUT_MS);
+  const wait = options.wait ?? sleep;
+  const listImages = options.listImages ?? api.listBoardImages;
   const claimed = new Set<string>();
   for (const row of rows) if (row.imageId) claimed.add(row.imageId);
 
-  while (Date.now() < deadline) {
+  let confirmationUnavailable = false;
+  while (now() < deadline) {
     const pending = rows.filter((r) => r.status === 'pending');
-    if (!pending.length) return false;
+    if (!pending.length) {
+      return { timedOut: false, confirmationUnavailable: false };
+    }
 
-    const { images } = await api.listBoardImages(
-      boardId,
-      'uploaded_at.desc',
-      0,
-      Math.max(rows.length, 1),
-    );
+    let images: Awaited<ReturnType<typeof api.listBoardImages>>['images'];
+    try {
+      ({ images } = await listImages(
+        boardId,
+        'uploaded_at.desc',
+        0,
+        Math.max(rows.length, 1),
+      ));
+      confirmationUnavailable = false;
+    } catch {
+      // The upload POST already succeeded. A failed status read says nothing
+      // about whether the server stored the files, so retry within the same
+      // bounded window instead of turning accepted rows into failures.
+      confirmationUnavailable = true;
+      await wait(options.intervalMs ?? POLL_INTERVAL_MS);
+      continue;
+    }
     for (const row of pending) {
       const match = row.imageId
         ? images.find((img) => img.id === row.imageId)
@@ -155,16 +179,20 @@ async function pollUntilReady(
     }
     emit();
     if (rows.every((r) => r.status !== 'pending' && r.status !== 'uploading')) {
-      return false;
+      return { timedOut: false, confirmationUnavailable: false };
     }
-    await sleep(POLL_INTERVAL_MS);
+    await wait(options.intervalMs ?? POLL_INTERVAL_MS);
   }
-  return true; // timed out with something still pending
+  return {
+    timedOut: !confirmationUnavailable,
+    confirmationUnavailable,
+  };
 }
 
 export interface UploadResult {
   rows: UploadRow[];
   timedOut: boolean;
+  confirmationUnavailable: boolean;
   allReady: boolean;
 }
 
@@ -200,9 +228,13 @@ export async function runUpload(
   );
   await uploadMultipartBatches(boardId, multipartRows, emit);
 
-  const timedOut = await pollUntilReady(boardId, rows, emit);
+  const { timedOut, confirmationUnavailable } = await pollUntilReady(
+    boardId,
+    rows,
+    emit,
+  );
   const allReady = rows.every((r) => r.status === 'ready');
-  return { rows, timedOut, allReady };
+  return { rows, timedOut, confirmationUnavailable, allReady };
 }
 
 export type { ImageStatus };

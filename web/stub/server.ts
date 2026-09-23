@@ -392,6 +392,9 @@ const SHEET_IMAGES: {
   s2: range(6, 18),
 };
 const SHEET_NAME: Record<string, string> = { s1: 'First pass', s2: 'Faces' };
+const SHEET_ARCHIVED = new Set<string>();
+const SHEET_READS = new Map<string, string>();
+const SHEET_CREATED_AT = new Date().toISOString();
 const SHEET_BOARD: Record<string, string> = { s1: 'b1', s2: 'b1' };
 // Neither seed sheet's creator is a board manager of Field (created_by
 // `member`) — `listed` deleting s1 is a real 403, not a vacuous one.
@@ -1388,6 +1391,10 @@ const httpServer = createServer(async (req, res) => {
     );
     const list = Object.keys(SHEET_NAME)
       .filter((id) => visibleBoardIds.has(SHEET_BOARD[id] ?? 'b1'))
+      .filter(
+        (id) =>
+          url.searchParams.get('archived') === '1' || !SHEET_ARCHIVED.has(id),
+      )
       .map((id) => ({
         id,
         name: SHEET_NAME[id],
@@ -1396,7 +1403,24 @@ const httpServer = createServer(async (req, res) => {
         savedAt: sheetSavedAt[id] ?? null,
         boardId: SHEET_BOARD[id] ?? 'b1',
         boardName: boardOf(SHEET_BOARD[id] ?? 'b1')?.name ?? '',
-      }));
+        archived: SHEET_ARCHIVED.has(id),
+        lastActivityAt: sheetSavedAt[id] ?? SHEET_CREATED_AT,
+        unread:
+          (SHEET_READS.get(`${u}:${id}`) ?? '') <
+          (sheetSavedAt[id] ?? SHEET_CREATED_AT),
+        previewImageIds: (SHEET_IMAGES[id] ?? [])
+          .slice(0, 4)
+          .map(
+            (slot) =>
+              images.find(
+                (image) =>
+                  image.boardId === (SHEET_BOARD[id] ?? 'b1') &&
+                  image.slot === slot,
+              )?.id,
+          )
+          .filter((id): id is string => !!id),
+      }))
+      .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
     return json(200, list);
   }
 
@@ -1653,6 +1677,25 @@ const httpServer = createServer(async (req, res) => {
   }
 
   // -- sheets ----------------------------------------------------------------------
+  const sheetThreadAction = url.pathname.match(
+    /^\/sheets\/([^/]+)\/(seen|archive|unarchive)$/,
+  );
+  if (sheetThreadAction && req.method === 'POST') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const id = sheetThreadAction[1] ?? '';
+    if (!SHEET_NAME[id]) return json(404, { reason: 'not found' });
+    const denied = boardForViewing(u, SHEET_BOARD[id] ?? 'b1');
+    if (denied) return json(403, denied);
+    if (sheetThreadAction[2] === 'seen') {
+      const seenAt = new Date().toISOString();
+      SHEET_READS.set(`${u}:${id}`, seenAt);
+      return json(200, { seenAt });
+    }
+    if (sheetThreadAction[2] === 'archive') SHEET_ARCHIVED.add(id);
+    else SHEET_ARCHIVED.delete(id);
+    return json(200, { archived: SHEET_ARCHIVED.has(id) });
+  }
   // Phase 2 (docs/phases/2-sheet.md section 6): imageCount + savedAt are
   // additive on top of phase 1's {id, name, createdAt} — the real server's
   // GET /boards/:id/sheets should grow the same two fields (see
@@ -1668,12 +1711,17 @@ const httpServer = createServer(async (req, res) => {
       200,
       Object.keys(SHEET_NAME)
         .filter((id) => (SHEET_BOARD[id] ?? 'b1') === boardId)
+        .filter(
+          (id) =>
+            url.searchParams.get('archived') === '1' || !SHEET_ARCHIVED.has(id),
+        )
         .map((id) => ({
           id,
           name: SHEET_NAME[id],
           createdAt: new Date().toISOString(),
           imageCount: (SHEET_IMAGES[id] ?? []).length,
           savedAt: sheetSavedAt[id] ?? null,
+          archived: SHEET_ARCHIVED.has(id),
         })),
     );
   }

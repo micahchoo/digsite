@@ -21,6 +21,11 @@ async function eventually(check: () => Promise<boolean>, message: string) {
 interface BoardWindow extends Window {
   __digsiteBoard?: { selectImages(ids: string[]): void };
 }
+interface SheetWindow extends Window {
+  __digsite?: {
+    getElements(): { customData?: { kind?: string; imageId?: string } }[];
+  };
+}
 
 async function main() {
   const owner = await signIn('owner@example.test', 'password1234');
@@ -155,6 +160,19 @@ async function main() {
     assert(equals(layoutIds, reordered), 'sheet layout differs from tray');
     console.log('PASS: real sheet follows the reordered tray');
 
+    const peer = await context.newPage();
+    await peer.goto(`${WEB}/s/${sheetId}`);
+    await peer.waitForFunction(
+      () => (window as SheetWindow).__digsite?.getElements().length === 2,
+    );
+    const newImageId = ids.find((id) => !selected.includes(id));
+    assert(newImageId, 'missing third image fixture');
+    const assetLoaded = peer.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/images/${newImageId}/preview`) &&
+        response.status() === 200,
+    );
+
     await page.getByTestId('show-on-board').click();
     await page.waitForURL(/\/b\//);
     await page.waitForFunction(
@@ -184,6 +202,58 @@ async function main() {
       return result.status === 200 && result.json.images.length === 3;
     }, 'add-to-sheet failed or duplicated existing images');
     console.log('PASS: show-on-board and add-to-sheet work without duplicates');
+    await assetLoaded;
+    await peer.waitForFunction(
+      (imageId) =>
+        (window as SheetWindow).__digsite
+          ?.getElements()
+          .some((element) => element.customData?.imageId === imageId),
+      newImageId,
+    );
+    await peer.close();
+    console.log(
+      'PASS: an already-open sheet receives the added image and loads its preview',
+    );
+
+    await page.getByTestId('thread-browser-open').click();
+    await page.getByTestId('thread-search').fill('Tray order');
+    const thread = page.locator(
+      `[data-testid="thread-row"][data-sheet-id="${sheetId}"]`,
+    );
+    await thread.waitFor();
+    await thread.getByTestId('thread-archive').click();
+    await eventually(async () => {
+      const result = await owner.get<{ id: string }[]>(
+        `/boards/${boardId}/sheets`,
+      );
+      return (
+        result.status === 200 && !result.json.some((row) => row.id === sheetId)
+      );
+    }, 'archived sheet remained in active listing');
+    await page.getByTestId('thread-status').selectOption('archived');
+    await thread.waitFor();
+    const retained = await owner.get<GetSheetResponse>(`/sheets/${sheetId}`);
+    assert(
+      retained.status === 200 && retained.json.images.length === 3,
+      'archive removed sheet content',
+    );
+    await thread.getByTestId('thread-archive').click();
+    await page.getByTestId('thread-status').selectOption('active');
+    await thread.waitFor();
+    await thread.getByRole('link', { name: 'Tray order', exact: true }).click();
+    await page.waitForURL(new RegExp(`/s/${sheetId}$`));
+    await eventually(async () => {
+      const result = await owner.get<{ id: string; unread: boolean }[]>(
+        `/groups/${group.id}/sheets`,
+      );
+      return (
+        result.status === 200 &&
+        result.json.some((row) => row.id === sheetId && !row.unread)
+      );
+    }, 'opening sheet did not persist its read state');
+    console.log(
+      'PASS: real thread browser archives, retains content, reopens and records read state',
+    );
   } finally {
     await browser.close();
     const removed = await owner.del(`/boards/${boardId}`);

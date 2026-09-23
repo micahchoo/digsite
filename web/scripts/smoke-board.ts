@@ -409,6 +409,43 @@ async function main() {
     delete document.documentElement.dataset.theme;
   });
 
+  // A rejected batch keeps its per-file reason visible in the bounded queue.
+  await page.route('**/boards/b1/images', async (route, request) => {
+    if (request.method() === 'POST') {
+      await route.fulfill({
+        status: 413,
+        contentType: 'application/json',
+        body: JSON.stringify({ reason: 'test batch rejected' }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.setInputFiles('[data-testid="upload-input"]', {
+    name: 'rejected.bin',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from('rejected-upload'),
+  });
+  await page.waitForFunction(() => {
+    const row = document.querySelector('[data-testid="upload-row"]');
+    return row?.getAttribute('data-status') === 'error';
+  });
+  assert(
+    (await page.locator('.board-upload-reason').innerText()).includes(
+      'test batch rejected',
+    ),
+    'failed upload row should show the returned reason',
+  );
+  assert(
+    (await page.locator('.board-upload-failures').innerText()).includes(
+      '1 image could not be added',
+    ),
+    'upload queue should summarize failed rows',
+  );
+  await page.unroute('**/boards/b1/images');
+  await page.locator('[data-testid="upload-close"]').click();
+  console.log('PASS: rejected upload shows its reason and failure count');
+
   await browser.close();
   console.log('smoke-board: all assertions passed');
 }

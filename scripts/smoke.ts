@@ -42,6 +42,9 @@ const SCRIPTS = [
   // docs/ux/design.md §7 slice 2 — the board, the selection model and its
   // tray, the zoom bar, the right-click/Actions menu.
   'scripts/smoke-selection.ts',
+  'scripts/smoke-threads.ts',
+  // Slice 3 — sheet navigation, mobile details drawer, and relation emphasis.
+  'scripts/smoke-sheet-surroundings.ts',
 ];
 
 function log(msg: string): void {

@@ -929,6 +929,14 @@
   font-weight: 600;
   text-align: center;
 }
+.board-upload-reason {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: var(--danger);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .board-upload-row[data-status="ready"] .board-upload-state {
   color: var(--claim-own);
 }
@@ -939,12 +947,16 @@
 .board-upload-row[data-status="error"] .board-upload-state {
   color: var(--danger);
 }
-.board-upload-queue > .muted {
+.board-upload-queue > .muted,
+.board-upload-failures {
   padding: 8px 12px 10px;
   border-top: 1px solid var(--line);
   background: var(--surface-raised);
   font-size: var(--text-xs);
   line-height: 1.4;
+}
+.board-upload-failures {
+  color: var(--danger);
 }
 
 @media (max-width: 920px) {

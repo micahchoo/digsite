@@ -25,6 +25,7 @@ interface Props {
   viewport: Viewport;
   offset: ContainerOffset;
   selectedId: string | null;
+  connectionRelation: string | null;
   onSelect: (id: string) => void;
   peers?: PeerCursor[];
 }
@@ -35,6 +36,7 @@ export function Overlay({
   viewport,
   offset,
   selectedId,
+  connectionRelation,
   onSelect,
   peers = [],
 }: Props) {
@@ -53,6 +55,11 @@ export function Overlay({
     >
       {shapes.map((shape) => {
         const selected = shape.id === selectedId;
+        const dimmed =
+          !selected &&
+          shape.kind === 'edge' &&
+          connectionRelation !== null &&
+          shape.row.relation !== connectionRelation;
         const stroke = selected
           ? 'var(--region-stroke)'
           : 'var(--foreign-stroke)';
@@ -108,6 +115,7 @@ export function Overlay({
               data-testid="foreign-shape"
               data-foreign-id={shape.id}
               data-foreign-kind="edge"
+              data-relation-dimmed={dimmed || undefined}
               x1={a.x}
               y1={a.y}
               x2={b.x}
@@ -115,7 +123,7 @@ export function Overlay({
               stroke={stroke}
               strokeWidth={strokeWidth}
               strokeDasharray="6 4"
-              opacity={0.7}
+              opacity={dimmed ? 0.12 : 0.7}
               className="sheet-overlay-hit"
               onPointerDown={handlePointerDown}
             />

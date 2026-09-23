@@ -844,3 +844,11 @@
     box-shadow: var(--shadow-l);
   }
 }
+.shell-sheet-link[data-unread="true"] {
+  font-weight: 700;
+  color: var(--text-navigation);
+}
+.shell-unread-dot {
+  margin-inline-start: auto;
+  color: var(--focus-navigation);
+}

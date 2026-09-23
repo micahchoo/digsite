@@ -1,0 +1,114 @@
+.thread-browser {
+  box-sizing: border-box;
+  width: min(680px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-l);
+}
+.thread-browser::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+.thread-browser-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.thread-browser-heading h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+.thread-browser-heading p {
+  margin: 4px 0 16px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.thread-browser-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.thread-browser-filters input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+.thread-browser-filters select {
+  max-width: 140px;
+}
+.thread-browser-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.thread-browser-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.thread-browser-identity {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.thread-browser-identity > a {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.thread-browser-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.thread-browser-preview {
+  display: flex;
+  gap: 4px;
+}
+.thread-browser-preview img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: var(--radius-s);
+  background: var(--surface-sunken);
+}
+.thread-unread,
+.thread-archived {
+  display: inline-block;
+  margin: 4px 6px 0 0;
+  padding: 1px 5px;
+  font-size: var(--text-xs);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-s);
+}
+.thread-unread {
+  color: var(--accent);
+  font-weight: 600;
+}
+.thread-browser-error {
+  color: var(--danger);
+  margin-block: 12px;
+}
+.thread-browser-empty {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+@media (max-width: 480px) {
+  .thread-browser {
+    padding: 14px;
+  }
+  .thread-browser-preview {
+    flex: 1;
+  }
+  .thread-browser-identity {
+    flex-basis: 100%;
+  }
+}

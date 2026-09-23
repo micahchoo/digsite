@@ -21,7 +21,7 @@ import {
   type SheetSummaryWithStats,
   api,
 } from '../lib/api.ts';
-import { onSheetsChanged } from '../lib/sheetEvents.ts';
+import { notifySheetsChanged, onSheetsChanged } from '../lib/sheetEvents.ts';
 
 export type RouteKind = 'other' | 'groups' | 'group' | 'board' | 'sheet';
 
@@ -179,6 +179,17 @@ export function useShellData(): ShellData {
   }, [location.pathname]);
 
   const groupId = resolved.groupId;
+  useEffect(() => {
+    const sheetId = resolved.sheetId;
+    if (!sheetId || location.pathname !== `/s/${sheetId}`) return;
+    const markSeen = () => {
+      void api
+        .markSheetSeen(sheetId)
+        .then(notifySheetsChanged)
+        .catch(() => {});
+    };
+    markSeen();
+  }, [resolved.sheetId, location.pathname]);
   // Slice 2 follow-up (a): a sheet created/renamed/deleted/grown elsewhere
   // on the page (the board tray, the sheet page's own rename) bumps this so
   // the effect below refetches — an event the pages emit, never a poll.
@@ -209,7 +220,7 @@ export function useShellData(): ShellData {
           (b.lastActivity ?? '').localeCompare(a.lastActivity ?? ''),
         );
         setBoards(sorted);
-        const allSheets = groupId ? await api.listGroupSheets(groupId) : [];
+        const allSheets = groupId ? await api.listGroupThreads(groupId) : [];
         if (cancelled) return;
         const grouped: Record<string, SheetSummaryWithStats[]> = {};
         for (const b of sorted) grouped[b.id] = [];

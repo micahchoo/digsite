@@ -9,6 +9,7 @@ import type {
   AddImagesToSheetResponse,
   AllowlistRequest,
   AllowlistResponse,
+  ArchiveSheetResponse,
   BoardImage,
   BoardSummary,
   CreateBoardRequest,
@@ -33,8 +34,10 @@ import type {
   InviteResponse,
   ListBoardImagesResponse,
   ListGroupSheetsResponse,
+  ListGroupThreadsResponse,
   ListGroupsResponse,
   ListMembersResponse,
+  MarkSheetSeenResponse,
   Member,
   PutBoardSelectionRequest,
   PutBoardSelectionResponse,
@@ -66,6 +69,7 @@ export type ImageStatus = BoardImage['status'];
 export type SheetSummaryWithStats = SheetSummary & {
   imageCount: number;
   savedAt: string | null;
+  unread?: boolean;
 };
 export type ListSheetsWithStatsResponse = SheetSummaryWithStats[];
 export type UpdateSheetRequest = { name: string };
@@ -278,6 +282,10 @@ export const api = {
   // loop (shell/useShellData.ts).
   listGroupSheets: (groupId: string) =>
     request<ListGroupSheetsResponse>(`/groups/${groupId}/sheets`),
+  listGroupThreads: (groupId: string, includeArchived = false) =>
+    request<ListGroupThreadsResponse>(
+      `/groups/${groupId}/sheets${includeArchived ? '?archived=1' : ''}`,
+    ),
 
   // -- boards ----------------------------------------------------------------
   listBoards: (groupId: string) =>
@@ -400,8 +408,16 @@ export const api = {
     ),
 
   // -- sheets ------------------------------------------------------------
-  listSheets: (boardId: string) =>
-    request<ListSheetsWithStatsResponse>(`/boards/${boardId}/sheets`),
+  listSheets: (boardId: string, includeArchived = false) =>
+    request<ListSheetsWithStatsResponse>(
+      `/boards/${boardId}/sheets${includeArchived ? '?archived=1' : ''}`,
+    ),
+  markSheetSeen: (sheetId: string) =>
+    request<MarkSheetSeenResponse>(`/sheets/${sheetId}/seen`, post({})),
+  archiveSheet: (sheetId: string) =>
+    request<ArchiveSheetResponse>(`/sheets/${sheetId}/archive`, post({})),
+  unarchiveSheet: (sheetId: string) =>
+    request<ArchiveSheetResponse>(`/sheets/${sheetId}/unarchive`, post({})),
   createSheet: (boardId: string, body: CreateSheetRequest) =>
     request<CreateSheetResponse>(`/boards/${boardId}/sheets`, post(body)),
   getSheet: (sheetId: string) =>

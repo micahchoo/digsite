@@ -1,10 +1,11 @@
+import { dataOf } from '@digsite/shared';
 // The document (docs/design.md "web/" § "The sheet page"). Composition only
 // (docs/phases/2-sheet.md section 7): loads the sheet, owns the socket
 // through `room.ts`, owns the foreign poll, lays out the page. Everything
 // imperative goes through `CanvasHandle` — no `@excalidraw` import, no
 // Excalidraw type, per `../.claude/rules/sheet-canvas-seam.md`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import {
   ErrorState,
   type ErrorStateInfo,
@@ -46,9 +47,12 @@ export function Sheet() {
   const { id } = useParams<{ id: string }>();
   const sheetId = id ?? '';
   const location = useLocation();
+  const navigate = useNavigate();
   const { data: session } = useSession();
 
   const canvasRef = useRef<CanvasHandle | null>(null);
+  const inspectorToggleRef = useRef<HTMLButtonElement | null>(null);
+  const inspectorCloseRef = useRef<HTMLButtonElement | null>(null);
   const imageMetaRef = useRef(new Map<string, ImageMeta>());
   const latestRef = useRef<{
     elements: SceneElement[];
@@ -56,6 +60,13 @@ export function Sheet() {
   } | null>(null);
   const flushQueued = useRef(false);
   const [sheetInfo, setSheetInfo] = useState<SheetInfo | null>(null);
+  const [boardSheets, setBoardSheets] = useState<
+    Awaited<ReturnType<typeof api.listSheets>>
+  >([]);
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
+  const [connectionRelation, setConnectionRelation] = useState<string | null>(
+    null,
+  );
   const [files, setFiles] = useState(new Map<string, CanvasFile>());
   const [sceneElements, setSceneElements] = useState<SceneElement[]>([]);
   const [viewport, setViewport] = useState<Viewport>(ZERO_VIEWPORT);
@@ -95,6 +106,10 @@ export function Sheet() {
     if (!sheetId) return;
     let cancelled = false;
     setSheetError(null);
+    setSheetInfo(null);
+    setBoardSheets([]);
+    setMobileInspectorOpen(false);
+    setConnectionRelation(null);
     // docs/ux/audit.md #1: a sheet the viewer can't or shouldn't see used to
     // hang on "loading…" forever — this call had no `.catch()` at all.
     void (async () => {
@@ -113,6 +128,40 @@ export function Sheet() {
       cancelled = true;
     };
   }, [sheetId, loadImages]);
+  useEffect(() => {
+    const boardId = sheetInfo?.boardId;
+    if (!boardId) return;
+    let cancelled = false;
+    void api
+      .listSheets(boardId)
+      .then((sheets) => {
+        if (!cancelled) setBoardSheets(sheets);
+      })
+      .catch(() => {
+        if (!cancelled) setBoardSheets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sheetInfo?.boardId]);
+  useEffect(() => {
+    if (!mobileInspectorOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !e.defaultPrevented)
+        setMobileInspectorOpen(false);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileInspectorOpen]);
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 768px)');
+    const closeOnDesktop = () => {
+      if (desktop.matches) setMobileInspectorOpen(false);
+    };
+    closeOnDesktop();
+    desktop.addEventListener('change', closeOnDesktop);
+    return () => desktop.removeEventListener('change', closeOnDesktop);
+  }, []);
   const onCanvasChange = useCallback(
     (scene: SceneChange) => {
       const handle = canvasRef.current;
@@ -142,6 +191,10 @@ export function Sheet() {
     },
     [room.sendScene],
   );
+  const focusInspectorToggle = useCallback(
+    () => inspectorToggleRef.current?.focus(),
+    [],
+  );
 
   const onPointerMoveForPresence = useCallback(
     (e: React.PointerEvent) => {
@@ -162,6 +215,19 @@ export function Sheet() {
   type LocationState = { copyEdges?: PendingCopyEdge[] } | null;
   const copyEdges = (location.state as LocationState)?.copyEdges;
   useCopyConnections(copyEdges, sceneElements, tools, rerender);
+  const sheetIndex = boardSheets.findIndex((sheet) => sheet.id === sheetId);
+  const previousSheet =
+    sheetIndex > 0 ? (boardSheets[sheetIndex - 1] ?? null) : null;
+  const nextSheet =
+    sheetIndex >= 0 && sheetIndex < boardSheets.length - 1
+      ? (boardSheets[sheetIndex + 1] ?? null)
+      : null;
+  const foreignRelations = Array.from(
+    new Set(foreign.rows.edges.map((edge) => edge.relation)),
+  ).sort((a, b) => a.localeCompare(b));
+  const currentImageCount = sceneElements.filter(
+    (element) => !element.isDeleted && dataOf(element)?.kind === 'image',
+  ).length;
 
   if (sheetError) return <ErrorState info={sheetError} />;
   if (room.denied) {
@@ -182,6 +248,8 @@ export function Sheet() {
     <div className="sheet-page">
       <div
         className="sheet-canvas-area"
+        aria-hidden={mobileInspectorOpen || undefined}
+        inert={mobileInspectorOpen}
         onPointerMove={onPointerMoveForPresence}
       >
         <Canvas
@@ -205,9 +273,26 @@ export function Sheet() {
           viewport={viewport}
           offset={{ left: 0, top: 0 }}
           selectedId={selectedForeignId}
+          connectionRelation={connectionRelation}
           onSelect={(sid) => tools.select(sid)}
           peers={peerCursorList}
         />
+        <button
+          ref={inspectorToggleRef}
+          type="button"
+          className="sheet-mobile-inspector-toggle"
+          aria-controls="sheet-inspector-panel"
+          aria-expanded={mobileInspectorOpen}
+          onClick={() => setMobileInspectorOpen((open) => !open)}
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M3 4.5h14M3 10h14M3 15.5h14" />
+            <circle cx="7" cy="4.5" r="1.5" />
+            <circle cx="13" cy="10" r="1.5" />
+            <circle cx="8" cy="15.5" r="1.5" />
+          </svg>
+          <span>Details</span>
+        </button>
         <Toolbar
           tool={tool}
           onChange={setTool}
@@ -215,17 +300,33 @@ export function Sheet() {
           canvas={canvasRef.current}
         />
       </div>
+      {mobileInspectorOpen && (
+        <button
+          type="button"
+          className="sheet-mobile-inspector-backdrop"
+          aria-label="Dismiss sheet details"
+          onClick={() => setMobileInspectorOpen(false)}
+        />
+      )}
       <SidePanel
         header={{
           name: sheetInfo.name,
           onRename: tools.rename,
-          imageCount: sheetInfo.images.length,
+          imageCount: currentImageCount,
           peers: room.peers,
           userEmail: session?.user.email,
           foreignCount: foreign.shapes.length,
           status: room.getStatus(),
           boardId: sheetInfo.boardId,
           sheetId,
+          previousSheet,
+          nextSheet,
+          onNavigateSheet: (id) => navigate(`/s/${id}`),
+          onCloseMobile: () => setMobileInspectorOpen(false),
+          closeButtonRef: inspectorCloseRef,
+          foreignRelations,
+          connectionRelation,
+          onConnectionRelationChange: setConnectionRelation,
         }}
         dangling={tools.getDangling()}
         onRemoveDangling={() => tools.removeDangling()}
@@ -234,6 +335,8 @@ export function Sheet() {
         onRemoveProperty={tools.removeProperty}
         onCopyForeign={(fid) => tools.copyForeign(fid)}
         onDeleteSelected={() => tools.deleteSelected()}
+        mobileOpen={mobileInspectorOpen}
+        onFocusToggle={focusInspectorToggle}
       />
     </div>
   );

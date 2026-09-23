@@ -109,11 +109,20 @@ function BoardRow({
                     : 'shell-sheet-link'
                 }
                 data-testid="shell-sheet-link"
+                data-unread={Boolean(s.unread && s.id !== activeSheetId)}
               >
                 <span className="shell-thread-glyph" aria-hidden="true">
                   ↳
                 </span>
                 {s.name}
+                {s.unread && s.id !== activeSheetId && (
+                  <span
+                    className="shell-unread-dot"
+                    aria-label="Unread activity"
+                  >
+                    •
+                  </span>
+                )}
               </Link>
             </li>
           ))}

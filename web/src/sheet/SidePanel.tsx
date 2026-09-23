@@ -3,6 +3,7 @@
 // `Inspector`, composed in one file per docs/phases/2-sheet.md section 7.
 // Styling is `sheet.css` classes only — no inline styles.
 import type { PropertyValue } from '@digsite/shared';
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router';
 import { RenameInline } from '../components/RenameInline.tsx';
 import { plural } from '../lib/plural.ts';
@@ -10,6 +11,11 @@ import { Inspector } from './Inspector.tsx';
 import { colorForUser, namedPeers } from './presence.ts';
 import type { Peer, RoomStatus } from './room.ts';
 import type { DanglingEdge, Selected } from './tools.ts';
+
+interface SheetNeighbor {
+  id: string;
+  name: string;
+}
 
 interface HeaderProps {
   name: string;
@@ -27,6 +33,14 @@ interface HeaderProps {
   // needs from the sheet side.
   boardId: string;
   sheetId: string;
+  previousSheet: SheetNeighbor | null;
+  nextSheet: SheetNeighbor | null;
+  onNavigateSheet: (id: string) => void;
+  onCloseMobile: () => void;
+  closeButtonRef: React.RefObject<HTMLButtonElement | null>;
+  foreignRelations: string[];
+  connectionRelation: string | null;
+  onConnectionRelationChange: (relation: string | null) => void;
 }
 
 function Header({
@@ -39,6 +53,14 @@ function Header({
   status,
   boardId,
   sheetId,
+  previousSheet,
+  nextSheet,
+  onNavigateSheet,
+  onCloseMobile,
+  closeButtonRef,
+  foreignRelations,
+  connectionRelation,
+  onConnectionRelationChange,
 }: HeaderProps) {
   const lastSyncAt = Math.max(status.lastEmitAt ?? 0, status.lastRecvAt ?? 0);
   const lastSyncMs = lastSyncAt ? Date.now() - lastSyncAt : null;
@@ -51,12 +73,51 @@ function Header({
   } foreign=${foreignCount} lastSync=${lastSyncMs === null ? '-' : `${lastSyncMs}ms`}`;
   return (
     <div className="sheet-header">
-      <RenameInline
-        name={name}
-        onRename={onRename}
-        testId="sheet-name"
-        style={{ fontWeight: 700 }}
-      />
+      <div className="sheet-header-topline">
+        <div
+          className="sheet-sheet-navigation"
+          aria-label="Sheets on this board"
+        >
+          <button
+            type="button"
+            aria-label={
+              previousSheet
+                ? `Previous sheet: ${previousSheet.name}`
+                : 'No previous sheet'
+            }
+            title={previousSheet?.name}
+            disabled={!previousSheet}
+            onClick={() => {
+              if (previousSheet) onNavigateSheet(previousSheet.id);
+            }}
+          >
+            <span aria-hidden="true">←</span>
+          </button>
+          <button
+            type="button"
+            aria-label={
+              nextSheet ? `Next sheet: ${nextSheet.name}` : 'No next sheet'
+            }
+            title={nextSheet?.name}
+            disabled={!nextSheet}
+            onClick={() => {
+              if (nextSheet) onNavigateSheet(nextSheet.id);
+            }}
+          >
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+        <button
+          ref={closeButtonRef}
+          type="button"
+          className="sheet-mobile-inspector-close"
+          aria-label="Close sheet details"
+          onClick={onCloseMobile}
+        >
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+      <RenameInline name={name} onRename={onRename} testId="sheet-name" />
       <div className="sheet-header-meta">{plural(imageCount, 'image')}</div>
       <Link
         to={`/b/${boardId}?showSheet=${sheetId}`}
@@ -86,6 +147,38 @@ function Header({
           ? 'not saved yet'
           : `saved ${savedSecondsAgo}s ago`}
       </div>
+      {foreignRelations.length > 0 && (
+        <div className="sheet-foreign-relation-filter">
+          <label htmlFor="foreign-relation-filter">
+            Other sheets’ connections
+          </label>
+          <select
+            id="foreign-relation-filter"
+            aria-describedby="foreign-relation-help"
+            value={
+              connectionRelation === null
+                ? ''
+                : String(foreignRelations.indexOf(connectionRelation) + 1)
+            }
+            onChange={(event) => {
+              const index = Number(event.target.value) - 1;
+              onConnectionRelationChange(
+                index < 0 ? null : (foreignRelations[index] ?? null),
+              );
+            }}
+          >
+            <option value="">All connections</option>
+            {foreignRelations.map((relation, index) => (
+              <option key={relation || 'no-relation'} value={index + 1}>
+                {relation || '(no relation)'}
+              </option>
+            ))}
+          </select>
+          <small id="foreign-relation-help">
+            Other relations dim. This sheet’s connections are unchanged.
+          </small>
+        </div>
+      )}
       <div className="visually-hidden" data-testid="status">
         {statusText}
       </div>
@@ -124,6 +217,8 @@ export interface SidePanelProps {
   onRemoveProperty: (id: string, key: string) => void;
   onCopyForeign: (id: string) => void;
   onDeleteSelected: () => void;
+  mobileOpen: boolean;
+  onFocusToggle: () => void;
 }
 
 export function SidePanel({
@@ -135,9 +230,54 @@ export function SidePanel({
   onRemoveProperty,
   onCopyForeign,
   onDeleteSelected,
+  mobileOpen,
+  onFocusToggle,
 }: SidePanelProps) {
+  const wasOpen = useRef(false);
+  const panelRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (mobileOpen) {
+      header.closeButtonRef.current?.focus();
+    } else if (wasOpen.current) {
+      onFocusToggle();
+    }
+    wasOpen.current = mobileOpen;
+  }, [mobileOpen, header.closeButtonRef, onFocusToggle]);
+
+  function trapTab(e: React.KeyboardEvent<HTMLElement>) {
+    if (!mobileOpen || e.key !== 'Tab') return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const focusable = Array.from(
+      panel.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) {
+      e.preventDefault();
+      panel.focus();
+    } else if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   return (
-    <div className="sheet-side">
+    <aside
+      ref={panelRef}
+      id="sheet-inspector-panel"
+      className={`sheet-side${mobileOpen ? ' sheet-side--mobile-open' : ''}`}
+      role={mobileOpen ? 'dialog' : 'complementary'}
+      aria-modal={mobileOpen || undefined}
+      aria-label="Sheet details"
+      tabIndex={mobileOpen ? -1 : undefined}
+      onKeyDown={trapTab}
+    >
       <Header {...header} />
       <Dangling items={dangling} onRemove={onRemoveDangling} />
       <Inspector
@@ -147,6 +287,6 @@ export function SidePanel({
         onCopyForeign={onCopyForeign}
         onDeleteSelected={onDeleteSelected}
       />
-    </div>
+    </aside>
   );
 }
