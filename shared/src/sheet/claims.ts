@@ -5,6 +5,7 @@
 
 import type { Direction, Properties } from './elements.ts';
 import type { Fraction } from './fractions.ts';
+import type { Confidence } from './sense.ts';
 
 export type RegionRow = {
   id: string;
@@ -27,11 +28,26 @@ export type EdgeRow = {
   direction: Direction;
   relation: string;
   properties: Properties;
+  confidence: Confidence | null;
+  note: string;
 };
 
 export type ForeignRegion = RegionRow & { sheetName: string };
 export type ForeignEdge = EdgeRow & { sheetName: string };
 export type Foreign = { regions: ForeignRegion[]; edges: ForeignEdge[] };
+
+/** An edge from another sheet with exactly one end on this sheet
+ * (CONTEXT.md "Reach"): `near` is the end this sheet holds. */
+export type ReachEdge = ForeignEdge & { near: 'source' | 'target' };
+/** The far image of a reach edge, enough to show and bring it in. */
+export type ReachImage = {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  missing: boolean;
+};
+export type Reach = { edges: ReachEdge[]; images: ReachImage[] };
 
 /** A claim's row id: which sheet, which source element, in one string. */
 export function claimId(sheetId: string, sourceId: string): string {

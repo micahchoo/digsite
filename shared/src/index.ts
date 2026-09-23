@@ -11,4 +11,6 @@ export * from './sheet/claims.ts';
 export * from './sheet/merge.ts';
 export * from './sheet/project.ts';
 export * from './sheet/layout.ts';
+export * from './sheet/sense.ts';
+export * from './sheet/segment.ts';
 export * from './api.ts';

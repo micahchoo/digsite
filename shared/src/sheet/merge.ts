@@ -32,15 +32,18 @@ export function mergeByVersion<T extends Versioned>(
     if (incomingWins) byId.set(i.id, i);
   }
 
-  // Scene order is the fractional index, not the id: sorting by id once
+  // Scene order is the fractional index, never the id: sorting by id once
   // put bound labels before their containers and rendering refused the
-  // snapshot on load (2026-09-22). Elements without an index go last.
+  // snapshot on load (2026-09-22), and put every native-canvas claim (a
+  // random uuid, no index) before its image, so reloads drew claims under
+  // pictures. Elements without an index go last, in the order they were
+  // stored and then arrived; the sort is stable, so equal keys keep it.
   return [...byId.values()].sort((a, b) => {
     const ai = a.index ?? null;
     const bi = b.index ?? null;
     if (ai !== null && bi !== null && ai !== bi) return ai < bi ? -1 : 1;
     if (ai === null && bi !== null) return 1;
     if (ai !== null && bi === null) return -1;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    return 0;
   });
 }

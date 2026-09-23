@@ -14,6 +14,8 @@
     "./sheet/merge": "./src/sheet/merge.ts",
     "./sheet/project": "./src/sheet/project.ts",
     "./sheet/layout": "./src/sheet/layout.ts",
+    "./sheet/sense": "./src/sheet/sense.ts",
+    "./sheet/segment": "./src/sheet/segment.ts",
     "./api": "./src/api.ts"
   },
   "scripts": {

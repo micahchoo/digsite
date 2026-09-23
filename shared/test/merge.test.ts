@@ -36,22 +36,29 @@ describe('mergeByVersion', () => {
     ]);
   });
 
-  test('output order is stable by id regardless of input order', () => {
+  test('unindexed elements keep their stored order; new ones follow', () => {
+    // Native-canvas scenes carry no index. An id sort put every claim (a
+    // random uuid) before its image and reloads drew claims underneath.
     const stored: Versioned[] = [
-      { id: 'c', version: 1, versionNonce: 1 },
-      { id: 'a', version: 1, versionNonce: 1 },
+      { id: 'img-c', version: 1, versionNonce: 1 },
+      { id: 'img-a', version: 1, versionNonce: 1 },
+      { id: '0e1f-edge', version: 1, versionNonce: 1 },
     ];
-    const incoming: Versioned[] = [{ id: 'b', version: 1, versionNonce: 1 }];
+    const incoming: Versioned[] = [
+      { id: 'b-new', version: 1, versionNonce: 1 },
+      { id: 'img-a', version: 2, versionNonce: 1 },
+    ];
     expect(mergeByVersion(stored, incoming).map((e) => e.id)).toEqual([
-      'a',
-      'b',
-      'c',
+      'img-c',
+      'img-a',
+      '0e1f-edge',
+      'b-new',
     ]);
   });
 });
 
 describe('mergeByVersion order', () => {
-  test('sorts by fractional index, unindexed last, id as the tiebreak', () => {
+  test('sorts by fractional index, unindexed last in stored order', () => {
     const el = (id: string, index?: string) => ({
       id,
       version: 1,
@@ -66,8 +73,8 @@ describe('mergeByVersion order', () => {
       'rect',
       'text',
       'arrow',
-      'a',
       'fresh',
+      'a',
     ]);
   });
 });

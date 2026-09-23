@@ -102,6 +102,8 @@ describe('project', () => {
         direction: 'forward',
         relation: 'resembles',
         properties: {},
+        confidence: null,
+        note: '',
       },
     ]);
   });

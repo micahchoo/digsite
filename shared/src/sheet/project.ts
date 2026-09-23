@@ -114,6 +114,8 @@ export function project(
       direction: data.direction,
       relation: data.relation,
       properties: data.properties,
+      confidence: data.confidence ?? null,
+      note: data.note ?? '',
     });
   }
 

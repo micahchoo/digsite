@@ -3,6 +3,7 @@
 // that trusts that shape; nothing else in the app reads customData raw.
 
 import type { PropertyValue } from '../board/sort.ts';
+import { type Confidence, isConfidence } from './sense.ts';
 
 export const SHEET_LIMIT = 150; // image-graph's EXPLORE_LIMIT, carried
 
@@ -21,6 +22,10 @@ export type EdgeData = {
   relation: string;
   direction: Direction;
   properties: Properties;
+  /** Absent in scenes saved before confidence existed, and when nobody said. */
+  confidence?: Confidence;
+  /** Why the connection holds. Absent reads as ''. */
+  note?: string;
 };
 export type ElementData = ImageData | RegionData | EdgeData;
 
@@ -103,11 +108,15 @@ export function dataOf(el: { customData?: unknown }): ElementData | null {
     if (typeof d.relation !== 'string') return null;
     if (!isDirection(d.direction)) return null;
     if (!isProperties(d.properties)) return null;
+    if (d.confidence !== undefined && !isConfidence(d.confidence)) return null;
+    if (d.note !== undefined && typeof d.note !== 'string') return null;
     return {
       kind: 'edge',
       relation: d.relation,
       direction: d.direction,
       properties: d.properties,
+      ...(d.confidence ? { confidence: d.confidence } : {}),
+      ...(d.note ? { note: d.note } : {}),
     };
   }
 

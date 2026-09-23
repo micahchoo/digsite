@@ -9,8 +9,9 @@
 // answers with a URL in a JSON body anywhere in this file today.
 
 import type { SortKey } from './board/sort.ts';
-import type { EdgeRow, Foreign, RegionRow } from './sheet/claims.ts';
+import type { EdgeRow, Foreign, Reach, RegionRow } from './sheet/claims.ts';
 import type { Properties } from './sheet/elements.ts';
+import type { Aliases, TermKind, Vocabulary } from './sheet/sense.ts';
 
 export type Role = 'owner' | 'admin' | 'member';
 
@@ -151,7 +152,19 @@ export type ListBoardImagesByIdsResponse = { images: BoardImageWithRank[] };
 // Phase 2 section 4: GET /boards/:id/relations — distinct relations across
 // every sheet's own edges on this board, for the Explore panel's relation
 // filter.
-export type GetBoardRelationsResponse = string[];
+// GET /boards/:id/vocabulary (CONTEXT.md "Vocabulary"): every label and
+// relation on the board, folded onto canonical terms, most-used first, with
+// the board's aliases.
+export type GetBoardVocabularyResponse = Vocabulary & { aliases: Aliases };
+// PUT /boards/:id/aliases: `term` now means `canonical`. DELETE with the
+// same kind and term separates it again.
+export type PutAliasRequest = {
+  kind: TermKind;
+  term: string;
+  canonical: string;
+};
+export type DeleteAliasRequest = { kind: TermKind; term: string };
+export type AliasesResponse = Aliases;
 
 // Phase 3 section 5: recent sheets across boards a user can see, for the
 // group home page.
@@ -326,6 +339,9 @@ export type GetSheetResponse = {
 export type GetSheetElementsResponse = { elements: unknown[] };
 
 export type GetSheetForeignResponse = Foreign;
+// GET /sheets/:id/reach (CONTEXT.md "Reach"): other sheets' edges with one
+// end on this sheet, and the far images they lead to.
+export type GetSheetReachResponse = Reach;
 
 export type GetSheetRowsResponse = { regions: RegionRow[]; edges: EdgeRow[] };
 

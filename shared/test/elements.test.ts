@@ -73,4 +73,28 @@ describe('dataOf', () => {
       properties: {},
     });
   });
+
+  test('an edge carries its confidence and note, and a scene saved before them still reads', () => {
+    const edge = (extra: Record<string, unknown>) =>
+      dataOf({
+        customData: {
+          kind: 'edge',
+          relation: 'same place',
+          direction: 'none',
+          properties: {},
+          ...extra,
+        },
+      });
+    expect(edge({ confidence: 'likely', note: 'same roofline' })).toEqual({
+      kind: 'edge',
+      relation: 'same place',
+      direction: 'none',
+      properties: {},
+      confidence: 'likely',
+      note: 'same roofline',
+    });
+    expect(edge({})).not.toBeNull();
+    expect(edge({ confidence: 'certain' })).toBeNull();
+    expect(edge({ note: 42 })).toBeNull();
+  });
 });
