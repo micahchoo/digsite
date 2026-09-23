@@ -11,17 +11,10 @@ import { join, relative, sep } from 'node:path';
 import type { FolderImport } from '@digsite/shared/api';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
-import { StorageFull } from '../storage/room.ts';
 import { enqueueJob } from '../worker/jobs.ts';
+import { fromCamera, isCameraFile } from './camera.ts';
 
 const IMAGE = /\.(png|jpe?g|webp|gif|avif)$/i;
-// Phone and camera formats (roadmap item 8). They are listed so that each
-// is counted and explained as a skip, never dropped without a word: before
-// this, a phone folder of HEIC files imported as "0 of 0". They are
-// skipped by name, without reading a 50 MB RAW file to refuse it.
-const CAMERA =
-  /\.(heic|heif|dng|nef|nrw|cr2|cr3|crw|arw|srf|sr2|raf|orf|rw2|pef|srw|x3f|3fr|iiq|erf|kdc|dcr|mrw|raw|rwl)$/i;
-const CAMERA_SKIP = 'phone or camera format (HEIC or RAW); not decoded yet';
 
 export class ImportRefused extends Error {
   constructor(
@@ -56,8 +49,8 @@ export async function allowedFolder(path: string): Promise<string> {
 }
 
 /** Image files under `folder`, relative to it, sorted; subfolders
- * included, hidden files and folders skipped. Camera formats are listed
- * too, so the batch can say why each is skipped. */
+ * included, hidden files and folders skipped. Phone and camera files
+ * (camera.ts) are images too. */
 export async function listImages(folder: string): Promise<string[]> {
   const entries = await readdir(folder, {
     recursive: true,
@@ -66,7 +59,7 @@ export async function listImages(folder: string): Promise<string[]> {
   const files: string[] = [];
   for (const entry of entries) {
     if (!entry.isFile()) continue;
-    if (!IMAGE.test(entry.name) && !CAMERA.test(entry.name)) continue;
+    if (!IMAGE.test(entry.name) && !isCameraFile(entry.name)) continue;
     const rel = relative(folder, join(entry.parentPath, entry.name));
     if (rel.split(sep).some((part) => part.startsWith('.'))) continue;
     files.push(rel);
@@ -142,37 +135,20 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
   const { validateUpload } = await import('./validate.ts');
   const { uploadOne } = await import('./upload.ts');
   for (const file of job.batch as string[]) {
-    let skip: string | null = null;
-    if (CAMERA.test(file)) {
-      skip = CAMERA_SKIP;
-    } else {
-      try {
-        const bytes = new Uint8Array(
-          await Bun.file(join(job.path, file)).arrayBuffer(),
-        );
-        const result = validateUpload(bytes);
-        if (result.ok) {
-          const dir = file.includes(sep)
-            ? file.slice(0, file.lastIndexOf(sep))
-            : '';
-          await uploadOne(
-            job.board_id,
-            job.user_id,
-            file.slice(file.lastIndexOf(sep) + 1),
-            bytes,
-            dir ? { folder: dir } : {},
-          );
-        } else {
-          skip = result.reason;
-        }
-      } catch (error) {
-        // A full disk is not this file's fault: stop here, cursor unmoved, and
-        // let the job retry with backoff; the import resumes on this file.
-        if (error instanceof StorageFull) throw error;
-        // A file that vanished or cannot be read is skipped, not retried:
-        // the folder is the owner's and may change under the import.
-        skip = error instanceof Error ? error.message : String(error);
-      }
+    const admitted = await admit(job.path, file, validateUpload);
+    const skip = 'skip' in admitted ? admitted.skip : null;
+    if (!('skip' in admitted)) {
+      // Not caught: a failure here is the server's (storage, database, a
+      // full disk), never this file's. The job retries with the cursor
+      // unmoved, and the import resumes on this file. Before, a missing
+      // DATA_DIR skipped every file of a 901-file import as its own fault.
+      await uploadOne(
+        job.board_id,
+        job.user_id,
+        admitted.name,
+        admitted.bytes,
+        admitted.properties,
+      );
     }
     await pool.query(
       `UPDATE folder_imports SET next = next + 1,
@@ -199,4 +175,37 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
   if (after[0]?.state === 'running') {
     await enqueueJob('folder-import', { importId });
   }
+}
+
+type Admitted =
+  | { name: string; bytes: Uint8Array; properties: Record<string, unknown> }
+  | { skip: string };
+
+/** One file as an upload, or why it is skipped. Only the FILE's faults
+ * are skips: it vanished, cannot be read, or is not an image. */
+async function admit(
+  folder: string,
+  file: string,
+  validateUpload: typeof import('./validate.ts').validateUpload,
+): Promise<Admitted> {
+  const name = file.slice(file.lastIndexOf(sep) + 1);
+  const dir = file.includes(sep) ? file.slice(0, file.lastIndexOf(sep)) : '';
+  const properties: Record<string, unknown> = dir ? { folder: dir } : {};
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await Bun.file(join(folder, file)).arrayBuffer());
+  } catch (error) {
+    // The folder is the owner's and may change under the import.
+    return { skip: error instanceof Error ? error.message : String(error) };
+  }
+  // A phone or camera file becomes a JPEG here and is an ordinary image
+  // from then on; `format` keeps what it was.
+  if (isCameraFile(name)) {
+    const converted = await fromCamera(name, bytes);
+    if (!converted.ok) return { skip: converted.reason };
+    bytes = converted.bytes;
+    properties.format = converted.format;
+  }
+  const result = validateUpload(bytes);
+  return result.ok ? { name, bytes, properties } : { skip: result.reason };
 }

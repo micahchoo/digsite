@@ -149,6 +149,13 @@ sheet that made it. The board never writes a claim.
 - **Folder import** — a board filled from a folder on the server's disk,
   under a root the operator allowed (`IMPORT_ROOTS`). Each file takes the
   upload path; the import keeps its file list and a cursor, so it resumes.
+  A **skip** is the file's fault only: it vanished, is unreadable, or is
+  not an image, and each one carries its reason. A fault of the server
+  (storage, database) stops the batch without moving the cursor.
+- **Camera file** — a phone or camera format (HEIC, RAW) that the import
+  turns into a JPEG original once, where it enters. HEIC is decoded; a
+  RAW gives up the full-size JPEG the camera embedded. The image's
+  `format` property keeps what the file was.
 - **Invalidation** — a message that one process's cached copy of a board
   (ladder pages, composed tiles, coarse tiles) is old. Published on one
   Postgres channel; every other process drops its copy.

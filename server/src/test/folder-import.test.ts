@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 // boards/folder-import.ts: a board filled from a folder on the server's
 // disk. The roots are the boundary; every file goes the upload path.
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -9,10 +16,12 @@ import {
   ImportRefused,
   allowedFolder,
   folderImport,
+  runFolderImportBatch,
   startFolderImport,
 } from '../boards/folder-import.ts';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
+import { resetRoomForTest } from '../storage/room.ts';
 import { drain } from '../worker/index.ts';
 
 let root = '';
@@ -48,8 +57,11 @@ beforeAll(async () => {
   await writeFile(join(root, 'fake.png'), 'not an image');
   await mkdir(join(root, 'trip'));
   await writeFile(join(root, 'notes.txt'), 'ignored');
-  // Named, not decoded: the import skips camera formats by name.
-  await writeFile(join(root, 'IMG_0001.HEIC'), 'heic');
+  // A real phone photo imports; a "RAW" that is not one is explained.
+  await copyFile(
+    join(import.meta.dir, 'fixtures', 'split-64x48.heic'),
+    join(root, 'IMG_0001.HEIC'),
+  );
   await writeFile(join(root, 'trip', 'DSC_0002.nef'), 'raw');
   await writeFile(join(root, 'trip', 'c.png'), await png(170));
   await mkdir(join(root, '.cache'));
@@ -90,20 +102,62 @@ describe('folder import', () => {
     await drain();
 
     const done = await folderImport(boardId, started.id);
-    expect(done).toMatchObject({ state: 'done', imported: 3, skipped: 3 });
+    expect(done).toMatchObject({ state: 'done', imported: 4, skipped: 2 });
     const why = Object.fromEntries(
       (done?.skips ?? []).map((s) => [s.file, s.reason]),
     );
     expect(why['fake.png']).toBe('not a recognised image type');
-    expect(why['IMG_0001.HEIC']).toContain('HEIC or RAW');
-    expect(why[join('trip', 'DSC_0002.nef')]).toContain('HEIC or RAW');
+    expect(why[join('trip', 'DSC_0002.nef')]).toBe(
+      'NEF carries no full-size JPEG',
+    );
 
     const { rows: images } = await pool.query(
       'SELECT name, status, properties FROM images WHERE board_id = $1 ORDER BY name',
       [boardId],
     );
-    expect(images.map((i) => i.name)).toEqual(['a.png', 'b.png', 'c.png']);
+    const byName = new Map(images.map((i) => [i.name as string, i]));
+    expect([...byName.keys()].sort()).toEqual([
+      'IMG_0001.HEIC',
+      'a.png',
+      'b.png',
+      'c.png',
+    ]);
     expect(images.every((i) => i.status === 'ready')).toBe(true);
-    expect(images[2]?.properties.folder).toBe('trip');
+    expect(byName.get('c.png')?.properties.folder).toBe('trip');
+    expect(byName.get('IMG_0001.HEIC')?.properties.format).toBe('HEIC');
+  });
+
+  test('a server fault skips nothing: the batch fails, and the import resumes on the same file', async () => {
+    env.IMPORT_ROOTS = [root];
+    const { rows } = await pool.query(
+      `INSERT INTO boards (org_id, name, open, created_by)
+       VALUES ('org-import', $1, true, 'importer') RETURNING id`,
+      [`folder-fault-${Date.now()}`],
+    );
+    const boardId = rows[0].id as string;
+    const started = await startFolderImport(boardId, 'importer', root);
+    // The fault seen for real: statfs on a DATA_DIR that is not there.
+    // Not StorageFull, which was already passed through.
+    const { DATA_DIR, UPLOAD_MIN_FREE_GB } = env;
+    env.DATA_DIR = join(outside, 'no-such-data-dir');
+    env.UPLOAD_MIN_FREE_GB = 1;
+    resetRoomForTest();
+    try {
+      await expect(runFolderImportBatch(started.id)).rejects.toThrow('ENOENT');
+    } finally {
+      Object.assign(env, { DATA_DIR, UPLOAD_MIN_FREE_GB });
+      resetRoomForTest();
+    }
+    expect(await folderImport(boardId, started.id)).toMatchObject({
+      state: 'running',
+      imported: 0,
+      skipped: 0,
+    });
+    await drain();
+    expect(await folderImport(boardId, started.id)).toMatchObject({
+      state: 'done',
+      imported: 4,
+      skipped: 2,
+    });
   });
 });
