@@ -7,7 +7,6 @@
 // Weights download on first use into DATA_DIR/models; a deployment without
 // network access must place them there first. Nothing here runs unless
 // env.EMBEDDINGS is on.
-import { join } from 'node:path';
 import {
   AutoProcessor,
   AutoTokenizer,
@@ -23,7 +22,7 @@ import { MODEL } from './model.ts';
 /** CLIP's input side; sharp scales to it before the processor sees it. */
 const INPUT = 224;
 
-runtime.cacheDir = join(env.DATA_DIR, 'models');
+runtime.cacheDir = env.MODELS_DIR;
 
 let vision:
   | Promise<{

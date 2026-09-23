@@ -8,6 +8,7 @@ import {
   arrangeBoard,
   arrangementOf,
   enqueueArrangeDebounced,
+  ensureArrangeQueued,
 } from '../meaning/arrangement.ts';
 import { MODEL, toVectorText } from '../meaning/model.ts';
 

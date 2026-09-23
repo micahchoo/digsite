@@ -89,10 +89,7 @@ import {
   toWebRequest,
 } from '../http.ts';
 import { checkLimit, tooManyRequests } from '../limits.ts';
-import {
-  arrangementOf,
-  enqueueArrangeDebounced,
-} from '../meaning/arrangement.ts';
+import { arrangementOf, ensureArrangeQueued } from '../meaning/arrangement.ts';
 import { duplicatesOf } from '../meaning/duplicates.ts';
 import { suggestLabels } from '../meaning/labels.ts';
 import { searchText, similarTo } from '../meaning/search.ts';
@@ -309,7 +306,7 @@ async function sortableKeysFor(
   // embedded before arrangements existed has no positions: queue one.
   if (arrangement && arrangement.embedded > 0) {
     keys.push({ key: 'meaning', label: 'Meaning' });
-    if (arrangement.placed === 0) await enqueueArrangeDebounced(boardId);
+    if (arrangement.placed === 0) await ensureArrangeQueued(boardId);
   }
   const { rows } = await pool.query(
     `SELECT e.key, jsonb_typeof(e.value) AS t,

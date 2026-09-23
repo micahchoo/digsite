@@ -170,6 +170,13 @@ export const env = {
   // unless set to `on`: the first use downloads ~150 MB of weights into
   // DATA_DIR/models, and each worker holds the image model (~300 MB).
   EMBEDDINGS: process.env.EMBEDDINGS === 'on',
+  // Where CLIP's weights are kept. DATA_DIR/models by default; a test run
+  // that starts from a fresh DATA_DIR each time points this at one kept
+  // folder, or downloads ~150 MB every run.
+  MODELS_DIR: resolve(
+    REPO_ROOT,
+    process.env.MODELS_DIR ?? join(process.env.DATA_DIR ?? './data', 'models'),
+  ),
   // boards/folder-import.ts: folders the server may import from, separated
   // by ':'. Empty (the default) turns folder import off: reading the
   // server's disk is the operator's decision, never a user's.

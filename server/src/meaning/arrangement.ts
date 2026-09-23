@@ -156,3 +156,18 @@ export async function enqueueArrangeDebounced(boardId: string): Promise<void> {
     [boardId],
   );
 }
+
+/** Makes sure an arrangement is queued, due now, without moving one
+ * already queued. For the read path: GET /boards/:id called the debounced
+ * enqueue, and a board polled every 3 s pushed its job out 30 s each time,
+ * so a watched board was never arranged. */
+export async function ensureArrangeQueued(boardId: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO jobs (kind, payload)
+     VALUES ('arrange', jsonb_build_object('boardId', $1::text))
+     ON CONFLICT ((payload->>'boardId'))
+       WHERE kind = 'arrange' AND state = 'pending'
+       DO NOTHING`,
+    [boardId],
+  );
+}
