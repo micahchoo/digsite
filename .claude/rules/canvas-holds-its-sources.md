@@ -32,6 +32,11 @@ reached 24 GB on it and would have been killed at a 16 GB cap near 13,000
 images (`docs/measurements/bulk-import-20000.md`). That is why
 `loadPageCanvas` takes `willEncode`, and why "just always resize" is wrong.
 
+It is not the library alone. A standalone loop of the same calls (resize,
+fill, put page, put cell, encode) holds flat on 0.1.100 and on 1.0.9
+(`docs/measurements/canvas-c7.md`). Do not report it upstream until a
+bisect of `scripts/repro-paint-ladder-import.ts` names the step.
+
 ## What must stay true
 
 - A new canvas that is drawn into and reused says, in a comment, whether an
