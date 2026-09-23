@@ -7,9 +7,25 @@ import {
   ensureRank,
   forceRebuildRank,
   imageIdsInRankBand,
+  rankOf,
+  rankOrder,
   sweepStaleRanks,
 } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
+
+/** The order as a list of slots, rank 0 first. */
+async function slotsInOrder(boardId: string, sort: Sort): Promise<number[]> {
+  return [...(await rankOrder(boardId, sort)).slotOfRank];
+}
+
+async function idsAtSlots(boardId: string, slots: number[]): Promise<string[]> {
+  const { rows } = await pool.query(
+    'SELECT slot, id FROM images WHERE board_id = $1 AND slot = ANY($2::int[])',
+    [boardId, slots],
+  );
+  const idOf = new Map(rows.map((row) => [row.slot, row.id]));
+  return slots.map((slot) => idOf.get(slot));
+}
 
 async function makeBoard(name: string): Promise<string> {
   const { rows } = await pool.query(
@@ -54,29 +70,24 @@ describe('ranks', () => {
 
     const forward = await imageIdsInRankBand(boardId, sort, 0, 18, 150);
     const reverse = await imageIdsInRankBand(boardId, sort, 18, 0, 150);
-    const expected = await pool.query(
-      `SELECT i.id FROM board_ranks br
-       JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
-       WHERE br.board_id = $1 AND br.sort_id = $2
-         AND br.rank IN (0, 1, 2, 16, 17, 18)
-       ORDER BY br.rank`,
-      [boardId, sortId(sort)],
+    const order = await slotsInOrder(boardId, sort);
+    const expected = await idsAtSlots(
+      boardId,
+      [0, 1, 2, 16, 17, 18].map((rank) => order[rank] as number),
     );
-    expect(forward).toEqual(expected.rows.map((row) => row.id));
+    expect(forward).toEqual(expected);
     expect(reverse).toEqual(forward);
 
     const capped = await imageIdsInRankBand(boardId, sort, 0, 255, 150);
     expect(capped).toHaveLength(150);
-    const cappedRanks = await pool.query(
-      `SELECT rank FROM board_ranks
-       WHERE board_id = $1 AND sort_id = $2 AND slot = ANY(
-         SELECT slot FROM images WHERE id = ANY($3::uuid[])
-       ) ORDER BY rank`,
-      [boardId, sortId(sort), capped],
+    const { rows: cappedRows } = await pool.query(
+      'SELECT slot FROM images WHERE id = ANY($1::uuid[])',
+      [capped],
     );
-    expect(cappedRanks.rows.map((row) => row.rank)).toEqual(
-      Array.from({ length: 150 }, (_, rank) => rank),
-    );
+    const decoded = await rankOrder(boardId, sort);
+    expect(
+      cappedRows.map((row) => rankOf(decoded, row.slot)).sort((a, b) => a - b),
+    ).toEqual(Array.from({ length: 150 }, (_, rank) => rank));
     expect(await imageIdsInRankBand(boardId, sort, 300, 302, 150)).toEqual([]);
   });
 
@@ -113,15 +124,8 @@ describe('ranks', () => {
     for (const sort of sorts) {
       const { built } = await ensureRank(boardId, sort);
       expect(built).toBe(true);
-      const { rows } = await pool.query(
-        'SELECT rank, slot FROM board_ranks WHERE board_id = $1 AND sort_id = $2 ORDER BY rank',
-        [boardId, sortId(sort)],
-      );
-      expect(rows.length).toBe(N);
-      const ranks = rows.map((r) => r.rank).sort((a, b) => a - b);
-      expect(ranks).toEqual([...Array(N).keys()]);
-      const slots = rows.map((r) => r.slot).sort((a, b) => a - b);
-      expect(slots).toEqual([...Array(N).keys()]);
+      const slots = await slotsInOrder(boardId, sort);
+      expect([...slots].sort((a, b) => a - b)).toEqual([...Array(N).keys()]);
     }
 
     // property sort ascending: images with no "year" property sort last.
@@ -129,14 +133,11 @@ describe('ranks', () => {
       key: { property: 'year', type: 'number' },
       dir: 'asc',
     };
-    const { rows: propRanked } = await pool.query(
-      'SELECT rank, slot FROM board_ranks WHERE board_id = $1 AND sort_id = $2 ORDER BY rank',
-      [boardId, sortId(propSort)],
-    );
+    const propRanked = await slotsInOrder(boardId, propSort);
     const tail = propRanked.slice(N - missingSlots.size);
-    for (const row of tail) expect(missingSlots.has(row.slot)).toBe(true);
+    for (const slot of tail) expect(missingSlots.has(slot)).toBe(true);
     const head = propRanked.slice(0, N - missingSlots.size);
-    for (const row of head) expect(missingSlots.has(row.slot)).toBe(false);
+    for (const slot of head) expect(missingSlots.has(slot)).toBe(false);
 
     // an upload (simulated here by the same stale flag it sets) marks the
     // state stale; ensureRank rebuilds once, then reports no rebuild needed.
@@ -178,18 +179,12 @@ describe('ranks', () => {
 
     const swept = await sweepStaleRanks(7);
     expect(swept.sorts).toBeGreaterThanOrEqual(1);
-    expect(swept.rows).toBeGreaterThanOrEqual(5);
 
     const { rows: staleRows } = await pool.query(
       'SELECT 1 FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
       [boardId, sortId(staleSort)],
     );
     expect(staleRows.length).toBe(0);
-    const { rows: staleRankRows } = await pool.query(
-      'SELECT 1 FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
-      [boardId, sortId(staleSort)],
-    );
-    expect(staleRankRows.length).toBe(0);
 
     const { rows: freshRows } = await pool.query(
       'SELECT 1 FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
@@ -201,14 +196,10 @@ describe('ranks', () => {
     // stale one already takes.
     const { built } = await ensureRank(boardId, staleSort);
     expect(built).toBe(true);
-    const { rows: rebuiltRows } = await pool.query(
-      'SELECT rank, slot FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
-      [boardId, sortId(staleSort)],
-    );
-    expect(rebuiltRows.length).toBe(5);
+    expect(await slotsInOrder(boardId, staleSort)).toHaveLength(5);
   });
 
-  test('two concurrent rebuilds of the same (board, sort) both resolve and the table ends with exactly N rows', async () => {
+  test('two concurrent rebuilds of the same (board, sort) both resolve and the order holds exactly N slots', async () => {
     const boardId = await makeBoard(`concurrent-rebuild-test-${Date.now()}`);
     const N = 5000;
     for (let i = 0; i < N; i++) {
@@ -222,10 +213,10 @@ describe('ranks', () => {
     const sort: Sort = { key: 'name', dir: 'asc' };
 
     // Before the advisory lock (server/src/boards/ranks.ts#rebuildRank),
-    // two rebuilds racing like this reproduced
-    // `duplicate key value violates unique constraint "board_ranks_..._pkey"`
-    // on the owner's demo server — both compute and INSERT the identical
-    // target row set. Firing forceRebuildRank (never skips on `stale`, so
+    // two rebuilds racing like this reproduced a duplicate-key error on the
+    // owner's demo server, when ranks were rows in board_ranks. The order is
+    // one value now, but the lock still keeps two builds from both doing
+    // the work. Firing forceRebuildRank (never skips on `stale`, so
     // both calls definitely attempt a real rebuild, not one short-circuiting
     // on ensureRank's own pre-check) twice at once is the sharpest
     // reproduction of that race. N=5000 matters: confirmed by hand that a
@@ -244,13 +235,8 @@ describe('ranks', () => {
       }
     }
 
-    const { rows } = await pool.query(
-      'SELECT rank, slot FROM board_ranks WHERE board_id = $1 AND sort_id = $2 ORDER BY rank',
-      [boardId, sortId(sort)],
-    );
-    expect(rows.length).toBe(N);
-    const ranks = rows.map((r) => r.rank).sort((a, b) => a - b);
-    expect(ranks).toEqual([...Array(N).keys()]);
+    const slots = await slotsInOrder(boardId, sort);
+    expect([...slots].sort((a, b) => a - b)).toEqual([...Array(N).keys()]);
   }, 20_000); // two real 5,000-row rebuilds exceed bun:test's default 5s
   // per-test timeout even on the fixed, non-racing path.
 });

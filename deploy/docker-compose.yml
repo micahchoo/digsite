@@ -6,7 +6,11 @@
 # .env.production.example — see README.md.
 services:
   db:
-    image: postgres:16-alpine
+    # postgres:16-alpine with pgvector built in (../db/Dockerfile): the same
+    # musl base as before, so an existing volume and its indexes carry over.
+    build:
+      context: ../db
+    image: digsite-postgres:16-pgvector
     container_name: digsite-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-digsite}
@@ -84,7 +88,7 @@ services:
       SESSION_UPDATE_AGE: ${SESSION_UPDATE_AGE:-86400}
       AUTH_RATE_LIMIT_WINDOW: ${AUTH_RATE_LIMIT_WINDOW:-10}
       AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-100}
-      RATE_UPLOAD_PER_MIN: ${RATE_UPLOAD_PER_MIN:-6000}
+      RATE_UPLOAD_PER_MIN: ${RATE_UPLOAD_PER_MIN:-12000}
       RATE_TUS_CREATE_PER_MIN: ${RATE_TUS_CREATE_PER_MIN:-600}
       RATE_SOCKET_CONNECT_PER_MIN: ${RATE_SOCKET_CONNECT_PER_MIN:-30}
       RATE_SCENE_EMIT_PER_SEC: ${RATE_SCENE_EMIT_PER_SEC:-30}

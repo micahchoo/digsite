@@ -36,14 +36,19 @@ line here before it gets a file.
 - **Sort** — an ordering of a board's images: by `name`, `uploaded_at` or a
   typed property, ascending or descending. Each viewer chooses; the board
   has a **default sort**. Images without the sort's value come last.
-- **Rank** — an image's position under one sort: `0..N-1`. Materialised per
-  `(board, sort)` as a table, rebuilt whole, never patched.
+- **Rank** — an image's position under one sort: `0..N-1`. Held per
+  `(board, sort)` as one **order**: every slot in rank order
+  (`board_rank_state.slot_order`), rebuilt whole, never patched.
 - **Cell** — where a rank sits on the map: fixed 128-unit squares, 16 per
   row, row-major. `col = rank % 16`, `row = rank / 16`.
 - **Tile** — a 256 px PNG of the cells in one square of the map at one
   **zoom** `z ∈ {0..−5}`. Composed on request from the ladder, cached.
 - **Missing** — an image whose original is gone. Kept as a row, shown as
   such, never deleted by the system.
+- **Captured properties** — properties the worker reads from an
+  original's EXIF once (`taken`, `taken_at`, `camera`, `lens`, `focal_mm`,
+  `iso`, `aperture`, `exposure_s`, `latitude`, `longitude`). Merged under
+  the image's own properties: a value a person set always wins.
 
 ## The sheet is a document
 
@@ -80,3 +85,52 @@ line here before it gets a file.
 
 A board's graph is the union of its sheets' claims, each tagged with the
 sheet that made it. The board never writes a claim.
+
+## Making sense
+
+- **Term** — a region's label or an edge's relation, as typed.
+- **Vocabulary** — a board's terms of one kind (labels, relations), each
+  with how many claims use it. Read from rows; never stored as its own
+  list. Every label and relation field suggests from it, most-used first.
+- **Alias** — a board-level statement that one term means another:
+  "same location" → "same place". The target is the **canonical** term.
+  Applied wherever claims are READ (vocabulary, find, explore, emphasis);
+  never written into a sheet's scene, because the sheet owns its claims.
+  Removing an alias restores the term; nothing was rewritten.
+- **Confidence** — how sure an edge's sheet is of it: `confirmed`,
+  `likely` or `unverified`. Absent means nobody said.
+- **Note** — an edge's free text: why the connection holds.
+- **Evidence** — an edge's two ends shown side by side: the crops of its
+  regions, or the images when an end is a whole image.
+- **Reach** — an edge from another sheet with exactly one end on this
+  sheet. Drawn on the overlay as a stub leading off the image, never in
+  the scene. Bringing its far image onto the sheet turns it into an
+  ordinary foreign edge.
+- **Pair** — two images, unordered. Every edge joins one pair, whatever
+  regions its ends are bound to.
+- **Agreement / disagreement** — edges from different sheets on the same
+  pair agree when their canonical relations match and their directions do
+  not oppose; otherwise they disagree. Shown, never resolved by the
+  system.
+
+## Work behind the map
+
+- **Job** — one unit of background work in `jobs`: `ladder`,
+  `rank-rebuild` or `materialise`. Claimed by a worker, deleted when done.
+- **Lease** — how long a claimed job belongs to its worker. Renewed while
+  the job runs. An expired lease means the worker died: the job returns to
+  the queue as a spent attempt, and ends `failed` when attempts run out.
+- **Worker process** — the worker runs as a child of the server by
+  default, so image work that exhausts memory takes down the worker and
+  never the API. It **retires** (finishes its batch, exits cleanly) past a
+  memory or job bound, and the server starts a new one.
+- **Embedding** — what an image means to a CLIP model: a 512-number vector
+  (`image_embeddings`, pgvector `halfvec`), computed by the worker when
+  `EMBEDDINGS=on`. **Similar** and **search** return images by meaning, as
+  ranks under the viewer's sort, the same shape as find.
+- **Folder import** — a board filled from a folder on the server's disk,
+  under a root the operator allowed (`IMPORT_ROOTS`). Each file takes the
+  upload path; the import keeps its file list and a cursor, so it resumes.
+- **Invalidation** — a message that one process's cached copy of a board
+  (ladder pages, composed tiles, coarse tiles) is old. Published on one
+  Postgres channel; every other process drops its copy.

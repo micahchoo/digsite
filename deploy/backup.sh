@@ -11,6 +11,8 @@
 #     ./backup.sh <backup-dir>
 #
 # Defaults match deploy/docker-compose.yml and .env.production.example.
+# Nightly, e.g. in cron:
+#   15 3 * * * cd /opt/digsite/deploy && ./backup.sh /var/backups/digsite
 # Prints the new backup's path (<backup-dir>/<UTC timestamp>) on its last
 # line, so a caller (deploy/restore.sh's own tests, cron) can capture it.
 set -euo pipefail
@@ -47,8 +49,20 @@ if [ "$STORAGE" = "s3" ]; then
 else
   : "${DATA_DIR:?DATA_DIR required when STORAGE=fs}"
   echo "backup: storage (fs $DATA_DIR) -> $DEST/storage.tar.gz" >&2
-  tar -C "$DATA_DIR" -czf "$DEST/storage.tar.gz" .
+  # models/ holds downloaded CLIP weights (meaning/clip.ts): ~150 MB the
+  # server fetches again on first use, so not worth a copy per backup.
+  tar -C "$DATA_DIR" --exclude=./models -czf "$DEST/storage.tar.gz" .
 fi
+
+# Retention: keep the newest BACKUP_KEEP backups (default 14), so a nightly
+# cron never fills the disk it is protecting. Only this script's own dated
+# directories are considered.
+BACKUP_KEEP="${BACKUP_KEEP:-14}"
+find "$OUT_DIR" -mindepth 1 -maxdepth 1 -type d -name '20*T*Z' \
+  | sort -r | tail -n "+$((BACKUP_KEEP + 1))" | while read -r old; do
+    echo "backup: pruning $old" >&2
+    rm -rf -- "$old"
+  done
 
 echo "backup complete: $DEST" >&2
 echo "$DEST"

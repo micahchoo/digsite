@@ -69,3 +69,20 @@ container's 128 MB, before adding anything else there.
 Rate limits on upload and sockets, an audit of every route against the
 access module, a load test across boards with the ladder LRU, error
 pages, observability from the `Server-Timing` headers already emitted.
+
+## Making sense — six horizons
+
+Sense on a board comes from annotation and connection; everything else is
+secondary. The first slice (vocabulary, one-gesture connect, evidence,
+aliases, reach, agreement, the keyboard loop) is DONE and walked on the
+real server by `e2e/src/sense-claims.ts`. Patterns borrowed from
+image-graph are mapped per horizon in `ux/image-graph-patterns.md`.
+
+| # | horizon | done when | status |
+| --- | --- | --- | --- |
+| 1 | The loop without friction | details docked, lines route around pictures, focus dims the rest, labels and captions on the canvas, confidence visible on the line, `?` shortcuts, mode bar, context menu | in progress |
+| 2 | Claims you can trust | compare two pictures side by side; who said what and when; replies on a claim; extract a region as its own picture | open |
+| 3 | A web you can walk | explore a connection or a relation; "how are A and B connected"; a graph view with hop rings | open |
+| 4 | The machine suggests, never decides | suggested connections, labels and near-duplicates from embeddings, each accepted by a person | open; needs the embedding routes (digsite-1b) |
+| 5 | Show the work | stable links to a claim or a view, a read-only view, a citable export | open |
+| 6 | The quality floor | dark mode, phone width, arrow keys and an announcer, screenshots and the claims walk in CI | open |

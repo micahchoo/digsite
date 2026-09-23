@@ -4,6 +4,131 @@ Updated 2026-09-22 after the upload-throughput and interface Luna pass.
 The product repository is `app/`; roadmap: `docs/roadmap.md`.
 Nothing was deployed. The isolated functional preview uses ports 5292/8892.
 
+## Interface and "making sense" in progress (2026-09-23)
+
+A second session, working beside the server-roadmap one. Not committed.
+The user narrowed the product: sense-making comes from annotation and
+connection; everything else is secondary. GeoCities is dropped.
+
+Interface polish (phases 1-3): one token palette read by both canvases
+(`web/src/theme/palette.ts`); `board/board.css` rewritten one rule per
+selector; the board's side panel reordered and made quiet; every typed
+glyph replaced by `web/src/components/Icon.tsx`; the top bar is a path.
+
+Making sense (CONTEXT.md "Making sense", all seven parts built):
+- Shared vocabulary: `GET /boards/:id/vocabulary`; every label and relation
+  field is `components/TermInput.tsx` (suggests, catches respellings).
+- Connect in one gesture: `sheet/ConnectLayer.tsx` handle, then
+  `sheet/RelationPicker.tsx` names it where it lands.
+- Evidence, confidence, note: first-class edge fields
+  (`0016_making_sense.sql`); the rewritten `sheet/Inspector.tsx` shows both
+  ends as crops (`sheet/evidence.ts`).
+- Aliases: `term_aliases`, `PUT/DELETE /boards/:id/aliases`, intent
+  `boardForAliasing`; read-time only. Merged from the board's Terms index.
+- Reach: `GET /sheets/:id/reach`, drawn by `sheet/overlay/Reach.tsx`.
+- Agreement: pure, from polled rows (`shared/src/sheet/sense.ts`).
+- The board learns: Terms index (`board/Terms.tsx`), find by label or
+  relation, corner marks on annotated cells, Explore answers first and draws
+  the neighbourhood on the map.
+- Keyboard loop: Region tool, Tab/Shift+Tab walk images in reading order.
+
+Fixed on the way: claims drew under images after a reload. Saved native
+scenes carry no index and `mergeByVersion` sorted them by id. Now the
+renderer and hit test go by layer (`scene.ts#paintOrder`), and the merge
+keeps stored order. The preview on 8892 was restarted on the current tree
+by digsite-1b (migrated through 0020).
+
+Six horizons follow (`docs/roadmap.md` § "Making sense — six horizons"),
+with image-graph's patterns mapped to them in
+`docs/ux/image-graph-patterns.md`. Horizon 1 so far:
+- Lines go around the pictures between their ends: `sheet/routing.ts`
+  (orthogonal A*, ported from image-graph; its search state carries the
+  arrival axis, or it gave three bends where two do). Canvas, hit test and
+  overlay labels all read `edgePaths`. Other sheets' lines are still
+  straight.
+- The selection sets the emphasis: `connection-emphasis.ts#focusOf`. Lines
+  and regions not touching it go faint. Confidence is the line style:
+  likely is dashed, unverified is dotted.
+- Region labels were never drawn on the native canvas. It reads
+  `customData.label`, and render.ts only read bound text. Now they are a
+  chip above the corner (`labels.ts#regionChip`, shared by render, overlay
+  and smoke).
+- The details panel docks as a column when the sheet is 900 px or wider
+  (a container query), and a sheet opens fitted.
+- `sheet/shortcuts.ts` is the one key table, shown by `?`
+  (`ShortcutsPanel.tsx`). A mode bar says what Region, Edge and Pan wait
+  for, with Cancel. The first Esc cancels a half-made connection, the next
+  leaves the tool.
+- Right-click and Shift+F10 open `sheet-menu.ts` in `board/ContextMenu.tsx`,
+  now keyboard-navigable. `CanvasHandle.hitAt` answers what the pointer is
+  over.
+- Board (the user asked for this): the view zooms to 800%. Tiles stop at
+  z=0, and past z=0.5 `board/detail.ts` draws each visible cell's own
+  preview.
+
+`smoke-sheet-surroundings.ts` hung forever on a failure (`exitCode` with
+Chromium still open). It now calls `process.exit(1)`. The five codex smoke
+runs from 2026-09-22 are that hang; the user decides about them.
+
+Verify with `bun run smoke` (15 scripts),
+`bun run e2e:fresh src/sense-claims.ts` (the real-server walk: claims 1-7),
+`cd web && bun test`, and `cd shared && bun test`. Next in horizon 1:
+captions under pictures, a group band, cursors by what is under the pointer,
+the sheet header ("not saved yet", the relation select). Then horizons 2-6.
+Also open: `shell.css` stacks overrides; ~20 inline SVGs sit outside `Icon`,
+the sheet toolbar's among them. Biome does not catch a hook after an early
+return; one shipped briefly in `Sheet.tsx` and blanked the page.
+
+## Server roadmap (2026-09-23)
+
+All six stages built and measured; not committed. Server suite 132/133 (one
+skip) on a throwaway DB; typecheck, Biome, seam lint clean. Every number:
+docs/measurements/server-roadmap-2026-09-23.md.
+
+- Stage 1: worker is a supervised child (WORKER=process), retires, is the
+  OOM victim, jobs are leased (0015). 4 GB soak passed: import + 60-min pan,
+  0 OOM kills. @napi-rs/canvas decodes nothing (its decoder rejects some
+  valid PNGs); sharp decodes. Rules: worker-is-disposable.md,
+  canvas-holds-its-sources.md.
+- Stage 2: board_ranks gone (0017); order is board_rank_state.slot_order.
+  1M rebuild 0.1-1.0 s.
+- Stage 3: sharp decode, EXIF captured properties, page-grouped painting;
+  folder import (0019, POST /boards/:id/imports, IMPORT_ROOTS). Upload rate
+  limit 12,000/min.
+- Stage 4: CLIP embeddings (EMBEDDINGS=on) in pgvector halfvec + HNSW
+  (0020). digsite-db now runs digsite-postgres:16-pgvector (db/Dockerfile,
+  same Alpine base; docker-compose.yml builds it). 1M search 8 ms.
+- Stage 5: 1 API + 2 workers, 0 of 60,003 cells blank (audit-ladder.ts).
+- Stage 6: metrics per process; disk guard (UPLOAD_MIN_FREE_GB, 507);
+  backups skip models/ and keep BACKUP_KEEP; no OpenTelemetry.
+
+The ONE demo to keep (agreed with digsite-7c): web http://localhost:5292,
+API :8892, owner@example.test / password1234, DB digsite_preview_1790122818.
+Restart it with /tmp/digsite-preview-server-restart.sh (now sets
+IMPORT_ROOTS=/home/micah/Pictures and EMBEDDINGS=on). It has a
+"Screenshots" board: 141 images, embedded, searchable.
+Other session: digsite-7c owns find.ts claim filters, vocabulary routes,
+sheets/**, web/**. Five orphaned codex smoke runs (8850-8852, 8891/5291)
+are hung; the user decides whether to stop them.
+
+## 20,000-image import and the OOM (2026-09-22)
+
+A real browser import of 20,001 PNGs from the image-graph vault completed
+with no failures, and reproduced the OOM: server RSS rose ~1.14 MB per
+processed image to 24.2 GB. Cause: `@napi-rs/canvas` keeps what was drawn
+into a canvas until it is encoded or resized, and `loadPageCanvas`'s resize
+leaked on the upload paint path. Fix in `server/src/boards/ladder.ts`
+(`willEncode`); rerun peaked at 2.9 GB, 799 s to all ready. Evidence:
+`docs/measurements/bulk-import-20000.md`; rule:
+`.claude/rules/canvas-holds-its-sources.md`. Not committed.
+
+Isolated stack still running for the compact-grid retest: server
+http://localhost:8893, web http://localhost:5293, database
+`digsite_import_1790136976`, storage `../.preview/digsite_import_1790136976/`.
+It holds two 20,001-image boards and one 200-image board.
+Still open from roadmap item 1: native file-dialog delay (needs a person),
+per-sort rank tables (needs a design choice), compact grid at 1M.
+
 ## Latest usability pass
 
 The real upload log showed 77 rate-limited responses among 164 requests.

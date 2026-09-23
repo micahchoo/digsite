@@ -18,7 +18,6 @@
 // moved onto a pool of real OS threads. The ladder residency cache
 // (ladder.ts) is not touched here on purpose: this reads pages directly off
 // disk so materialising never evicts what a live viewer's pan has resident.
-import os from 'node:os';
 import {
   CELL,
   TILE,
@@ -37,13 +36,16 @@ import {
   sizeFor,
 } from '@digsite/shared/board/ladder';
 import { type Sort, sortId } from '@digsite/shared/board/sort';
-import { type Canvas, Image, createCanvas } from '@napi-rs/canvas';
+import { type Canvas, createCanvas } from '@napi-rs/canvas';
 import { pool } from '../db/pool.ts';
 import { env } from '../env.ts';
 import { deletePrefix, storageFromEnv } from '../storage/index.ts';
+import { Semaphore } from '../util/semaphore.ts';
 import { setResidentSort } from './coarse-cache.ts';
-import { ladderPageKey } from './ladder.ts';
+import { publish } from './invalidation.ts';
+import { decodePage, ladderPageKey } from './ladder.ts';
 import { coarseTilesPrefix } from './paths.ts';
+import { rankOrder } from './ranks.ts';
 import { PENDING_COLOR, materialisedTileKey } from './tiles.ts';
 
 const MATERIALISE_ZOOMS = ZOOMS.filter((z) => z <= -3);
@@ -215,17 +217,13 @@ async function paintPageDirect(
   s: LadderSize,
   page: number,
   dstCtx: ReturnType<Canvas['getContext']>,
-  img: Image, // reused across every page too, same reason as the canvas
 ): Promise<void> {
   const key = ladderPageKey(boardId, s, page);
   dstCtx.fillStyle = '#222';
   dstCtx.fillRect(0, 0, PAGE, PAGE);
   const bytes = await storageFromEnv().get(key);
-  if (bytes) {
-    img.src = Buffer.from(bytes);
-    await img.decode();
-    dstCtx.drawImage(img, 0, 0);
-  }
+  // ladder.ts#decodePage: the canvas library cannot read every page it wrote.
+  if (bytes) dstCtx.putImageData(await decodePage(bytes), 0, 0);
 }
 
 /** Every zoom that reads ladder size `s`, per shared/board/ladder.ts's
@@ -258,7 +256,7 @@ async function scatterSize(
   const capacity = perPage(s);
   const maxPage = Math.floor((count - 1) / capacity);
 
-  // One page canvas and one Image, reused for every page of this size —
+  // One page canvas, reused for every page of this size —
   // see paintPageDirect's header comment for why a fresh one per iteration
   // OOMs the process well before finishing. Reserved/released around the
   // whole size's pass rather than per page: the canvas is the same
@@ -270,7 +268,6 @@ async function scatterSize(
   budget.reserve(pageBytes, `decoded page (size ${s})`);
   try {
     const pageCanvas = createCanvas(PAGE, PAGE);
-    const img = new Image();
 
     for (let page = 0; page <= maxPage; page++) {
       // In @napi-rs/canvas 0.1.100, repeated decoded-Image draws into a
@@ -280,7 +277,7 @@ async function scatterSize(
       pageCanvas.width = PAGE;
       pageCanvas.height = PAGE;
       const pageCtx = pageCanvas.getContext('2d');
-      await paintPageDirect(boardId, s, page, pageCtx, img);
+      await paintPageDirect(boardId, s, page, pageCtx);
       const base = page * capacity;
       const limit = Math.min(capacity, count - base);
 
@@ -319,8 +316,9 @@ async function scatterSize(
 
 /** Round-robins finished tile canvases across a pool of real OS threads for
  * PNG encoding — the CPU cost docs/measurements/phase-1-map.md's Row 4
- * traced the 277s to. `os.cpus().length - 2` leaves two cores for the DB
- * client and the rest of the process.
+ * traced the 277s to. `env.MATERIALISE_ENCODERS` threads, each a whole JS
+ * heap: 30 idle threads measured +254 MB, and a machine's core count is no
+ * guide to the memory it can spare (the 4 GB soak, 2026-09-23).
  *
  * The worker (tile-encode-worker.ts) does ONLY the encode and hands the PNG
  * back; this pool writes it through Storage on the main thread. Before
@@ -428,7 +426,20 @@ class EncodePool {
   }
 }
 
-export async function materialiseSort(
+// One materialise at a time per process. MATERIALISE_BUDGET_MB and the
+// encode threads are sized for ONE run; the worker runs several units at
+// once, and four concurrent materialises after a restart OOM-killed a
+// worker under a 4 GB cap within two seconds (the soak, 2026-09-23).
+const oneAtATime = new Semaphore(1);
+
+export function materialiseSort(
+  boardId: string,
+  sort: Sort,
+): Promise<{ tiles: number; ms: number }> {
+  return oneAtATime.run(() => materialiseSortNow(boardId, sort));
+}
+
+async function materialiseSortNow(
   boardId: string,
   sort: Sort,
 ): Promise<{ tiles: number; ms: number }> {
@@ -457,15 +468,10 @@ export async function materialiseSort(
   const tiles = allocateTiles(boardId, sid, count, budget);
 
   if (count > 0) {
-    // One query for the whole sort, not one per tile — slot -> rank as a
-    // flat Int32Array (~4 MB at 1,000,000 images) so the scatter loop below
-    // never touches the database again.
-    const rankOfSlot = new Int32Array(count).fill(-1);
-    const { rows: rankRows } = await pool.query(
-      'SELECT slot, rank FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
-      [boardId, sid],
-    );
-    for (const r of rankRows) rankOfSlot[r.slot as number] = r.rank as number;
+    // The sort's whole order, already a flat slot -> rank Int32Array
+    // (ranks.ts#rankOrder), so the scatter loop below never touches the
+    // database again. A slot past its end was uploaded after the build.
+    const { rankOfSlot } = await rankOrder(boardId, sort);
 
     const pendingSlots = new Uint8Array(count);
     const { rows: pendingRows } = await pool.query(
@@ -493,7 +499,7 @@ export async function materialiseSort(
   // shouldn't pay to boot dozens of OS threads for a few hundred PNGs.
   const concurrency = Math.max(
     1,
-    Math.min(os.cpus().length - 2, entries.length),
+    Math.min(env.MATERIALISE_ENCODERS, entries.length),
   );
   const pool_ = new EncodePool(concurrency);
   try {
@@ -527,6 +533,8 @@ export async function materialiseSort(
     residentTiles.set(`${entry.z}/${entry.x}-${entry.y}`, entry.png);
   }
   setResidentSort(boardId, sid, residentTiles);
+  // Installed here; any other process may hold the previous files.
+  await publish({ kind: 'materialised', boardId });
 
   return { tiles: entries.length, ms: performance.now() - start };
 }

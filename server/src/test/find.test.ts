@@ -15,7 +15,6 @@ afterAll(async () => {
   await pool.query('DELETE FROM board_property_indexes WHERE board_id = $1', [
     boardId,
   ]);
-  await pool.query('DELETE FROM board_ranks WHERE board_id = $1', [boardId]);
   await pool.query('DELETE FROM board_rank_state WHERE board_id = $1', [
     boardId,
   ]);

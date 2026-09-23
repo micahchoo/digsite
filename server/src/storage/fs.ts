@@ -8,6 +8,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   rmdir,
   writeFile,
@@ -29,7 +30,19 @@ export class FsStorage implements Storage {
   ): Promise<void> {
     const path = this.resolve(key);
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, body);
+    // Write beside, then rename over: a rename within one directory is
+    // atomic, so a reader in any process sees the whole old file or the
+    // whole new one. writeFile in place truncates first, so a reader (the
+    // API composing a tile while the worker repaints the page) could read a
+    // partial file.
+    const temp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      await writeFile(temp, body);
+      await rename(temp, path);
+    } catch (err) {
+      await rm(temp, { force: true });
+      throw err;
+    }
   }
 
   async get(key: string): Promise<Uint8Array | null> {

@@ -14,6 +14,7 @@ import type { AddressInfo } from 'node:net';
 import { createCanvas } from '@napi-rs/canvas';
 import {
   AccessDenied,
+  boardForAliasing,
   boardForCreating,
   boardForDeleting,
   boardForManagingAllowlist,
@@ -298,6 +299,9 @@ describe('access matrix', () => {
         imageForDeleting,
         bPrivateImageId,
       ],
+      // An alias changes how claims are read, never a claim: exactly the
+      // viewers of the board, the same cells as boardForViewing(B-private).
+      ['boardForAliasing(B-private)', boardForAliasing, bPrivateId],
     ];
 
     const expected: Record<string, boolean[]> = {
@@ -310,6 +314,7 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
         false,
         false,
         false,
@@ -326,6 +331,7 @@ describe('access matrix', () => {
         true,
         true,
         true,
+        true,
       ],
       member: [
         true,
@@ -333,6 +339,7 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
         false,
         false,
         false,
@@ -352,6 +359,7 @@ describe('access matrix', () => {
         false,
         false,
         false,
+        true,
       ],
       outsider: [
         false,
@@ -361,6 +369,7 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
         false,
         false,
         false,

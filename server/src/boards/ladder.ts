@@ -16,12 +16,8 @@ import {
 // from here): it visits every page of a size exactly once, so caching there
 // buys nothing and would only evict what a live viewer's pan has resident
 // while a board materialises in the background.
-import {
-  type Canvas,
-  type Image,
-  createCanvas,
-  loadImage,
-} from '@napi-rs/canvas';
+import { type Canvas, ImageData, createCanvas } from '@napi-rs/canvas';
+import sharp from 'sharp';
 import { env } from '../env.ts';
 import { storageFromEnv } from '../storage/index.ts';
 import { withLock } from '../storage/lock.ts';
@@ -305,6 +301,29 @@ function cacheSet(key: string, v: Canvas): void {
   }
 }
 
+/** Drops one resident page because another process repainted it
+ * (invalidation.ts). The next read loads the new PNG. A pinned canvas is
+ * mid-draw: it leaves the cache but is not recycled, the same bounded cost
+ * as `cacheSet` replacing a pinned page. */
+export function forgetPage(boardId: string, s: LadderSize, page: number): void {
+  const key = cacheKey(boardId, s, page);
+  const canvas = cache.get(key);
+  if (!canvas) return;
+  cache.delete(key);
+  removeFromBoard(boardId, key);
+  if (!isPinned(key)) releasePageCanvas(canvas);
+}
+
+/** Drops every resident page, for a process that may have missed
+ * invalidations while its listener was disconnected. */
+export function forgetAllPages(): void {
+  for (const [key, canvas] of cache) {
+    removeFromBoard(boardOfKey(key), key);
+    if (!isPinned(key)) releasePageCanvas(canvas);
+  }
+  cache.clear();
+}
+
 /** Estimated REAL bytes the resident ladder-page LRU holds right now —
  * `cache.size * PAGE_BYTES * CANVAS_OVERHEAD_FACTOR`, calibrated against
  * measured native memory per resident canvas (see `CANVAS_OVERHEAD_FACTOR`'s
@@ -365,26 +384,49 @@ async function loadPageCanvas(
   boardId: string,
   s: LadderSize,
   page: number,
+  willEncode: boolean,
 ): Promise<Canvas> {
   const key = ladderPageKey(boardId, s, page);
   const canvas = acquirePageCanvas();
-  // In @napi-rs/canvas 0.1.100, repeated decoded-Image draws into a reused
-  // destination canvas retain native memory; resetting its dimensions
-  // before a new PNG keeps RSS flat in the page-churn reproduction.
-  // clearRect/fillRect alone did not. Without this, a cold pan that churns
-  // past the ladder LRU grows RSS even though every Canvas is recycled. See
-  // scripts/repro-ladder-page-churn.ts for the bounded real-cache repro.
-  canvas.width = PAGE;
-  canvas.height = PAGE;
+  // @napi-rs/canvas (0.1.100 and 1.0.9 alike) keeps every source drawn into
+  // a canvas until that canvas is encoded or resized; getImageData does not
+  // release them. A page read for tiles is never encoded, so it is resized
+  // here to release the page it held before: without this, the pan churn in
+  // scripts/repro-ladder-page-churn.ts grows ~1 MB per load.
+  // paintLadder encodes every page it paints, which releases them, and it
+  // must NOT resize: resizing there grew ~1.1 MB per uploaded image
+  // (scripts/repro-paint-ladder-import.ts, 623 MB over 550 images). Why
+  // that resize leaks is not known; both harnesses gate the choice.
+  // A 20,000-file import passed 24 GB on it
+  // (docs/measurements/bulk-import-20000.md).
+  if (!willEncode) {
+    canvas.width = PAGE;
+    canvas.height = PAGE;
+  }
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#222';
   ctx.fillRect(0, 0, PAGE, PAGE);
   const bytes = await storageFromEnv().get(key);
-  if (bytes) {
-    const img = await loadImage(Buffer.from(bytes));
-    ctx.drawImage(img, 0, 0);
-  }
+  if (bytes) ctx.putImageData(await decodePage(bytes), 0, 0);
   return canvas;
+}
+
+/** A stored page as pixels, decoded by libvips — never by @napi-rs/canvas.
+ * That library's own encoder writes, for some pixels, a valid PNG its own
+ * decoder rejects ("Invalid SVG image"); sharp reads it. Once written, such
+ * a page failed every later paint and tile. Measured 2026-09-23: one page
+ * in each 20,000-image soak; the pixels are test/fixtures/
+ * page-canvas-cannot-read.png. */
+export async function decodePage(bytes: Uint8Array): Promise<ImageData> {
+  const { data, info } = await sharp(bytes)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return new ImageData(
+    new Uint8ClampedArray(data.buffer, data.byteOffset, data.length),
+    info.width,
+    info.height,
+  );
 }
 
 // Reported by the coordinator: an 11.9 s cold-start-to-16 GB-cap OOM kill
@@ -425,7 +467,7 @@ export async function getPage(
   const pending = inFlight.get(key);
   if (pending) return pending;
   const promise = pageLoadSemaphore
-    .run(() => loadPageCanvas(boardId, s, page))
+    .run(() => loadPageCanvas(boardId, s, page, false))
     .then((canvas) => {
       cacheSet(key, canvas);
       return canvas;
@@ -471,49 +513,109 @@ export async function withPage<T>(
   }
 }
 
-/**
- * Paints one uploaded image into every ladder size's page, square,
- * contained and centred on #222. Read page, draw, write page, under the
- * page's lock (storage/lock.ts) so a concurrent upload to the same page
- * cannot lose a write — the only thing preventing that loss once the write
- * is a `put` to S3 rather than an in-place file edit (no append there).
- */
+export type LadderCells = Record<LadderSize, ImageData>;
+
+export type LadderPaint = { slot: number; cells: LadderCells };
+
+const BACKGROUND = '#222222';
+
+/** One image as its ladder cells: at every ladder size, an s x s square with
+ * the picture contained and centred on #222, transparency flattened onto
+ * it. libvips makes them; the page canvas only receives them with
+ * `putImageData`. @napi-rs/canvas neither decodes nor scales here: its
+ * decoder rejects some valid PNGs (decodePage), and a canvas drawn into
+ * holds its sources (.claude/rules/canvas-holds-its-sources.md). */
+export async function ladderCells(
+  bytes: Uint8Array,
+  limitInputPixels: number | boolean = true,
+): Promise<LadderCells> {
+  const largest = Math.max(...LADDER);
+  const base = await sharp(bytes, { limitInputPixels })
+    .rotate()
+    .resize(largest, largest, { fit: 'inside' })
+    .flatten({ background: BACKGROUND })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const entries = await Promise.all(
+    LADDER.map(async (s) => {
+      const data = await sharp(base.data, {
+        raw: {
+          width: base.info.width,
+          height: base.info.height,
+          channels: base.info.channels,
+        },
+      })
+        .resize(s, s, { fit: 'contain', background: BACKGROUND })
+        .ensureAlpha(1)
+        .raw()
+        .toBuffer();
+      const pixels = new Uint8ClampedArray(
+        data.buffer,
+        data.byteOffset,
+        data.length,
+      );
+      return [s, new ImageData(pixels, s, s)] as const;
+    }),
+  );
+  return Object.fromEntries(entries) as LadderCells;
+}
+
+/** Paints images' ladder cells into every ladder size's page. Read page,
+ * write cells, write page, under the page's lock (storage/lock.ts) so a
+ * concurrent upload to the same page cannot lose a write — on S3 there is no
+ * append, so the lock is the only thing preventing that loss.
+ *
+ * Each page a call touches is loaded and encoded ONCE, not once per image;
+ * the worker groups jobs by page (worker/jobs.ts#planUnits) so a group of 16
+ * aligned slots is one page per size. Returns the pages it painted, so the
+ * caller can tell other processes their resident copies are old
+ * (invalidation.ts). */
+export async function paintLadderMany(
+  boardId: string,
+  paints: LadderPaint[],
+): Promise<{ s: LadderSize; page: number }[]> {
+  const painted: { s: LadderSize; page: number }[] = [];
+  for (const s of LADDER) {
+    const byPage = new Map<number, LadderPaint[]>();
+    for (const paint of paints) {
+      const { page } = ladderAddress(paint.slot, s);
+      byPage.set(page, [...(byPage.get(page) ?? []), paint]);
+    }
+    for (const [page, onPage] of byPage) {
+      const key = cacheKey(boardId, s, page);
+      await withLock(key, async () => {
+        // Same semaphore as getPage's read path (above) — WORKER_CONCURRENCY
+        // (4 by default) already bounds this more tightly in practice, but
+        // the invariant this file relies on ("total canvases ever created
+        // <= MAX_PAGES + PAGE_LOAD_CONCURRENCY") shouldn't depend on that
+        // staying true independently.
+        const canvas = await pageLoadSemaphore.run(() =>
+          loadPageCanvas(boardId, s, page, true),
+        );
+        const ctx = canvas.getContext('2d');
+        for (const { slot, cells } of onPage) {
+          const { x, y } = ladderAddress(slot, s);
+          ctx.putImageData(cells[s], x, y);
+        }
+        await storageFromEnv().put(
+          ladderPageKey(boardId, s, page),
+          canvas.encodeSync('png'),
+          'image/png',
+        );
+        cacheSet(key, canvas);
+      });
+      painted.push({ s, page });
+    }
+  }
+  return painted;
+}
+
+/** One image from its encoded bytes: `paintLadderMany` with a single paint.
+ * For tests and scripts; the worker builds cells in worker/decode.ts. */
 export async function paintLadder(
   boardId: string,
   slot: number,
-  image: Image,
-  imgWidth: number,
-  imgHeight: number,
-): Promise<void> {
-  for (const s of LADDER) {
-    const { page, x, y } = ladderAddress(slot, s);
-    const key = cacheKey(boardId, s, page);
-    await withLock(key, async () => {
-      // Same semaphore as getPage's read path (above) — WORKER_CONCURRENCY
-      // (4 by default) already bounds this more tightly in practice, but
-      // the invariant this file relies on ("total canvases ever created
-      // <= MAX_PAGES + PAGE_LOAD_CONCURRENCY") shouldn't depend on that
-      // staying true independently.
-      const canvas = await pageLoadSemaphore.run(() =>
-        loadPageCanvas(boardId, s, page),
-      );
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#222';
-      ctx.fillRect(x, y, s, s);
-      const scale = Math.min(s / imgWidth, s / imgHeight);
-      const dw = imgWidth * scale;
-      const dh = imgHeight * scale;
-      const dx = x + (s - dw) / 2;
-      const dy = y + (s - dh) / 2;
-      ctx.drawImage(image, dx, dy, dw, dh);
-
-      const storageKey = ladderPageKey(boardId, s, page);
-      await storageFromEnv().put(
-        storageKey,
-        canvas.encodeSync('png'),
-        'image/png',
-      );
-      cacheSet(key, canvas);
-    });
-  }
+  bytes: Uint8Array,
+): Promise<{ s: LadderSize; page: number }[]> {
+  return paintLadderMany(boardId, [{ slot, cells: await ladderCells(bytes) }]);
 }

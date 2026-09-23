@@ -317,9 +317,19 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/boards/${fx.bPrivateId}/images`,
     outsider: 403,
   },
-  'GET /boards/:id/relations': {
+  'GET /boards/:id/vocabulary': {
     method: 'GET',
-    path: (fx) => `/boards/${fx.bPrivateId}/relations`,
+    path: (fx) => `/boards/${fx.bPrivateId}/vocabulary`,
+    outsider: 403,
+  },
+  'PUT /boards/:id/aliases': {
+    method: 'PUT',
+    path: (fx) => `/boards/${fx.bPrivateId}/aliases`,
+    outsider: 403,
+  },
+  'DELETE /boards/:id/aliases/:kind/:term': {
+    method: 'DELETE',
+    path: (fx) => `/boards/${fx.bPrivateId}/aliases/relation/same%20place`,
     outsider: 403,
   },
   'GET /images/:id': {
@@ -392,6 +402,27 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/boards/${fx.bPrivateId}/find`,
     outsider: 403,
   },
+  'GET /boards/:id/similar': {
+    method: 'GET',
+    path: (fx) => `/boards/${fx.bPrivateId}/similar`,
+    outsider: 403,
+  },
+  'GET /boards/:id/search': {
+    method: 'GET',
+    path: (fx) => `/boards/${fx.bPrivateId}/search`,
+    outsider: 403,
+  },
+  'POST /boards/:id/imports': {
+    method: 'POST',
+    path: (fx) => `/boards/${fx.bPrivateId}/imports`,
+    outsider: 403,
+  },
+  'GET /boards/:id/imports/:importId': {
+    method: 'GET',
+    path: (fx) =>
+      `/boards/${fx.bPrivateId}/imports/00000000-0000-0000-0000-000000000000`,
+    outsider: 403,
+  },
 
   'GET /boards/:id/sheets': {
     method: 'GET',
@@ -457,6 +488,11 @@ const EXPECTATIONS: Record<string, Expectation> = {
   'GET /sheets/:id/foreign': {
     method: 'GET',
     path: (fx) => `/sheets/${fx.sheetId}/foreign`,
+    outsider: 403,
+  },
+  'GET /sheets/:id/reach': {
+    method: 'GET',
+    path: (fx) => `/sheets/${fx.sheetId}/reach`,
     outsider: 403,
   },
   'GET /sheets/:id/rows': {

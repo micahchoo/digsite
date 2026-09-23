@@ -152,6 +152,13 @@ export async function loadResidentSortFromDisk(
  * (`markBoardRanksStale`) applies to the whole board and a targeted rebuild
  * (`forceRebuildRank`) doesn't know which sorts had files materialised.
  * Mirrors `tiles-cache.ts#invalidateComposedTiles`'s board-wide sweep. */
+/** Drops every resident sort, for a process that may have missed
+ * invalidations (invalidation.ts, on reconnect). */
+export function invalidateAllResidentSorts(): void {
+  cache.clear();
+  totalBytes = 0;
+}
+
 export function invalidateResidentSort(boardId: string): void {
   const prefix = `${boardId}:`;
   for (const [k, v] of cache) {

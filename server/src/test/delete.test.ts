@@ -216,7 +216,7 @@ describe('delete', () => {
       edgeEl('el-edge-x-y', 'el-img-x', 'el-img-y'),
     ]);
 
-    // Populate board_ranks/board_rank_state, and a queued job, so the
+    // Populate board_rank_state (each sort's order), and a queued job, so the
     // delete's cleanup of those has something real to remove.
     await forceRebuildRank(boardId, { key: 'uploaded_at', dir: 'desc' });
     await pool.query(
@@ -264,7 +264,6 @@ describe('delete', () => {
     );
     expect(await countRows('regions', 'sheet_id = $1', sheetA.id)).toBe(0);
     expect(await countRows('edges', 'sheet_id = $1', sheetA.id)).toBe(0);
-    expect(await countRows('board_ranks', 'board_id = $1', boardId)).toBe(0);
     expect(await countRows('board_rank_state', 'board_id = $1', boardId)).toBe(
       0,
     );

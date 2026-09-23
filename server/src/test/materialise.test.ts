@@ -19,7 +19,7 @@ import {
 } from '@digsite/shared/board/grid';
 import { DEFAULT_SORT, sortId } from '@digsite/shared/board/sort';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import { paintLadder } from '../boards/ladder.ts';
+import { ladderCells, paintLadder, paintLadderMany } from '../boards/ladder.ts';
 import { materialiseSort, tileGrid } from '../boards/materialise.ts';
 import { ensureRank, slotsForTile } from '../boards/ranks.ts';
 import {
@@ -67,6 +67,18 @@ async function decodePixels(png: Buffer): Promise<Uint8ClampedArray> {
   return ctx.getImageData(0, 0, img.width, img.height).data;
 }
 
+/** Paints slots 0..N-1 a page group at a time, as the worker does
+ * (jobs.ts#GROUP): one load and one encode per page, not per image. */
+async function paintAll(boardId: string, hue: (slot: number) => number) {
+  for (let base = 0; base < N; base += 256) {
+    const paints = [];
+    for (let slot = base; slot < Math.min(N, base + 256); slot++) {
+      paints.push({ slot, cells: await ladderCells(paintSquare(hue(slot))) });
+    }
+    await paintLadderMany(boardId, paints);
+  }
+}
+
 describe('materialise', () => {
   test('legacy wide-grid tiles are ignored after compact layout upgrade', async () => {
     const boardId = await makeBoard(`grid-upgrade-${Date.now()}`);
@@ -74,8 +86,7 @@ describe('materialise', () => {
     await pool.query('UPDATE boards SET image_count = 1 WHERE id = $1', [
       boardId,
     ]);
-    const image = await loadImage(paintSquare(90));
-    await paintLadder(boardId, 0, image, image.width, image.height);
+    await paintLadder(boardId, 0, paintSquare(90));
     await ensureRank(boardId, DEFAULT_SORT);
     const sid = sortId(DEFAULT_SORT);
     await pool.query(
@@ -108,10 +119,7 @@ describe('materialise', () => {
       N,
       boardId,
     ]);
-    for (let i = 0; i < N; i++) {
-      const img = await loadImage(paintSquare((i * 137.508) % 360));
-      await paintLadder(boardId, i, img, img.width, img.height);
-    }
+    await paintAll(boardId, (i) => (i * 137.508) % 360);
 
     const { built } = await ensureRank(boardId, DEFAULT_SORT);
     expect(built).toBe(true);
@@ -164,10 +172,7 @@ describe('materialise', () => {
       N,
       boardId,
     ]);
-    for (let i = 0; i < N; i++) {
-      const img = await loadImage(paintSquare((i * 89) % 360));
-      await paintLadder(boardId, i, img, img.width, img.height);
-    }
+    await paintAll(boardId, (i) => (i * 89) % 360);
 
     await ensureRank(boardId, DEFAULT_SORT);
     await materialiseSort(boardId, DEFAULT_SORT);
@@ -221,10 +226,7 @@ describe('materialise', () => {
       N,
       boardId,
     ]);
-    for (let i = 0; i < N; i++) {
-      const img = await loadImage(paintSquare((i * 53) % 360));
-      await paintLadder(boardId, i, img, img.width, img.height);
-    }
+    await paintAll(boardId, (i) => (i * 53) % 360);
     await ensureRank(boardId, DEFAULT_SORT);
 
     const before = env.MATERIALISE_BUDGET_MB;

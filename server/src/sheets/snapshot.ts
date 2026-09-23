@@ -70,8 +70,8 @@ export async function saveSnapshotAndProjectInTransaction(
   }
   for (const e of projected.edges) {
     await client.query(
-      `INSERT INTO edges (id, sheet_id, source_id, src_image_id, src_region_source_id, dst_image_id, dst_region_source_id, direction, relation, properties)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      `INSERT INTO edges (id, sheet_id, source_id, src_image_id, src_region_source_id, dst_image_id, dst_region_source_id, direction, relation, properties, confidence, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         e.id,
         e.sheetId,
@@ -83,6 +83,8 @@ export async function saveSnapshotAndProjectInTransaction(
         e.direction,
         e.relation,
         JSON.stringify(e.properties),
+        e.confidence,
+        e.note,
       ],
     );
   }

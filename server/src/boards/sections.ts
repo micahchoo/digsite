@@ -1,14 +1,16 @@
 // GET /boards/:id/sections (docs/phases/1-map.md "Sections, hover,
 // selection"): the rank ranges where a sort's grouping value changes. One
-// query over board_ranks JOIN images, ordered by rank, using LAG() to find
-// the boundaries — the same expression is both the grouping key and the
+// query over images in the sort's own order (ranks.ts#orderExpr, the
+// expression the rank build uses), with LAG() finding the boundaries and
+// only boundary rows coming back — the same expression is both the grouping
+// key and the
 // display label (name: first letter uppercased; uploaded_at: the day;
 // number/boolean/text property: the value as text), so no separate label
 // step is needed. A property's absence sorts last (ranks.ts's NULLS LAST)
 // and lands in one trailing section labelled "—".
 import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { pool } from '../db/pool.ts';
-import { ensureRank } from './ranks.ts';
+import { type RankOrder, orderExpr, rankOrder } from './ranks.ts';
 
 const CAP = 500;
 
@@ -25,37 +27,52 @@ function sectionKeyExpr(sort: Sort): string {
   return `i.properties->>'${property}'`;
 }
 
+type Sections = { sections: Section[]; truncated: boolean };
+
+// Sections depend only on the build: keyed by it, recomputed after the next.
+// A sort of a million images costs 0.4-1.4 s to walk (2026-09-23).
+const memo = new Map<string, { version: string; result: Sections }>();
+const MEMO_ENTRIES = 256;
+
 export async function sectionsFor(
   boardId: string,
   sort: Sort,
-): Promise<{ sections: Section[]; truncated: boolean }> {
-  await ensureRank(boardId, sort);
-  const sid = sortId(sort);
+): Promise<Sections> {
+  const order = await rankOrder(boardId, sort);
+  const key = `${boardId}:${sortId(sort)}`;
+  const hit = memo.get(key);
+  if (hit && hit.version === order.version) return hit.result;
+  const result = await computeSections(boardId, sort, order);
+  memo.delete(key);
+  memo.set(key, { version: order.version, result });
+  if (memo.size > MEMO_ENTRIES) memo.delete(memo.keys().next().value as string);
+  return result;
+}
+
+async function computeSections(
+  boardId: string,
+  sort: Sort,
+  order: RankOrder,
+): Promise<Sections> {
+  const total = order.slotOfRank.length;
+  if (total === 0) return { sections: [], truncated: false };
   const keyExpr = sectionKeyExpr(sort);
 
-  const { rows: boardRows } = await pool.query(
-    'SELECT image_count FROM boards WHERE id = $1',
-    [boardId],
-  );
-  const total = boardRows[0]?.image_count ?? 0;
-  if (total === 0) return { sections: [], truncated: false };
-
+  // Slots only grow, so `slot <= newest ranked` is exactly the images this
+  // build ranked: an upload that has not been ranked yet cannot shift a
+  // section away from the map.
   const { rows } = await pool.query(
-    `WITH ordered AS (
-       SELECT br.rank AS rank, ${keyExpr} AS key
-       FROM board_ranks br
-       JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
-       WHERE br.board_id = $1 AND br.sort_id = $2
-     )
-     SELECT rank, key FROM (
-       SELECT rank, key,
-         key IS DISTINCT FROM LAG(key) OVER (ORDER BY rank) AS is_boundary
-       FROM ordered
+    `SELECT rank, key FROM (
+       SELECT (ROW_NUMBER() OVER w - 1)::int AS rank, ${keyExpr} AS key,
+         ${keyExpr} IS DISTINCT FROM LAG(${keyExpr}) OVER w AS is_boundary
+       FROM images i
+       WHERE i.board_id = $1 AND i.slot < $2
+       WINDOW w AS (ORDER BY ${orderExpr(sort)})
      ) b
      WHERE is_boundary
      ORDER BY rank
      LIMIT $3`,
-    [boardId, sid, CAP + 1],
+    [boardId, order.rankOfSlot.length, CAP + 1],
   );
 
   const truncated = rows.length > CAP;

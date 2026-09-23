@@ -13,9 +13,10 @@
 import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.ts';
 import { storageFromEnv } from '../storage/index.ts';
+import { ensureRoomFor } from '../storage/room.ts';
 import { enqueueLadderJob } from '../worker/jobs.ts';
+import { invalidate } from './invalidation.ts';
 import { originalKey } from './paths.ts';
-import { invalidateComposedTiles } from './tiles-cache.ts';
 
 export type UploadedImage = { id: string; slot: number; status: 'pending' };
 
@@ -27,6 +28,7 @@ export async function uploadOne(
   properties: Record<string, unknown> = {},
   contentType = 'application/octet-stream',
 ): Promise<UploadedImage> {
+  await ensureRoomFor(bytes.length);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
 
   const storage = storageFromEnv();
@@ -66,7 +68,7 @@ export async function uploadOne(
     client.release();
   }
 
-  invalidateComposedTiles(boardId);
+  await invalidate({ kind: 'ranks', boardId });
   await enqueueLadderJob(boardId, imageId);
 
   return { id: imageId, slot, status: 'pending' };

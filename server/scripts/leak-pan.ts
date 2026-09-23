@@ -14,8 +14,10 @@ import { pool } from '../src/db/pool.ts';
 import { env } from '../src/env.ts';
 
 const SERVER = env.SERVER_ORIGIN;
-const MEMBER_EMAIL = 'member@example.test';
-const MEMBER_PASSWORD = 'password1'; // see measure-map.ts's own comment on this account
+// see measure-map.ts's own comment on this account; a database seeded by
+// src/seed.ts uses password1234, so both are overridable.
+const MEMBER_EMAIL = process.env.PAN_EMAIL ?? 'member@example.test';
+const MEMBER_PASSWORD = process.env.PAN_PASSWORD ?? 'password1';
 
 async function signIn(): Promise<string> {
   const res = await fetch(`${SERVER}/api/auth/sign-in/email`, {

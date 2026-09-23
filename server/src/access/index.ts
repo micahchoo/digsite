@@ -175,6 +175,17 @@ export async function boardForCreatingSheet(
   return boardForViewing(userId, boardId, db);
 }
 
+/** Declaring that one term means another (CONTEXT.md "Alias"). Anyone who
+ * can see the board may: an alias changes how claims are READ, never a
+ * claim, and every member may already draw claims here. */
+export async function boardForAliasing(
+  userId: string,
+  boardId: string,
+  db: Pool = pool,
+): Promise<BoardRow> {
+  return boardForViewing(userId, boardId, db);
+}
+
 export async function boardForManagingAllowlist(
   userId: string,
   boardId: string,

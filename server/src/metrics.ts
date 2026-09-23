@@ -15,10 +15,12 @@ import {
 //
 // Plus three residency reads: ladder bytes and evictions, coarse-tile
 // bytes — the numbers the phase-5 load run needed and could not see.
+import { rankCacheBytes } from './boards/ranks.ts';
 import { pool } from './db/pool.ts';
 import { env } from './env.ts';
 import type { Router } from './http.ts';
 import { roomCounts } from './sheets/room.ts';
+import { rssBytes, supervisedWorker } from './worker/supervisor.ts';
 
 const LATENCY_BUCKETS_MS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
 
@@ -137,9 +139,34 @@ export async function renderMetrics(): Promise<string> {
   );
   lines.push('# TYPE digsite_ladder_active_boards gauge');
   lines.push(`digsite_ladder_active_boards ${ladderActiveBoards()}`);
+  lines.push('# HELP digsite_rank_orders_bytes Decoded rank orders held.');
+  lines.push('# TYPE digsite_rank_orders_bytes gauge');
+  lines.push(`digsite_rank_orders_bytes ${rankCacheBytes()}`);
   lines.push('# HELP digsite_coarse_resident_bytes Coarse tiles held.');
   lines.push('# TYPE digsite_coarse_resident_bytes gauge');
   lines.push(`digsite_coarse_resident_bytes ${coarseBytes()}`);
+  lines.push('# HELP digsite_process_rss_bytes Resident memory by process.');
+  lines.push('# TYPE digsite_process_rss_bytes gauge');
+  lines.push(
+    `digsite_process_rss_bytes{process="api"} ${process.memoryUsage().rss}`,
+  );
+  const worker = supervisedWorker();
+  const workerPid = worker?.pid();
+  const workerRss = workerPid ? rssBytes(workerPid) : null;
+  if (workerRss !== null)
+    lines.push(`digsite_process_rss_bytes{process="worker"} ${workerRss}`);
+  if (worker) {
+    lines.push(
+      '# HELP digsite_worker_exits_total Supervised worker exits: retired on purpose, or crashed (OOM kill, signal, error).',
+    );
+    lines.push('# TYPE digsite_worker_exits_total counter');
+    lines.push(
+      `digsite_worker_exits_total{reason="retired"} ${worker.exits() - worker.crashes()}`,
+    );
+    lines.push(
+      `digsite_worker_exits_total{reason="crashed"} ${worker.crashes()}`,
+    );
+  }
   lines.push('# HELP digsite_worker_queue_depth Jobs table rows by state.');
   lines.push('# TYPE digsite_worker_queue_depth gauge');
   for (const { state, n } of await workerQueueDepth()) {

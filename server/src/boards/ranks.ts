@@ -1,35 +1,27 @@
 import { COLS, type Zoom, tileRanks } from '@digsite/shared/board/grid';
-// Rank tables (CONTEXT.md "Rank"): an image's position under one sort,
-// 0..N-1, materialised per (board, sort_id) and rebuilt whole, never
-// patched — see .claude/rules/ladder-slot-vs-rank.md. `slotsForTile` looks
-// ranks up with `unnest($1::int[]) JOIN board_ranks`, 5-7x faster than
-// `= ANY($1)` at the coarsest tile's 4,096 ranks (measured in
-// ../../prototype/board/RESULTS.md).
+// Ranks (CONTEXT.md "Rank"): an image's position under one sort, 0..N-1,
+// rebuilt whole, never patched — see .claude/rules/ladder-slot-vs-rank.md.
+//
+// A sort's ranks are ONE value: board_rank_state.slot_order, every slot of
+// the board in rank order as 4-byte big-endian integers, built by one
+// string_agg(... ORDER BY ...) in Postgres (0017_rank_order.sql). Readers
+// hold it decoded, as `RankOrder`, keyed by its build (`version`), so a
+// rebuild in another process is noticed on the next read of the state row
+// every reader already makes — nothing to invalidate.
+//
+// Measured 2026-09-23 on a 1,000,000-image board: the board_ranks table
+// this replaces rebuilt in 1.5-6.0 s per sort; slot_order in 0.3-1.1 s,
+// loading in 28 ms and decoding in 13 ms.
 import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { pool } from '../db/pool.ts';
-import { invalidateResidentSort } from './coarse-cache.ts';
+import { env } from '../env.ts';
+import { invalidate } from './invalidation.ts';
 import { ensurePropertyIndex } from './property-index.ts';
-import { invalidateComposedTiles } from './tiles-cache.ts';
 
-// board_ranks.board_id has no FK to boards(id) as of 0004_ranks_no_fk.sql —
-// the per-row FK-check trigger cost ~4s of a 6.7s rebuild on the
-// 1,000,000-image board (docs/measurements/phase-1-map.md "Row 1"). The
-// only writer is rebuildRank below, and its board_id always comes from a
-// SELECT against `images`/`boards`, never from a caller — enforcement is
-// this module, not the schema. Phase 3's board delete must delete this
-// board's board_ranks rows explicitly, in the same transaction as the
-// boards row; there is no FK left to do it for you.
-//
-// board_ranks is partitioned by board_id (HASH, 16 partitions) as of
-// 0007_board_ranks_partitioned.sql (docs/phases/5-hardening.md section 5,
-// measured against list-per-board on the 1,000,000-image board in
-// docs/measurements/phase-5.md — hash kept; see that migration's own
-// comment for why). Every query below is unchanged: Postgres routes a
-// board_id-scoped INSERT/DELETE/SELECT to (or from) the right partition on
-// its own, so this file's SQL is byte-for-byte what it was before the
-// migration — the partitioning is entirely a schema/planner concern.
-
-function orderExpr(sort: Sort): string {
+/** The ORDER BY that defines a sort. The rebuild and sections.ts must use
+ * exactly this, or sections would disagree with the map. Bare column
+ * names, so it reads the same with or without an `images i` alias. */
+export function orderExpr(sort: Sort): string {
   const dir = sort.dir === 'asc' ? 'ASC' : 'DESC';
   if (sort.key === 'name') return `name ${dir} NULLS LAST, slot ASC`;
   if (sort.key === 'uploaded_at')
@@ -52,14 +44,71 @@ function orderExpr(sort: Sort): string {
   return `(CASE WHEN jsonb_typeof(properties->'${property}') = 'string' THEN properties->>'${property}' END) ${dir} NULLS LAST, slot ASC`;
 }
 
-// docs/measurements/phase-5.md "After the leftovers", problem 3: a sort
-// nobody has asked for in a long time is dead weight in board_ranks_pkey
-// that every OTHER sort on the same board's partition pays to maintain —
-// see 0009_rank_sweep.sql's header for the full root-cause chain. Bumping
-// last_requested_at on literally every ensureRank call (i.e. every tile
-// request) would add a write to the hottest read path in the app for no
-// real precision a sweep measured in days needs — throttled to once per
-// this interval instead.
+/** One build of one sort, decoded. */
+export type RankOrder = {
+  /** The build this is (built_at to the microsecond, as text). */
+  version: string;
+  /** slotOfRank[rank] is the slot at that rank; length is the ranked count. */
+  slotOfRank: Int32Array;
+  /** rankOfSlot[slot] is its rank, or -1 for a slot this build has not seen
+   * (uploaded after it). Index past the end is also "not ranked". */
+  rankOfSlot: Int32Array;
+};
+
+export function rankOf(order: RankOrder, slot: number): number {
+  return slot < order.rankOfSlot.length ? (order.rankOfSlot[slot] ?? -1) : -1;
+}
+
+function decodeOrder(version: string, bytes: Buffer): RankOrder {
+  // int4send is big-endian; swap into the platform's order in one pass.
+  const copy = new Uint8Array(bytes);
+  const slotOfRank = new Int32Array(copy.buffer, 0, copy.length / 4);
+  const view = new DataView(copy.buffer);
+  for (let i = 0; i < slotOfRank.length; i++)
+    slotOfRank[i] = view.getInt32(i * 4, false);
+  let maxSlot = -1;
+  for (const slot of slotOfRank) if (slot > maxSlot) maxSlot = slot;
+  const rankOfSlot = new Int32Array(maxSlot + 1).fill(-1);
+  for (let rank = 0; rank < slotOfRank.length; rank++)
+    rankOfSlot[slotOfRank[rank] as number] = rank;
+  return { version, slotOfRank, rankOfSlot };
+}
+
+// Decoded orders, LRU by insertion order, bounded by RANK_CACHE_MB. Two
+// Int32Arrays per order: ~8 MB per sort of a million-image board.
+const orders = new Map<string, RankOrder>();
+let orderBytes = 0;
+
+/** Decoded orders held right now, for GET /metrics. */
+export function rankCacheBytes(): number {
+  return orderBytes;
+}
+
+function bytesOf(order: RankOrder): number {
+  return order.slotOfRank.byteLength + order.rankOfSlot.byteLength;
+}
+
+function remember(key: string, order: RankOrder): void {
+  const old = orders.get(key);
+  if (old) {
+    orders.delete(key);
+    orderBytes -= bytesOf(old);
+  }
+  orders.set(key, order);
+  orderBytes += bytesOf(order);
+  const budget = env.RANK_CACHE_MB * 1024 * 1024;
+  for (const [k, o] of orders) {
+    if (orderBytes <= budget || k === key) break;
+    orders.delete(k);
+    orderBytes -= bytesOf(o);
+  }
+}
+
+// docs/measurements/phase-5.md "After the leftovers", problem 3: a sweep
+// deletes sorts nobody has asked for in a while (sweepStaleRanks). Bumping
+// last_requested_at on every read (every tile request) would put a write on
+// the hottest read path in the app for no precision a sweep measured in
+// days needs — throttled to once per this interval instead.
 const TOUCH_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 
 async function touchLastRequested(boardId: string, sid: string): Promise<void> {
@@ -70,54 +119,23 @@ async function touchLastRequested(boardId: string, sid: string): Promise<void> {
   );
 }
 
-/** Deletes board_ranks + board_rank_state for every (board, sort) pair
- * nobody has requested in `olderThanDays` — the fix for problem 3's actual
- * root cause (a board's own accumulated multi-sort history, not board-to-
- * board sharing, which partitioning by board_id alone cannot touch). Global
- * across every board, matching the brief's own framing ("sorts nobody has
- * requested"). Safe to run at any time: `ensureRank` already rebuilds a
- * missing (board, sort) row transparently on the next request — the same
- * path it takes for a `stale` one today — so a sweep never produces a wrong
- * answer, only, occasionally, one slow rebuild for a sort that turns out to
- * still be wanted. Call from an operator's cron, not wired to a timer here
- * (worker/index.ts's poll loop is per-job, not a place to hang a
- * once-a-day sweep) — server/scripts/sweep-ranks.ts is the entry point. */
+/** Deletes every (board, sort) order nobody has requested in
+ * `olderThanDays`. Safe at any time: a swept sort rebuilds transparently on
+ * its next request, the path a stale one already takes. Global across
+ * boards; run from an operator's cron (server/scripts/sweep-ranks.ts). With
+ * the order a single value this saves storage, not rebuild time. */
 export async function sweepStaleRanks(
   olderThanDays: number,
-): Promise<{ sorts: number; rows: number }> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const stale = await client.query(
-      `SELECT board_id, sort_id FROM board_rank_state
-       WHERE last_requested_at < now() - ($1 || ' days')::interval`,
-      [String(olderThanDays)],
-    );
-    let rows = 0;
-    for (const s of stale.rows) {
-      const del = await client.query(
-        'DELETE FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
-        [s.board_id, s.sort_id],
-      );
-      rows += del.rowCount ?? 0;
-    }
-    await client.query(
-      `DELETE FROM board_rank_state
-       WHERE last_requested_at < now() - ($1 || ' days')::interval`,
-      [String(olderThanDays)],
-    );
-    await client.query('COMMIT');
-    for (const s of stale.rows) {
-      invalidateComposedTiles(s.board_id as string);
-      invalidateResidentSort(s.board_id as string);
-    }
-    return { sorts: stale.rows.length, rows };
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
+): Promise<{ sorts: number }> {
+  const { rows } = await pool.query(
+    `DELETE FROM board_rank_state
+     WHERE last_requested_at < now() - ($1 || ' days')::interval
+     RETURNING board_id`,
+    [String(olderThanDays)],
+  );
+  const boards = new Set(rows.map((row) => row.board_id as string));
+  for (const boardId of boards) await invalidate({ kind: 'ranks', boardId });
+  return { sorts: rows.length };
 }
 
 export async function markBoardRanksStale(boardId: string): Promise<void> {
@@ -125,13 +143,12 @@ export async function markBoardRanksStale(boardId: string): Promise<void> {
     'UPDATE board_rank_state SET stale = true WHERE board_id = $1',
     [boardId],
   );
-  invalidateComposedTiles(boardId);
-  invalidateResidentSort(boardId);
+  await invalidate({ kind: 'ranks', boardId });
 }
 
-/** Unconditionally rebuilds (board, sort)'s rank table — `ensureRank` checks
- * `stale` first; this is for a caller that wants a rebuild regardless (the
- * manual `POST /boards/:id/sort/:sortId/rebuild` route). */
+/** Unconditionally rebuilds (board, sort) — `ensureRank` checks `stale`
+ * first; this is for a caller that wants a rebuild regardless (the manual
+ * `POST /boards/:id/sort/:sortId/rebuild` route). */
 export async function forceRebuildRank(
   boardId: string,
   sort: Sort,
@@ -139,27 +156,13 @@ export async function forceRebuildRank(
   return rebuildRank(boardId, sort);
 }
 
-/** Reported by the coordinator against the owner's demo server (same code,
- * shared database): two rank rebuilds of the same (board, sort) running
- * concurrently — two `ensureRank` callers both reading `stale`/missing
- * before either commits, or an `ensureRank` racing a manual
- * `forceRebuildRank` — both compute and INSERT the IDENTICAL target row
- * set (same images, same sort => same ranks), and under READ COMMITTED
- * the second transaction's INSERT collides with the first's just-committed
- * rows: `duplicate key value violates unique constraint
- * "board_ranks_p10_pkey"`. `rebuildRank` now serialises per (board, sort)
- * with a transaction-scoped Postgres advisory lock (released automatically
- * on commit/rollback, so a crashed process can't leave one held) — the
- * second caller blocks here until the first commits, then re-checks
- * `built_at` against a timestamp captured BEFORE this call even started
- * waiting: if the winner's commit landed after that (a genuine race), this
- * caller's own request is already satisfied and it does no work, instead
- * of redoing the identical INSERT the lock exists to prevent colliding on.
- * A NON-racing `forceRebuildRank` call (the ordinary case — an admin
- * clicking "rebuild" once) always sees `built_at <= requestedAt` here
- * (there was no time for anyone else's commit to land after this call's
- * own start), so its "rebuild regardless of staleness" contract is
- * unaffected. See ranks.test.ts's concurrent-rebuild test. */
+/** Two rebuilds of one (board, sort) can race — two readers both finding it
+ * stale, or a read racing the manual rebuild route. A transaction-scoped
+ * advisory lock serialises them; the second then re-checks built_at
+ * against a time taken before it waited, and does no work if the winner's
+ * build landed after that. A non-racing forced rebuild always sees an
+ * older built_at, so it still rebuilds. See ranks.test.ts's concurrent
+ * rebuild test. */
 async function rebuildRank(boardId: string, sort: Sort): Promise<void> {
   const sid = sortId(sort);
   const requestedAt = new Date();
@@ -189,20 +192,17 @@ async function rebuildRank(boardId: string, sort: Sort): Promise<void> {
       await client.query('COMMIT');
       return;
     }
+    // A rebuild makes any materialised coarse tiles describe old ranks, so
+    // materialised_at is cleared until materialise runs again.
     await client.query(
-      'DELETE FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
-      [boardId, sid],
-    );
-    await client.query(
-      `INSERT INTO board_ranks (board_id, sort_id, rank, slot)
-       SELECT $1, $2, (ROW_NUMBER() OVER (ORDER BY ${orderExpr(sort)}) - 1)::int, slot
-       FROM images WHERE board_id = $1`,
-      [boardId, sid],
-    );
-    await client.query(
-      `INSERT INTO board_rank_state (board_id, sort_id, built_at, stale, last_requested_at)
-       VALUES ($1, $2, now(), false, now())
-       ON CONFLICT (board_id, sort_id) DO UPDATE SET built_at = now(), stale = false, last_requested_at = now()`,
+      `INSERT INTO board_rank_state
+         (board_id, sort_id, built_at, stale, last_requested_at, slot_order)
+       VALUES ($1, $2, now(), false, now(), (
+         SELECT COALESCE(string_agg(int4send(slot), ''::bytea ORDER BY ${orderExpr(sort)}), ''::bytea)
+         FROM images WHERE board_id = $1))
+       ON CONFLICT (board_id, sort_id) DO UPDATE SET
+         built_at = now(), stale = false, last_requested_at = now(),
+         materialised_at = NULL, slot_order = EXCLUDED.slot_order`,
       [boardId, sid],
     );
     await client.query('COMMIT');
@@ -212,36 +212,80 @@ async function rebuildRank(boardId: string, sort: Sort): Promise<void> {
   } finally {
     client.release();
   }
-  invalidateComposedTiles(boardId);
-  invalidateResidentSort(boardId);
+  await invalidate({ kind: 'ranks', boardId });
 }
 
-/** Rebuilds (board, sort)'s rank table if it has never been built or was
- * marked stale by an upload. Cheap when already fresh: one indexed read. */
+type State = { stale: boolean; version: string; lastRequested: Date };
+
+async function readState(boardId: string, sid: string): Promise<State | null> {
+  const { rows } = await pool.query(
+    `SELECT stale, built_at::text AS version, last_requested_at
+     FROM board_rank_state WHERE board_id = $1 AND sort_id = $2`,
+    [boardId, sid],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    stale: row.stale,
+    version: row.version,
+    lastRequested: row.last_requested_at,
+  };
+}
+
+/** The state of (board, sort), rebuilt first if it has never been built or
+ * an upload marked it stale. Cheap when fresh: one indexed read. */
+async function freshState(
+  boardId: string,
+  sort: Sort,
+): Promise<{ state: State | null; built: boolean; ms: number }> {
+  const sid = sortId(sort);
+  const state = await readState(boardId, sid);
+  if (state && !state.stale) {
+    // One extra UPDATE per read only when the throttle window has passed,
+    // decided here rather than in SQL so the usual case costs no write.
+    if (Date.now() - state.lastRequested.getTime() > TOUCH_THROTTLE_MS) {
+      await touchLastRequested(boardId, sid);
+    }
+    return { state, built: false, ms: 0 };
+  }
+  const start = performance.now();
+  await rebuildRank(boardId, sort);
+  const ms = performance.now() - start;
+  return { state: await readState(boardId, sid), built: true, ms };
+}
+
+/** Rebuilds (board, sort) if needed; for callers that need the order to be
+ * current but do not read it (the rank-rebuild job, warming at startup). */
 export async function ensureRank(
   boardId: string,
   sort: Sort,
 ): Promise<{ built: boolean; ms: number }> {
-  const sid = sortId(sort);
+  const { built, ms } = await freshState(boardId, sort);
+  return { built, ms };
+}
+
+/** The current order of (board, sort), rebuilt first if needed. Decoded
+ * once per build per process; after that, one state-row read per call. */
+export async function rankOrder(
+  boardId: string,
+  sort: Sort,
+): Promise<RankOrder> {
+  const { state } = await freshState(boardId, sort);
+  const key = `${boardId}:${sortId(sort)}`;
+  const cached = orders.get(key);
+  if (cached && state && cached.version === state.version) return cached;
   const { rows } = await pool.query(
-    'SELECT stale, last_requested_at FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
-    [boardId, sid],
+    `SELECT built_at::text AS version, slot_order
+     FROM board_rank_state WHERE board_id = $1 AND sort_id = $2`,
+    [boardId, sortId(sort)],
   );
-  if (rows.length > 0 && !rows[0].stale) {
-    // One extra UPDATE round-trip per tile request (this is on the hottest
-    // read path in the app) only when actually due — the throttle window
-    // read back here, decided client-side, instead of a WHERE clause that
-    // would still cost a full round-trip every time even on the (typical)
-    // no-op case.
-    const lastRequested = rows[0].last_requested_at as Date;
-    if (Date.now() - lastRequested.getTime() > TOUCH_THROTTLE_MS) {
-      await touchLastRequested(boardId, sid);
-    }
-    return { built: false, ms: 0 };
-  }
-  const start = performance.now();
-  await rebuildRank(boardId, sort);
-  return { built: true, ms: performance.now() - start };
+  const row = rows[0];
+  // Swept between the two reads: an empty order is an honest answer, and
+  // the next request rebuilds.
+  if (!row?.slot_order) return decodeOrder('', Buffer.alloc(0));
+  const order = decodeOrder(row.version, row.slot_order);
+  remember(key, order);
+  return order;
 }
 
 export async function slotsForTile(
@@ -251,36 +295,37 @@ export async function slotsForTile(
   x: number,
   y: number,
 ): Promise<(number | null)[]> {
-  await ensureRank(boardId, sort);
-
-  const ranks = tileRanks(z, x, y);
-  const out: (number | null)[] = new Array(ranks.length).fill(null);
-  const wanted: { rank: number; idx: number }[] = [];
-  ranks.forEach((r, idx) => {
-    if (r >= 0) wanted.push({ rank: r, idx });
-  });
-  if (wanted.length === 0) return out;
-
-  const sid = sortId(sort);
-  const { rows } = await pool.query(
-    `SELECT r.rank, br.slot FROM unnest($1::int[]) AS r(rank)
-     JOIN board_ranks br ON br.rank = r.rank AND br.board_id = $2 AND br.sort_id = $3`,
-    [wanted.map((w) => w.rank), boardId, sid],
+  const order = await rankOrder(boardId, sort);
+  return tileRanks(z, x, y).map((rank) =>
+    rank >= 0 && rank < order.slotOfRank.length
+      ? (order.slotOfRank[rank] as number)
+      : null,
   );
-  const found = new Map<number, number>();
-  for (const row of rows) found.set(row.rank, row.slot);
-  for (const w of wanted) out[w.idx] = found.get(w.rank) ?? null;
-  return out;
+}
+
+/** Image ids for slots, in the order given; a slot with no image is left
+ * out. */
+async function idsForSlots(
+  boardId: string,
+  slots: number[],
+): Promise<string[]> {
+  if (slots.length === 0) return [];
+  const { rows } = await pool.query(
+    'SELECT slot, id FROM images WHERE board_id = $1 AND slot = ANY($2::int[])',
+    [boardId, slots],
+  );
+  const idOf = new Map(rows.map((row) => [row.slot as number, row.id]));
+  return slots.flatMap((slot) => {
+    const id = idOf.get(slot);
+    return id ? [id as string] : [];
+  });
 }
 
 /** Image ids for a contiguous rank RANGE, for `POST /boards/:id/selection/
  * range` (docs/phases/6-product.md "Selection on a million cells" — range
  * and band selects resolve server-side so a million-cell board never pages
  * ranks to the client). `fromRank`/`toRank` may arrive in either order (a
- * drag can run either direction) — normalised here. A contiguous BETWEEN on
- * `(board_id, sort_id, rank)` uses a btree range scan. For discrete rank
- * sets, use the unnest join in `slotsForTile` above, as required by
- * `.claude/rules/ladder-slot-vs-rank.md`. */
+ * drag can run either direction) — normalised here. */
 export async function imageIdsInRankRange(
   boardId: string,
   sort: Sort,
@@ -288,18 +333,12 @@ export async function imageIdsInRankRange(
   toRank: number,
   cap: number,
 ): Promise<string[]> {
-  await ensureRank(boardId, sort);
+  const order = await rankOrder(boardId, sort);
   const lo = Math.max(0, Math.min(fromRank, toRank));
-  const hi = Math.max(fromRank, toRank);
-  const sid = sortId(sort);
-  const { rows } = await pool.query(
-    `SELECT i.id FROM board_ranks br
-     JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
-     WHERE br.board_id = $1 AND br.sort_id = $2 AND br.rank BETWEEN $3 AND $4
-     ORDER BY br.rank ASC LIMIT $5`,
-    [boardId, sid, lo, hi, cap],
-  );
-  return rows.map((r) => r.id);
+  const hi = Math.min(Math.max(fromRank, toRank), order.slotOfRank.length - 1);
+  if (hi < lo) return [];
+  const slots = [...order.slotOfRank.subarray(lo, Math.min(hi + 1, lo + cap))];
+  return idsForSlots(boardId, slots);
 }
 
 /** Image ids in the grid rectangle whose opposite corners are `fromRank`
@@ -312,26 +351,22 @@ export async function imageIdsInRankBand(
   toRank: number,
   cap: number,
 ): Promise<string[]> {
-  await ensureRank(boardId, sort);
+  const order = await rankOrder(boardId, sort);
   const fromCol = fromRank % COLS;
   const toCol = toRank % COLS;
-  const fromRow = Math.floor(fromRank / COLS);
-  const toRow = Math.floor(toRank / COLS);
   const loCol = Math.min(fromCol, toCol);
   const hiCol = Math.max(fromCol, toCol);
-  const lo = Math.min(fromRow, toRow) * COLS + loCol;
-  const hi = Math.max(fromRow, toRow) * COLS + hiCol;
-  const sid = sortId(sort);
-  const { rows } = await pool.query(
-    `SELECT i.id FROM board_ranks br
-     JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
-     WHERE br.board_id = $1 AND br.sort_id = $2
-       AND br.rank BETWEEN $3 AND $4
-       AND br.rank % $5 BETWEEN $6 AND $7
-     ORDER BY br.rank ASC LIMIT $8`,
-    [boardId, sid, lo, hi, COLS, loCol, hiCol, cap],
-  );
-  return rows.map((r) => r.id);
+  const loRow = Math.floor(Math.min(fromRank, toRank) / COLS);
+  const hiRow = Math.floor(Math.max(fromRank, toRank) / COLS);
+  const slots: number[] = [];
+  for (let row = loRow; row <= hiRow && slots.length < cap; row++) {
+    for (let col = loCol; col <= hiCol && slots.length < cap; col++) {
+      const rank = row * COLS + col;
+      if (rank >= order.slotOfRank.length) break;
+      slots.push(order.slotOfRank[rank] as number);
+    }
+  }
+  return idsForSlots(boardId, slots);
 }
 
 /** Images in rank order, for `GET /boards/:id/images` — the click-to-image
@@ -342,14 +377,20 @@ export async function imagesInRankOrder(
   from: number,
   count: number,
 ): Promise<{ rank: number; imageId: string }[]> {
-  await ensureRank(boardId, sort);
-  const sid = sortId(sort);
+  const order = await rankOrder(boardId, sort);
+  const start = Math.max(0, from);
+  const slots = [
+    ...order.slotOfRank.subarray(
+      start,
+      Math.min(start + count, order.slotOfRank.length),
+    ),
+  ];
+  if (slots.length === 0) return [];
   const { rows } = await pool.query(
-    `SELECT br.rank, i.id AS image_id FROM board_ranks br
-     JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
-     WHERE br.board_id = $1 AND br.sort_id = $2 AND br.rank >= $3
-     ORDER BY br.rank ASC LIMIT $4`,
-    [boardId, sid, from, count],
+    'SELECT slot, id FROM images WHERE board_id = $1 AND slot = ANY($2::int[])',
+    [boardId, slots],
   );
-  return rows.map((r) => ({ rank: r.rank, imageId: r.image_id }));
+  return rows
+    .map((row) => ({ rank: rankOf(order, row.slot), imageId: row.id }))
+    .sort((a, b) => a.rank - b.rank);
 }

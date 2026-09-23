@@ -8,6 +8,7 @@ import { auth } from './auth.ts';
 import { env } from './env.ts';
 import { logError, logRequest, requestIdFor } from './logging.ts';
 import { startRequestDiagnostic } from './request-diagnostics.ts';
+import { StorageFull } from './storage/room.ts';
 
 export type Ctx = {
   req: IncomingMessage;
@@ -127,6 +128,13 @@ export class Router {
         await route.handler(ctx);
       } catch (err) {
         if (err instanceof StopHandling) {
+          finish();
+          return true;
+        }
+        if (err instanceof StorageFull) {
+          // storage/room.ts: the server refuses new files before the disk
+          // is full; 507 is HTTP's own word for it.
+          json(res, 507, { error: err.message });
           finish();
           return true;
         }

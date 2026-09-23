@@ -4,6 +4,7 @@
 // it is loaded explicitly here and never overwrites a variable the shell
 // already set.
 import { existsSync, readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +40,15 @@ function required(name: string): string {
 // instance and a check run against another port, say) set PORT and get a
 // consistent origin for free.
 const PORT = Number(process.env.PORT ?? 8800);
+
+function parseWorkerMode(
+  value: string | undefined,
+): 'process' | 'inline' | 'off' {
+  if (value === undefined || value === '') return 'process';
+  if (value === 'process' || value === 'inline' || value === 'off')
+    return value;
+  throw new Error(`WORKER must be process, inline or off; got ${value}`);
+}
 
 function withPort(origin: string, port: number): string {
   try {
@@ -95,8 +105,10 @@ export const env = {
   AUTH_RATE_LIMIT_WINDOW: Number(process.env.AUTH_RATE_LIMIT_WINDOW ?? 10),
   AUTH_RATE_LIMIT_MAX: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 100),
   // limits.ts's token buckets, one action each — docs/phases/5-hardening.md
-  // section 2.
-  RATE_UPLOAD_PER_MIN: Number(process.env.RATE_UPLOAD_PER_MIN ?? 6000),
+  // section 2. Uploads: 200 files/s sustained, above the ~75/s the worker
+  // processes, so one person importing never waits on it; at 6,000 a fast
+  // 20,000-file import drew 7-66 retried 429s (2026-09-23).
+  RATE_UPLOAD_PER_MIN: Number(process.env.RATE_UPLOAD_PER_MIN ?? 12_000),
   RATE_TUS_CREATE_PER_MIN: Number(process.env.RATE_TUS_CREATE_PER_MIN ?? 600),
   RATE_SOCKET_CONNECT_PER_MIN: Number(
     process.env.RATE_SOCKET_CONNECT_PER_MIN ?? 30,
@@ -110,6 +122,9 @@ export const env = {
   // before form parsing or per-file buffering.
   UPLOAD_BATCH_MAX_MB: Number(process.env.UPLOAD_BATCH_MAX_MB ?? 100),
   UPLOAD_MAX_PIXELS: Number(process.env.UPLOAD_MAX_PIXELS ?? 100_000_000),
+  // storage/room.ts: uploads stop while the data volume has less than this
+  // free (STORAGE=fs only); 0 turns the guard off.
+  UPLOAD_MIN_FREE_GB: Number(process.env.UPLOAD_MIN_FREE_GB ?? 5),
   // worker/jobs.ts#runLadderJob: `loadImage` is wrapped in this timeout, so
   // a pathological file can fail fast instead of tying up a worker slot.
   DECODE_TIMEOUT_MS: Number(process.env.DECODE_TIMEOUT_MS ?? 15_000),
@@ -136,11 +151,43 @@ export const env = {
   // MATERIALISE_BUDGET_MB below; PNG encoding there is sized off CPU count,
   // not this.
   WORKER_CONCURRENCY: Number(process.env.WORKER_CONCURRENCY ?? 4),
+  // Where the worker runs (worker/supervisor.ts). `process`: a child the
+  // server restarts, so a native-memory leak in image work can take down
+  // the worker and never the API — docs/measurements/bulk-import-20000.md.
+  // `inline`: inside the server, as before. `off`: not at all (run
+  // `bun run worker` elsewhere).
+  WORKER: parseWorkerMode(process.env.WORKER),
+  // A worker process finishes its batch and exits past either bound; the
+  // supervisor starts a fresh one. Jobs are leased, so nothing is lost.
+  WORKER_RSS_LIMIT_MB: Number(process.env.WORKER_RSS_LIMIT_MB ?? 3072),
+  WORKER_MAX_JOBS: Number(process.env.WORKER_MAX_JOBS ?? 50_000),
   // boards/materialise.ts's scatter path allocates every z<=-3 tile canvas
   // for a sort up front (RGBA, before PNG encoding) — this bounds that, and
   // materialiseSort throws rather than allocate past it. ~1.3 GB at
   // 1,000,000 images (docs/measurements/phase-1-map.md "Row 4").
   MATERIALISE_BUDGET_MB: Number(process.env.MATERIALISE_BUDGET_MB ?? 2048),
+  // meaning/clip.ts: CLIP embeddings for similarity and text search. Off
+  // unless set to `on`: the first use downloads ~150 MB of weights into
+  // DATA_DIR/models, and each worker holds the image model (~300 MB).
+  EMBEDDINGS: process.env.EMBEDDINGS === 'on',
+  // boards/folder-import.ts: folders the server may import from, separated
+  // by ':'. Empty (the default) turns folder import off: reading the
+  // server's disk is the operator's decision, never a user's.
+  IMPORT_ROOTS: (process.env.IMPORT_ROOTS ?? '')
+    .split(':')
+    .map((root) => root.trim())
+    .filter(Boolean),
+  IMPORT_MAX_FILES: Number(process.env.IMPORT_MAX_FILES ?? 100_000),
+  // boards/ranks.ts: decoded rank orders held per process, ~8 MB per sort of
+  // a million-image board.
+  RANK_CACHE_MB: Number(process.env.RANK_CACHE_MB ?? 256),
+  // PNG-encode threads per materialise (boards/materialise.ts#EncodePool).
+  // Each is a whole JS heap; the default leaves two cores free and caps at
+  // eight so a large machine's core count does not become a memory spike.
+  MATERIALISE_ENCODERS: Number(
+    process.env.MATERIALISE_ENCODERS ??
+      Math.max(1, Math.min(availableParallelism() - 2, 8)),
+  ),
   // boards/coarse-cache.ts: a materialised sort's z<=-3 tiles held resident
   // per open board, LRU across (board, sort) — .claude/rules/
   // tile-cache-is-for-the-second-viewer.md. ~124 MB per sort at 1,000,000

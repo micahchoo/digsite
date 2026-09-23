@@ -5,6 +5,7 @@
 // graph, CONTEXT.md "The union").
 import type { EdgeRow, RegionRow } from '@digsite/shared/sheet/claims';
 import type { Direction, Properties } from '@digsite/shared/sheet/elements';
+import type { Confidence } from '@digsite/shared/sheet/sense';
 
 export type RegionDbRow = {
   id: string;
@@ -29,6 +30,8 @@ export type EdgeDbRow = {
   direction: string;
   relation: string;
   properties: Properties;
+  confidence: Confidence | null;
+  note: string;
 };
 
 export function toRegionRow(r: RegionDbRow): RegionRow {
@@ -66,5 +69,7 @@ export function toEdgeRow(e: EdgeDbRow): EdgeRow {
     direction: e.direction as Direction,
     relation: e.relation,
     properties: e.properties,
+    confidence: e.confidence,
+    note: e.note,
   };
 }

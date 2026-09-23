@@ -1,12 +1,24 @@
 // GET /boards/:id/find?sort=&q=&filter= (docs/phases/6-product.md "Find and
-// filter"): matches under the given sort, as ranks — never rebuilds
-// board_ranks (joins the table `ensureRank` already maintains, same as
-// every other rank reader in this directory).
-import { type Sort, sortId } from '@digsite/shared/board/sort';
+// filter"): matches under the given sort, as ranks. Postgres filters the
+// board's images; their ranks come from the sort's decoded order
+// (ranks.ts#rankOrder). Measured on a 1,000,000-image board: 63 ms for
+// 62,564 matches, where joining the old board_ranks table took 4.9 s.
+import type { Sort } from '@digsite/shared/board/sort';
 import { SHEET_LIMIT } from '@digsite/shared/sheet/elements';
+import { termsMeaning } from '@digsite/shared/sheet/sense';
 import { pool } from '../db/pool.ts';
 import { type FilterClause, buildFilterSql } from './filter.ts';
-import { ensureRank } from './ranks.ts';
+import { rankOf, rankOrder } from './ranks.ts';
+import { aliasesOf } from './vocabulary.ts';
+
+/** Matches by what sheets have claimed about an image (CONTEXT.md "Making
+ * sense"): a region with this label, an edge with this relation at either
+ * end, or any claim at all. Terms match through aliases. */
+export type ClaimFilter = {
+  label?: string;
+  relation?: string;
+  annotated?: boolean;
+};
 
 const RANKS_CAP = 10_000;
 
@@ -57,11 +69,11 @@ export async function findRanks(
   sort: Sort,
   q: string | null,
   filter: FilterClause[],
+  claims: ClaimFilter = {},
 ): Promise<FindResult> {
-  await ensureRank(boardId, sort);
-  const sid = sortId(sort);
+  const order = await rankOrder(boardId, sort);
 
-  const params: unknown[] = [boardId, sid];
+  const params: unknown[] = [boardId];
   const conditions: string[] = [];
 
   const trimmedQ = (q ?? '').trim();
@@ -83,28 +95,56 @@ export async function findRanks(
     params.push(...built.params);
   }
 
-  const where = conditions.length ? `AND ${conditions.join(' AND ')}` : '';
-  params.push(RANKS_CAP);
-  const limitParam = params.length;
+  if (claims.label || claims.relation) {
+    const aliases = await aliasesOf(boardId);
+    if (claims.label) {
+      params.push(termsMeaning(claims.label, aliases.label));
+      conditions.push(
+        `EXISTS (SELECT 1 FROM regions r WHERE r.image_id = i.id AND r.label = ANY($${params.length}::text[]))`,
+      );
+    }
+    if (claims.relation) {
+      params.push(termsMeaning(claims.relation, aliases.relation));
+      conditions.push(
+        `EXISTS (SELECT 1 FROM edges e WHERE (e.src_image_id = i.id OR e.dst_image_id = i.id) AND e.relation = ANY($${params.length}::text[]))`,
+      );
+    }
+  }
+  if (claims.annotated) {
+    conditions.push(
+      `(EXISTS (SELECT 1 FROM regions r WHERE r.image_id = i.id)
+        OR EXISTS (SELECT 1 FROM edges e WHERE e.src_image_id = i.id OR e.dst_image_id = i.id))`,
+    );
+  }
 
-  const { rows } = await pool.query(
-    `WITH matched AS (
-       SELECT br.rank, i.id AS image_id
-       FROM board_ranks br
-       JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
-       WHERE br.board_id = $1 AND br.sort_id = $2 ${where}
-     )
-     SELECT (SELECT COUNT(*) FROM matched) AS total,
-       COALESCE((SELECT json_agg(rank ORDER BY rank)
-         FROM (SELECT rank FROM matched ORDER BY rank LIMIT $${limitParam}) r), '[]'::json) AS ranks,
-       COALESCE((SELECT json_agg(image_id ORDER BY rank)
-         FROM (SELECT image_id, rank FROM matched ORDER BY rank LIMIT ${SHEET_LIMIT}) i), '[]'::json) AS image_ids`,
-    params,
+  const where = conditions.length ? `AND ${conditions.join(' AND ')}` : '';
+  // Slots only, as array rows: a broad query can match most of a board,
+  // and a uuid per match was most of the cost (872,133 matches: 7.6 s).
+  const { rows } = await pool.query<[number]>({
+    text: `SELECT i.slot FROM images i WHERE i.board_id = $1 ${where}`,
+    values: params,
+    rowMode: 'array',
+  });
+  // An image uploaded after this build has no rank yet; it is not on the
+  // map, so it is not a match on it either.
+  const ranks = new Int32Array(rows.length);
+  let count = 0;
+  for (const [slot] of rows) {
+    const rank = rankOf(order, slot);
+    if (rank >= 0) ranks[count++] = rank;
+  }
+  const sorted = ranks.subarray(0, count).sort();
+  const first = [...sorted.subarray(0, SHEET_LIMIT)].map(
+    (rank) => order.slotOfRank[rank] as number,
   );
-  const row = rows[0];
+  const { rows: idRows } = await pool.query(
+    'SELECT slot, id FROM images WHERE board_id = $1 AND slot = ANY($2::int[])',
+    [boardId, first],
+  );
+  const idOf = new Map(idRows.map((row) => [row.slot as number, row.id]));
   return {
-    ranks: (row?.ranks ?? []) as number[],
-    imageIds: (row?.image_ids ?? []) as string[],
-    count: Number(row?.total ?? 0),
+    ranks: [...sorted.subarray(0, RANKS_CAP)],
+    imageIds: first.map((slot) => idOf.get(slot) as string),
+    count,
   };
 }

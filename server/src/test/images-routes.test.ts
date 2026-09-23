@@ -126,9 +126,7 @@ describe('GET /images/:id/preview', () => {
 
     // Paint the ladder (8/32/128) without ever writing an original — this
     // is exactly the synthetic million-image board's own shape.
-    const png = paintSquare(120);
-    const decoded = await loadImage(png);
-    await paintLadder(boardId, slot, decoded, decoded.width, decoded.height);
+    await paintLadder(boardId, slot, paintSquare(120));
     expect(await storageFromEnv().exists(originalKey(boardId, sha256))).toBe(
       false,
     );
@@ -209,8 +207,7 @@ describe('GET /images/:id/preview', () => {
     const slot = 0;
     const sha256 = `sha-preview-missing-${ts}`;
     const imageId = await makeImage(boardId, slot, sha256, { missing: true });
-    const decoded = await loadImage(paintSquare(200));
-    await paintLadder(boardId, slot, decoded, decoded.width, decoded.height);
+    await paintLadder(boardId, slot, paintSquare(200));
 
     const res = await owner.get(`/images/${imageId}/preview`);
     expect(res.status).toBe(404);

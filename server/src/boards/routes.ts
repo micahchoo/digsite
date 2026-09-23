@@ -1,6 +1,7 @@
 // Boards (CONTEXT.md "Board", "Image", "Tile"). See docs/design.md
 // "Routes / Boards" for the fixed route shapes.
 import type {
+  AliasesResponse,
   AllowlistRequest,
   AllowlistResponse,
   BoardFootprint,
@@ -11,15 +12,16 @@ import type {
   CreateBoardResponse,
   FindBoardResponse,
   GetBoardAllowlistResponse,
-  GetBoardRelationsResponse,
   GetBoardResponse,
   GetBoardSelectionResponse,
+  GetBoardVocabularyResponse,
   GetImageResponse,
   GetSectionsResponse,
   ListBoardImagesByIdsResponse,
   ListBoardImagesResponse,
   ListBoardsResponse,
   ListJobsResponse,
+  PutAliasRequest,
   PutBoardSelectionRequest,
   PutBoardSelectionResponse,
   RebuildSortResponse,
@@ -51,11 +53,13 @@ import {
   sortId as toSortId,
 } from '@digsite/shared/board/sort';
 import { SHEET_LIMIT } from '@digsite/shared/sheet/elements';
-import { type Canvas, createCanvas, loadImage } from '@napi-rs/canvas';
+import { type Canvas, createCanvas } from '@napi-rs/canvas';
 import { fromNodeHeaders } from 'better-auth/node';
+import sharp from 'sharp';
 import {
   type BoardRow,
   type ImageRow,
+  boardForAliasing,
   boardForCreating,
   boardForDeleting,
   boardForManagingAllowlist,
@@ -80,6 +84,7 @@ import {
   toWebRequest,
 } from '../http.ts';
 import { checkLimit, tooManyRequests } from '../limits.ts';
+import { searchText, similarTo } from '../meaning/search.ts';
 import { recordTileCache } from '../metrics.ts';
 import {
   deletePrefix,
@@ -90,6 +95,11 @@ import { Semaphore } from '../util/semaphore.ts';
 import { enqueueMaterialiseJob } from '../worker/jobs.ts';
 import type { FilterClause } from './filter.ts';
 import { findRanks } from './find.ts';
+import {
+  ImportRefused,
+  folderImport,
+  startFolderImport,
+} from './folder-import.ts';
 import { withPage } from './ladder.ts';
 import { originalKey, previewKey } from './paths.ts';
 import { isProperties } from './properties.ts';
@@ -100,11 +110,19 @@ import {
   imageIdsInRankRange,
   imagesInRankOrder,
   markBoardRanksStale,
+  rankOf,
+  rankOrder,
 } from './ranks.ts';
 import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
 import { uploadOne } from './upload.ts';
 import { validateUpload } from './validate.ts';
+import {
+  aliasesOf,
+  deleteAlias,
+  putAlias,
+  vocabularyOf,
+} from './vocabulary.ts';
 
 const SELECTION_CAP = 5000;
 const UUID_RE =
@@ -123,31 +141,14 @@ const PREVIEW_LADDER_SIZE = 128;
 // leak than the tile/ladder ones (bounded by distinct images previewed,
 // not by request volume, for `originalPreview`) but the same defect class.
 //
-// `originalPreview`'s output size varies per image (scaled to fit
-// PREVIEW_MAX_SIDE), so a plain same-size free list doesn't apply the way
-// it did for TILE/PAGE-sized canvases — instead this reuses ONE canvas
-// across requests by resizing it (`canvas.width =`/`canvas.height =`,
-// which clears it — the same behaviour image-graph's
-// `image-graph-atlas-tiles.md` rule documents for this canvas library, and
-// exactly what's wanted here since the whole canvas gets redrawn anyway).
+// `originalPreview` now scales with libvips and needs no canvas.
 // `ladderPreview`'s output is always exactly PREVIEW_LADDER_SIZE square, so
-// its own pool is the same shape as ladder.ts's page pool. Both are gated
-// by a semaphore, same invariant as ladder.ts/tiles.ts: canvases ever
-// created <= concurrency limit, not bounded by a capped free list.
+// its pool is the same shape as ladder.ts's page pool. Both are gated by a
+// semaphore, same invariant as ladder.ts/tiles.ts: canvases ever created <=
+// concurrency limit, not bounded by a capped free list.
 const PREVIEW_CONCURRENCY = 8;
 const previewSemaphore = new Semaphore(PREVIEW_CONCURRENCY);
-const originalPreviewPool: Canvas[] = [];
 const ladderPreviewPool: Canvas[] = [];
-
-function acquireOriginalPreviewCanvas(w: number, h: number): Canvas {
-  const canvas = originalPreviewPool.pop();
-  if (canvas) {
-    if (canvas.width !== w) canvas.width = w;
-    if (canvas.height !== h) canvas.height = h;
-    return canvas;
-  }
-  return createCanvas(w, h);
-}
 
 /** `GET /images/:id/preview`'s first choice: the original, scaled to at
  * most `PREVIEW_MAX_SIDE` on its longer side, encoded once and cached at
@@ -165,25 +166,21 @@ async function originalPreview(
   if (cached) return Buffer.from(cached);
   const original = await storage.get(originalKey(boardId, sha256));
   if (!original) return null;
+  // libvips, not @napi-rs/canvas: that library's decoder rejects some
+  // valid images (ladder.ts#decodePage), and a JPEG shrinks while decoding.
   return previewSemaphore.run(async () => {
-    const img = await loadImage(Buffer.from(original));
-    const scale = Math.min(
-      1,
-      PREVIEW_MAX_SIDE / Math.max(img.width, img.height),
-    );
-    const w = Math.max(1, Math.round(img.width * scale));
-    const h = Math.max(1, Math.round(img.height * scale));
-    const canvas = acquireOriginalPreviewCanvas(w, h);
-    try {
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0, w, h);
-      const buf = canvas.encodeSync('png');
-      await storage.put(cachedKey, buf, 'image/png');
-      return buf;
-    } finally {
-      originalPreviewPool.push(canvas);
-    }
+    const buf = await sharp(Buffer.from(original), {
+      limitInputPixels: env.UPLOAD_MAX_PIXELS,
+    })
+      .rotate()
+      .resize(PREVIEW_MAX_SIDE, PREVIEW_MAX_SIDE, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .png()
+      .toBuffer();
+    await storage.put(cachedKey, buf, 'image/png');
+    return buf;
   });
 }
 
@@ -440,8 +437,8 @@ export function registerBoardRoutes(router: Router) {
 
   // DELETE /boards/:id (docs/phases/3-groups.md section 4): every row that
   // names this board, in the doc's own order (children before the parents
-  // that FK to them — board_ranks lost its FK in 0004_ranks_no_fk.sql but
-  // board_rank_state did not, see ranks.ts's header comment), in one
+  // that FK to them — board_rank_state, which holds each sort's whole order
+  // since 0017_rank_order.sql, keeps its FK), in one
   // transaction; the private board's team (best-effort — see below) and a
   // best-effort sweep of its files, after the transaction commits.
   router.del('/boards/:id', async (ctx) => {
@@ -473,10 +470,10 @@ export function registerBoardRoutes(router: Router) {
         [boardId],
       );
       await client.query('DELETE FROM sheets WHERE board_id = $1', [boardId]);
-      await client.query('DELETE FROM board_ranks WHERE board_id = $1', [
+      await client.query('DELETE FROM board_rank_state WHERE board_id = $1', [
         boardId,
       ]);
-      await client.query('DELETE FROM board_rank_state WHERE board_id = $1', [
+      await client.query('DELETE FROM term_aliases WHERE board_id = $1', [
         boardId,
       ]);
       await client.query('DELETE FROM board_selections WHERE board_id = $1', [
@@ -828,26 +825,20 @@ export function registerBoardRoutes(router: Router) {
         const response: ListBoardImagesByIdsResponse = { images: [] };
         return json(ctx.res, 200, response);
       }
-      await ensureRank(boardId, sort);
-      const sid = toSortId(sort);
+      const order = await rankOrder(boardId, sort);
       const { rows } = await pool.query(
-        `SELECT i.*, br.rank FROM images i
-         LEFT JOIN board_ranks br
-           ON br.board_id = i.board_id AND br.sort_id = $2 AND br.slot = i.slot
-         WHERE i.board_id = $1 AND i.id = ANY($3::uuid[])`,
-        [boardId, sid, wanted],
+        'SELECT * FROM images WHERE board_id = $1 AND id = ANY($2::uuid[])',
+        [boardId, wanted],
       );
       const byId = new Map(rows.map((r) => [r.id, r]));
       const images: BoardImageWithRank[] = wanted
         .map((id) => byId.get(id))
         .filter((r): r is NonNullable<typeof r> => !!r)
-        .map((r) => ({
-          ...toBoardImage(r),
-          rank:
-            r.rank === null || r.rank === undefined
-              ? undefined
-              : Number(r.rank),
-        }));
+        .map((r) => {
+          // Uploaded after this build: not on the map yet, so no rank.
+          const rank = rankOf(order, r.slot);
+          return { ...toBoardImage(r), rank: rank < 0 ? undefined : rank };
+        });
       const response: ListBoardImagesByIdsResponse = { images };
       return json(ctx.res, 200, response);
     }
@@ -876,21 +867,54 @@ export function registerBoardRoutes(router: Router) {
     json(ctx.res, 200, response);
   });
 
-  // GET /boards/:id/relations (docs/phases/2-sheet.md section 4 /
-  // web/src/lib/api.ts's TODO): distinct relations across every sheet's own
-  // edges on this board, for the Explore panel's relation filter.
-  router.get('/boards/:id/relations', async (ctx) => {
+  // GET /boards/:id/vocabulary (CONTEXT.md "Vocabulary"): every label and
+  // relation the board's sheets use, folded onto canonical terms, with the
+  // aliases. What every label and relation field suggests from.
+  router.get('/boards/:id/vocabulary', async (ctx) => {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
     await boardForViewing(userId, boardId);
-    const { rows } = await pool.query(
-      `SELECT DISTINCT e.relation FROM edges e
-       JOIN sheets s ON s.id = e.sheet_id
-       WHERE s.board_id = $1 AND e.relation != ''
-       ORDER BY e.relation`,
-      [boardId],
-    );
-    const response: GetBoardRelationsResponse = rows.map((r) => r.relation);
+    const response: GetBoardVocabularyResponse = await vocabularyOf(boardId);
+    json(ctx.res, 200, response);
+  });
+
+  // PUT /boards/:id/aliases {kind, term, canonical}: `term` now means
+  // `canonical` everywhere claims are read. No scene changes.
+  router.put('/boards/:id/aliases', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForAliasing(userId, boardId);
+    const body = (await readJsonBody(ctx.req)) as Partial<PutAliasRequest>;
+    const kind = body.kind;
+    const term = typeof body.term === 'string' ? body.term.trim() : '';
+    const canonical =
+      typeof body.canonical === 'string' ? body.canonical.trim() : '';
+    if (kind !== 'label' && kind !== 'relation') {
+      return json(ctx.res, 400, { error: 'kind must be label or relation' });
+    }
+    if (!term || !canonical || term.length > 200 || canonical.length > 200) {
+      return json(ctx.res, 400, {
+        error: 'term and canonical must be 1 to 200 characters',
+      });
+    }
+    if (!(await putAlias(boardId, kind, term, canonical, userId))) {
+      return json(ctx.res, 400, { error: 'a term cannot mean itself' });
+    }
+    const response: AliasesResponse = await aliasesOf(boardId);
+    json(ctx.res, 200, response);
+  });
+
+  // DELETE /boards/:id/aliases/:kind/:term: the term means itself again.
+  router.del('/boards/:id/aliases/:kind/:term', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForAliasing(userId, boardId);
+    const kind = param(ctx, 'kind');
+    if (kind !== 'label' && kind !== 'relation') {
+      return json(ctx.res, 400, { error: 'kind must be label or relation' });
+    }
+    await deleteAlias(boardId, kind, param(ctx, 'term'));
+    const response: AliasesResponse = await aliasesOf(boardId);
     json(ctx.res, 200, response);
   });
 
@@ -1276,8 +1300,8 @@ export function registerBoardRoutes(router: Router) {
 
   // GET /boards/:id/find?sort=&q=&filter= (docs/phases/6-product.md "Find
   // and filter"): matches under the given sort as ranks, capped at 10,000,
-  // ascending — never rebuilds board_ranks (find.ts joins the same table
-  // every other rank reader does).
+  // ascending — reads the sort's current order like every other rank reader
+  // (find.ts, ranks.ts#rankOrder).
   router.get('/boards/:id/find', async (ctx) => {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
@@ -1309,11 +1333,23 @@ export function registerBoardRoutes(router: Router) {
     }
 
     try {
+      const label = ctx.url.searchParams.get('label');
+      const relation = ctx.url.searchParams.get('relation');
+      if ((label?.length ?? 0) > 200 || (relation?.length ?? 0) > 200) {
+        return json(ctx.res, 400, {
+          error: 'label and relation must be at most 200 characters',
+        });
+      }
       const { ranks, imageIds, count } = await findRanks(
         boardId,
         sort,
         q,
         filter,
+        {
+          ...(label ? { label } : {}),
+          ...(relation ? { relation } : {}),
+          annotated: ctx.url.searchParams.get('annotated') === '1',
+        },
       );
       const response: FindBoardResponse = { ranks, imageIds, count };
       json(ctx.res, 200, response);
@@ -1328,5 +1364,91 @@ export function registerBoardRoutes(router: Router) {
       }
       throw err;
     }
+  });
+
+  // GET /boards/:id/similar?image=&sort=&limit= and GET /boards/:id/search?
+  // text=&sort=&limit= (CONTEXT.md "Embedding", roadmap stage 4): images by
+  // meaning, best first, as ranks under the viewer's sort — the shape find
+  // returns, so the map dims the rest the same way. 503 while embeddings are
+  // off (env.EMBEDDINGS).
+  const MEANING_LIMIT = 1_000;
+  function meaningLimit(ctx: { url: URL }): number {
+    const asked = Number(ctx.url.searchParams.get('limit') ?? SHEET_LIMIT);
+    return Number.isInteger(asked) && asked > 0
+      ? Math.min(asked, MEANING_LIMIT)
+      : SHEET_LIMIT;
+  }
+
+  router.get('/boards/:id/similar', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    if (!env.EMBEDDINGS) {
+      return json(ctx.res, 503, { error: 'embeddings are off' });
+    }
+    const image = ctx.url.searchParams.get('image') ?? '';
+    // The anchor must be on this board: an image of a board the viewer
+    // cannot see must not become a query here.
+    const { rows } = await pool.query(
+      'SELECT 1 FROM images WHERE board_id = $1 AND id::text = $2',
+      [boardId, image],
+    );
+    if (rows.length === 0) {
+      return json(ctx.res, 400, { error: 'image is not on this board' });
+    }
+    const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
+    const matches = await similarTo(boardId, image, sort, meaningLimit(ctx));
+    if (matches === null) {
+      return json(ctx.res, 409, { error: 'image is not embedded yet' });
+    }
+    return json(ctx.res, 200, { matches });
+  });
+
+  router.get('/boards/:id/search', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    if (!env.EMBEDDINGS) {
+      return json(ctx.res, 503, { error: 'embeddings are off' });
+    }
+    const text = (ctx.url.searchParams.get('text') ?? '').trim();
+    if (!text || text.length > 200) {
+      return json(ctx.res, 400, { error: 'text must be 1 to 200 characters' });
+    }
+    const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
+    const matches = await searchText(boardId, text, sort, meaningLimit(ctx));
+    return json(ctx.res, 200, { matches });
+  });
+
+  // POST /boards/:id/imports {path} and GET /boards/:id/imports/:importId
+  // (CONTEXT.md "Folder import"): fill a board from a folder on the
+  // server's disk, under a root the operator allowed. Anyone who may upload
+  // to the board may import; the roots are what bound it.
+  router.post('/boards/:id/imports', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForUploading(userId, boardId);
+    const body = (await readJsonBody(ctx.req)) as { path?: unknown };
+    if (typeof body?.path !== 'string' || !body.path.trim()) {
+      return json(ctx.res, 400, { error: 'path is required' });
+    }
+    try {
+      const started = await startFolderImport(boardId, userId, body.path);
+      return json(ctx.res, 202, started);
+    } catch (err) {
+      if (err instanceof ImportRefused) {
+        return json(ctx.res, err.status, { error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  router.get('/boards/:id/imports/:importId', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    const found = await folderImport(boardId, param(ctx, 'importId'));
+    if (!found) return json(ctx.res, 404, { error: 'no such import' });
+    return json(ctx.res, 200, found);
   });
 }

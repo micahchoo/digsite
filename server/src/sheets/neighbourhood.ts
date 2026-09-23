@@ -8,6 +8,8 @@ import { SHEET_LIMIT } from '@digsite/shared/sheet/elements';
 // WHOLE graph, every sheet's claims unioned (CONTEXT.md "The union") — this
 // deliberately walks across sheets, scoped to one board by joining `images`
 // on both of an edge's ends.
+import { termsMeaning } from '@digsite/shared/sheet/sense';
+import { aliasesOf } from '../boards/vocabulary.ts';
 import { pool } from '../db/pool.ts';
 import { type EdgeDbRow, toEdgeRow } from './rows.ts';
 
@@ -31,6 +33,10 @@ export async function neighbourhoodFrom(
   relation: string | undefined,
   limit: number = SHEET_LIMIT,
 ): Promise<Neighbourhood> {
+  // A relation means every spelling aliased to it (CONTEXT.md "Alias").
+  const relations = relation
+    ? termsMeaning(relation, (await aliasesOf(boardId)).relation)
+    : null;
   const { rows } = await pool.query(
     `WITH RECURSIVE nbhd(image_id, hops, path) AS (
        SELECT $1::uuid, 0, ARRAY[$1::uuid]
@@ -47,14 +53,14 @@ export async function neighbourhoodFrom(
          END AS next_id
        ) step
        WHERE n.hops < $3
-         AND ($4::text IS NULL OR e.relation = $4)
+         AND ($4::text[] IS NULL OR e.relation = ANY($4::text[]))
          AND step.next_id <> ALL(n.path)
      )
      SELECT image_id, MIN(hops) AS hops
      FROM nbhd
      GROUP BY image_id
      ORDER BY hops, image_id`,
-    [from, boardId, hops, relation ?? null],
+    [from, boardId, hops, relations],
   );
 
   const truncated = rows.length > limit;
@@ -68,8 +74,8 @@ export async function neighbourhoodFrom(
     const { rows: edgeRows } = await pool.query(
       `SELECT * FROM edges
        WHERE src_image_id = ANY($1::uuid[]) AND dst_image_id = ANY($1::uuid[])
-         AND ($2::text IS NULL OR relation = $2)`,
-      [imageIds, relation ?? null],
+         AND ($2::text[] IS NULL OR relation = ANY($2::text[]))`,
+      [imageIds, relations],
     );
     edges = (edgeRows as EdgeDbRow[]).map(toEdgeRow);
   }

@@ -194,10 +194,7 @@ async function cmdRank(boardId: string): Promise<void> {
   const session = await signInMember();
   const out: { sortId: string; ms: number; httpMs: number }[] = [];
   for (const sortId of SORTS) {
-    await pool.query(
-      'DELETE FROM board_ranks WHERE board_id = $1 AND sort_id = $2',
-      [boardId, sortId],
-    );
+    // The whole order lives in this row (0017_rank_order.sql).
     await pool.query(
       'DELETE FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
       [boardId, sortId],

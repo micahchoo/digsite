@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:16-alpine
+    # postgres:16-alpine with pgvector built in (db/Dockerfile): the same
+    # musl base as before, so the existing volume and its indexes carry over.
+    build: ./db
+    image: digsite-postgres:16-pgvector
     container_name: digsite-db
     ports:
       - "127.0.0.1:5440:5432"

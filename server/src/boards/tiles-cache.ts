@@ -34,6 +34,13 @@ export function setComposedTile(
   }
 }
 
+/** Drops every composed tile, for a process that may have missed
+ * invalidations (invalidation.ts, on reconnect). */
+export function invalidateAllComposedTiles(): void {
+  cache.clear();
+  bytes = 0;
+}
+
 export function invalidateComposedTiles(boardId: string): void {
   for (const [k, v] of cache) {
     if (v.boardId === boardId) {

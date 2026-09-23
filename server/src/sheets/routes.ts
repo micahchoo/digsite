@@ -7,6 +7,7 @@ import type {
   GetNeighbourhoodResponse,
   GetSheetElementsResponse,
   GetSheetForeignResponse,
+  GetSheetReachResponse,
   GetSheetResponse,
   GetSheetRowsResponse,
   GetStatsResponse,
@@ -41,6 +42,7 @@ import {
   requireAuth,
 } from '../http.ts';
 import { neighbourhoodFrom } from './neighbourhood.ts';
+import { reachOf } from './reach.ts';
 import { broadcastSheetScene, roomStats } from './room.ts';
 import { toEdgeRow, toRegionRow } from './rows.ts';
 import {
@@ -594,6 +596,23 @@ export function registerSheetRoutes(router: Router) {
       sheetName: e.sheet_name,
     }));
     const response: GetSheetForeignResponse = { regions, edges };
+    json(ctx.res, 200, response);
+  });
+
+  // GET /sheets/:id/reach (CONTEXT.md "Reach"): other sheets' edges with
+  // exactly one end on this sheet — where this sheet's images lead that the
+  // sheet does not show — and the far images, enough to preview and bring
+  // them in. The overlay draws these; they never enter the scene
+  // (.claude/rules/foreign-never-in-scene.md). Bounded: the nearest
+  // REACH_LIMIT edges are plenty to show and the payload stays small.
+  // GET /sheets/:id/reach (CONTEXT.md "Reach"): see reach.ts.
+  router.get('/sheets/:id/reach', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const sheet = await sheetForEditing(userId, param(ctx, 'id'));
+    const response: GetSheetReachResponse = await reachOf(
+      sheet.id,
+      sheet.board_id,
+    );
     json(ctx.res, 200, response);
   });
 

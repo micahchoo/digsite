@@ -28,6 +28,7 @@ import { AccessDenied, boardForUploading } from '../access/index.ts';
 import { auth } from '../auth.ts';
 import { env } from '../env.ts';
 import { checkLimit } from '../limits.ts';
+import { StorageFull } from '../storage/room.ts';
 import { uploadOne } from './upload.ts';
 import { validateUpload } from './validate.ts';
 
@@ -145,14 +146,21 @@ export const tusServer = new Server({
     // Use the verified bytes, not optional client metadata. S3 preserves this
     // type when the original is later served through a signed URL.
     const contentType = `image/${result.type}`;
-    const image = await uploadOne(
-      meta.boardId,
-      meta.userId,
-      filename,
-      bytes,
-      properties,
-      contentType,
-    );
+    let image: Awaited<ReturnType<typeof uploadOne>>;
+    try {
+      image = await uploadOne(
+        meta.boardId,
+        meta.userId,
+        filename,
+        bytes,
+        properties,
+        contentType,
+      );
+    } catch (err) {
+      if (!(err instanceof StorageFull)) throw err;
+      await fileStore.remove(upload.id).catch(() => {});
+      throw { status_code: 507, body: `${err.message}\n` };
+    }
     await fileStore.remove(upload.id).catch(() => {});
 
     return { headers: { 'Upload-Image-Id': image.id } };
