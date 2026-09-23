@@ -6,6 +6,7 @@
 // server may read, and none by default. A path is resolved with realpath —
 // symlinks and `..` included — and must land inside a root. Every file then
 // takes the same path as a browser upload: validateUpload, then uploadOne.
+import { createHash } from 'node:crypto';
 import { readdir, realpath } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import type { FolderImport } from '@digsite/shared/api';
@@ -135,7 +136,7 @@ export async function runFolderImportBatch(importId: string): Promise<void> {
   const { validateUpload } = await import('./validate.ts');
   const { uploadOne } = await import('./upload.ts');
   for (const file of job.batch as string[]) {
-    const admitted = await admit(job.path, file, validateUpload);
+    const admitted = await admit(job.board_id, job.path, file, validateUpload);
     const skip = 'skip' in admitted ? admitted.skip : null;
     if (!('skip' in admitted)) {
       // Not caught: a failure here is the server's (storage, database, a
@@ -182,8 +183,11 @@ type Admitted =
   | { skip: string };
 
 /** One file as an upload, or why it is skipped. Only the FILE's faults
- * are skips: it vanished, cannot be read, or is not an image. */
+ * are skips: it vanished, cannot be read, is not an image, or its bytes
+ * are already an image on this board (C6: a folder imported twice made
+ * every image twice). */
 async function admit(
+  boardId: string,
   folder: string,
   file: string,
   validateUpload: typeof import('./validate.ts').validateUpload,
@@ -207,5 +211,12 @@ async function admit(
     properties.format = converted.format;
   }
   const result = validateUpload(bytes);
-  return result.ok ? { name, bytes, properties } : { skip: result.reason };
+  if (!result.ok) return { skip: result.reason };
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const { rows } = await pool.query(
+    'SELECT name FROM images WHERE board_id = $1 AND sha256 = $2 LIMIT 1',
+    [boardId, sha256],
+  );
+  if (rows[0]) return { skip: `already on this board as ${rows[0].name}` };
+  return { name, bytes, properties };
 }

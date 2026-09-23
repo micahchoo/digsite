@@ -160,4 +160,33 @@ describe('folder import', () => {
       skipped: 2,
     });
   });
+
+  test('a folder imported twice adds nothing the second time, and says where each file already is', async () => {
+    env.IMPORT_ROOTS = [root];
+    const { rows } = await pool.query(
+      `INSERT INTO boards (org_id, name, open, created_by)
+       VALUES ('org-import', $1, true, 'importer') RETURNING id`,
+      [`folder-twice-${Date.now()}`],
+    );
+    const boardId = rows[0].id as string;
+    const first = await startFolderImport(boardId, 'importer', root);
+    await drain();
+    expect(await folderImport(boardId, first.id)).toMatchObject({
+      imported: 4,
+    });
+    const again = await startFolderImport(boardId, 'importer', root);
+    await drain();
+    const done = await folderImport(boardId, again.id);
+    expect(done).toMatchObject({ state: 'done', imported: 0, skipped: 6 });
+    const why = Object.fromEntries(
+      (done?.skips ?? []).map((s) => [s.file, s.reason]),
+    );
+    expect(why['a.png']).toBe('already on this board as a.png');
+    expect(why['IMG_0001.HEIC']).toBe('already on this board as IMG_0001.HEIC');
+    const { rows: count } = await pool.query(
+      'SELECT count(*)::int AS n FROM images WHERE board_id = $1',
+      [boardId],
+    );
+    expect(count[0].n).toBe(4);
+  });
 });
