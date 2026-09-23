@@ -90,15 +90,20 @@ the user asked to commit as I go, 2026-09-23). Also done since then:
   and the web view (`board/WebView.tsx`, `web-layout.ts`): hop rings, bent
   lines so two claims on one pair read as two arcs, walk from a picture.
   Opens from Explore, the path panel, and a connection on a sheet.
+- Horizon 3 also: the web of one relation, from the board's Terms; parts
+  no edge joins sit side by side (`web-layout.ts#ringLayout`).
 - Horizon 4: "Looks like" under a sheet picture (`sheet/LooksLike.tsx`):
   Bring here, then a click connects ("copy of" for a near-duplicate).
   "Copies of this picture" on the board (`board/Copies.tsx`, digsite-1b's
-  `/duplicates`).
+  `/duplicates`). Label suggestions as chips on a new region
+  (`/label-suggestions`; the CLIP prompt is untuned until real labels).
 - Horizon 5: `/b/<board>?image=<id>` and `/s/<sheet>?claim=<id>` links;
   "Export a report" (`sheet/report.ts`, `crop.ts`): one HTML file.
 - Horizon 6: arrow keys walk pictures and a live region announces the
   selection (`arrow-walk.ts`, `announce.ts`); `smoke-surfaces.ts` checks
-  dark mode and 390 px; CI uses a pgvector database.
+  dark mode and 390 px across the new surfaces, the tray, the side
+  drawer, the keyboard panel and the sheet menu; CI uses a pgvector
+  database. The sheet toolbar draws from the one `Icon` set.
 
 Found and fixed on the way:
 - `smoke-sheet-surroundings.ts` hung forever on a failure (the five codex
@@ -114,17 +119,20 @@ Found and fixed on the way:
 - Esc in a dialog also closed the picture's details and the shell's
   drawers; `lib/modal.ts#modalOpen` makes page key handlers stand back.
 - `besideSpot` measured the element's own position instead of the spot.
+- The phone's side drawer and the context menu were content-box wider
+  than their placement; both border-box now.
+- A label chip's press reached the draw layer, which captured the click.
 
 Verify with `bun run smoke` (16 scripts), `bun run e2e:fresh` (all six
 suites pass together; `IMPORT_ROOTS=<dir>` for walk claim 8), `cd web &&
 bun test`, `cd shared && bun test`, and `cd server && bun test
 replies-routes extract-routes making-sense access.test routes-audit`.
 
-Open: a web of one relation (horizon 3); label suggestions (4); a
-read-only view for people outside the group (5); the rest of the app at
-phone width (6). The preview API needs a restart for `/duplicates`
-(asked digsite-1b). `shell.css` stacks overrides; ~20 inline SVGs sit
-outside `Icon`. Biome does not catch a hook after an early return.
+Open, needing the user: a read-only view for people outside the group
+(horizon 5) is a decision about who may see what; the report covers
+showing the work meanwhile. Also open: `shell.css` stacks overrides; the
+shell's and group pages' inline SVGs (drawn on 16- and 24-unit grids)
+sit outside `Icon`. Biome does not catch a hook after an early return.
 
 ## Server roadmap (2026-09-23)
 
