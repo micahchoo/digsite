@@ -63,13 +63,22 @@ levels off:
 | 0.1.100 | 235 | 269 | 291 | 317 | 344 MB | 0.09 MB |
 | 1.0.9 | 265 | 301 | 348 | 399 | 442 MB | 0.15 MB |
 
-1.0.9 leaks about 60% faster on the paint path, so the decode fix (which
-the libvips fence already covers) does not pay for it. The upgrade is not
-taken.
+That looked like a leak on both versions. It is not. The same harness
+with the page cache off (`LADDER_BUDGET_MB=0`) levels off:
 
-The same table shows a problem on the current version: a steady 0.09 MB
-per painted image, about 1.8 GB over a 20,000-file import. The
-harness's "under 128 MB at 600" hides it. Today the worker's retirement
-at WORKER_RSS_LIMIT_MB (worker-is-disposable.md) contains it. Roadmap
-C11 tracks it: bisect by removing one step of the harness at a time, and
-judge by the slope from 300 to 1,500, never by the delta at 600.
+| RSS, page cache off | 300 | 600 | 1,200 | 1,800 | 3,000 images |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0.1.100 | 224 | 230 | 243 | 246 | 251 MB |
+| 1.0.9 (to 1,500) | 202 | 202 | 215 | — | — |
+
+The slope was the ladder's resident pages filling up, as budgeted: the
+harness paints about 94 new 128-px pages per 1,500 images, and the 4 GB
+default keeps them all. What differs between the versions is the cost of
+a resident page. 1.0.9 costs about 1.6 times as much as 0.1.100, and
+`CANVAS_OVERHEAD_FACTOR` (ladder.ts) is calibrated for 0.1.100. Under
+1.0.9 the budget would undercount by that much.
+
+So the upgrade is not taken now. The decode fix it brings is already
+fenced by libvips, and taking it means first calibrating the overhead
+factor again under 1.0.9 and rerunning the pan soak. Roadmap C11, opened
+from the first table, is closed as not a leak.

@@ -37,10 +37,12 @@ fill, put page, put cell, encode) holds flat on 0.1.100 and on 1.0.9
 (`docs/measurements/canvas-c7.md`). Do not report it upstream until a
 bisect of `scripts/repro-paint-ladder-import.ts` names the step.
 
-**Judge a harness by its slope, not its delta.** At 600 images the import
-harness passes on 0.1.100 (+48 MB) while growing a steady 0.09 MB an
-image to 1,500 (roadmap C11); 1.0.9 grows 0.15, which is why it is not
-installed (`docs/measurements/canvas-c7.md`).
+**Run a harness with `LADDER_BUDGET_MB=0` before calling a slope a
+leak.** With the default budget the import harness grows 0.09 MB an image
+to 1,500 images, which is resident pages filling up as budgeted. With
+the cache off it levels off near 250 MB (`docs/measurements/canvas-c7.md`,
+roadmap C11). Upgrading past 0.1.x means calibrating
+`CANVAS_OVERHEAD_FACTOR` again: a 1.0.9 page costs about 1.6x as much.
 
 ## What must stay true
 
