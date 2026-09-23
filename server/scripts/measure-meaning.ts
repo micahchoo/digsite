@@ -8,6 +8,7 @@
 // worker's embed job does), then times similarTo and searchText.
 import type { Sort } from '@digsite/shared/board/sort';
 import { originalKey } from '../src/boards/paths.ts';
+import { buildOf } from '../src/boards/ranks.ts';
 import { pool } from '../src/db/pool.ts';
 import { embedImage } from '../src/meaning/clip.ts';
 import { MODEL, toVectorText } from '../src/meaning/model.ts';
@@ -58,7 +59,8 @@ const perImage = (performance.now() - t) / rows.length;
 
 const anchor = rows[0];
 t = performance.now();
-const similar = (await similarTo(boardId, anchor.id, sort, 5)) ?? [];
+const build = await buildOf(boardId, sort);
+const similar = (await similarTo(build, anchor.id, 5)) ?? [];
 const similarMs = performance.now() - t;
 const names = new Map(rows.map((row) => [row.id, row.name]));
 
@@ -67,7 +69,7 @@ for (const query of queries.length
   ? queries
   : ['a white crystal', 'a red car']) {
   t = performance.now();
-  const matches = await searchText(boardId, query, sort, 3);
+  const matches = await searchText(build, query, 3);
   texts.push({
     query,
     ms: Math.round(performance.now() - t),

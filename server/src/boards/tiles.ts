@@ -16,7 +16,7 @@ import { Semaphore } from '../util/semaphore.ts';
 import { getResidentTile, loadResidentSortFromDisk } from './coarse-cache.ts';
 import { getPage, withPage } from './ladder.ts';
 import { coarseTilesPrefix } from './paths.ts';
-import { ensureRank, rankOrder, slotsForTile } from './ranks.ts';
+import { buildOf, ensureRank, slotsForTile } from './ranks.ts';
 import {
   composedGeneration,
   getComposedTile,
@@ -273,8 +273,9 @@ export async function tileFor(
   const since = composedGeneration(boardId);
   // One order for the slots and the version, so the pixels are that
   // build's and no other.
-  const order = await rankOrder(boardId, sort);
-  const slots = await slotsForTile(boardId, sort, z, x, y, order);
+  const build = await buildOf(boardId, sort);
+  const { order } = build;
+  const slots = slotsForTile(build, z, x, y);
   const pendingSlots = await pendingSlotsFor(boardId, slots);
   const rankMs = performance.now() - rankStart;
 

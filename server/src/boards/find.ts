@@ -8,7 +8,7 @@ import { SHEET_LIMIT } from '@digsite/shared/sheet/elements';
 import { termsMeaning } from '@digsite/shared/sheet/sense';
 import { pool } from '../db/pool.ts';
 import { type FilterClause, buildFilterSql } from './filter.ts';
-import { type RankOrder, rankOf, rankOrder } from './ranks.ts';
+import { type Build, rankOf } from './ranks.ts';
 import { aliasesOf } from './vocabulary.ts';
 
 /** Matches by what sheets have claimed about an image (CONTEXT.md "Making
@@ -32,16 +32,11 @@ export function containsPattern(term: string): string {
 export type FindResult = { ranks: number[]; imageIds: string[]; count: number };
 
 export async function findRanks(
-  boardId: string,
-  sort: Sort,
+  { boardId, order }: Build,
   q: string | null,
   filter: FilterClause[],
   claims: ClaimFilter = {},
-  /** The order to rank by, when the caller names its build (C3). */
-  given?: RankOrder,
 ): Promise<FindResult> {
-  const order = given ?? (await rankOrder(boardId, sort));
-
   const params: unknown[] = [boardId];
   const conditions: string[] = [];
 

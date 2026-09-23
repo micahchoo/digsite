@@ -21,7 +21,7 @@ import { DEFAULT_SORT, sortId } from '@digsite/shared/board/sort';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { ladderCells, paintLadder, paintLadderMany } from '../boards/ladder.ts';
 import { materialiseSort, tileGrid } from '../boards/materialise.ts';
-import { ensureRank, slotsForTile } from '../boards/ranks.ts';
+import { buildOf, ensureRank, slotsForTile } from '../boards/ranks.ts';
 import {
   composeTile,
   materialisedTileKey,
@@ -197,7 +197,7 @@ describe('materialise', () => {
       if (!bytes) throw new Error(`materialised tile missing: ${key}`);
       const scattered = Buffer.from(bytes);
 
-      const slots = await slotsForTile(boardId, DEFAULT_SORT, z, x, y);
+      const slots = slotsForTile(await buildOf(boardId, DEFAULT_SORT), z, x, y);
       const pendingSlots = await pendingSlotsFor(boardId, slots);
       const composed = await composeTile(
         boardId,

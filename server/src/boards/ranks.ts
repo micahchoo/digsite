@@ -65,6 +65,25 @@ export function orderToken(version: string): string {
   return createHash('sha256').update(version).digest('base64url').slice(0, 16);
 }
 
+/** One build of one sort, as a request holds it (CONTEXT.md "Build
+ * token"). Every answer in ranks takes one as its first argument, so an
+ * answer cannot span two builds: before this, the guarantee rested on an
+ * optional `given?: RankOrder` threaded through each reader, and leaving
+ * it out compiled and silently read a second build (roadmap C3). */
+export type Build = {
+  boardId: string;
+  sort: Sort;
+  order: RankOrder;
+  /** orderToken(order.version): what X-Order-Version and `?v=` carry. */
+  token: string;
+};
+
+/** The current build of (board, sort), rebuilt first if needed. */
+export async function buildOf(boardId: string, sort: Sort): Promise<Build> {
+  const order = await rankOrder(boardId, sort);
+  return { boardId, sort, order, token: orderToken(order.version) };
+}
+
 export function rankOf(order: RankOrder, slot: number): number {
   return slot < order.rankOfSlot.length ? (order.rankOfSlot[slot] ?? -1) : -1;
 }
@@ -293,16 +312,12 @@ export async function rankOrder(
   return order;
 }
 
-export async function slotsForTile(
-  boardId: string,
-  sort: Sort,
+export function slotsForTile(
+  { order }: Build,
   z: Zoom,
   x: number,
   y: number,
-  /** The order to read, when the caller must know which build it was. */
-  given?: RankOrder,
-): Promise<(number | null)[]> {
-  const order = given ?? (await rankOrder(boardId, sort));
+): (number | null)[] {
   return tileRanks(z, x, y).map((rank) =>
     rank >= 0 && rank < order.slotOfRank.length
       ? (order.slotOfRank[rank] as number)
@@ -334,14 +349,11 @@ async function idsForSlots(
  * ranks to the client). `fromRank`/`toRank` may arrive in either order (a
  * drag can run either direction) — normalised here. */
 export async function imageIdsInRankRange(
-  boardId: string,
-  sort: Sort,
+  { boardId, order }: Build,
   fromRank: number,
   toRank: number,
   cap: number,
-  given?: RankOrder,
 ): Promise<string[]> {
-  const order = given ?? (await rankOrder(boardId, sort));
   const lo = Math.max(0, Math.min(fromRank, toRank));
   const hi = Math.min(Math.max(fromRank, toRank), order.slotOfRank.length - 1);
   if (hi < lo) return [];
@@ -353,14 +365,11 @@ export async function imageIdsInRankRange(
  * and `toRank`. Unlike a linear rank range, cells outside the rectangle on
  * intervening rows are excluded. The caller supplies the result cap. */
 export async function imageIdsInRankBand(
-  boardId: string,
-  sort: Sort,
+  { boardId, order }: Build,
   fromRank: number,
   toRank: number,
   cap: number,
-  given?: RankOrder,
 ): Promise<string[]> {
-  const order = given ?? (await rankOrder(boardId, sort));
   const fromCol = fromRank % COLS;
   const toCol = toRank % COLS;
   const loCol = Math.min(fromCol, toCol);
@@ -381,13 +390,10 @@ export async function imageIdsInRankBand(
 /** Images in rank order, for `GET /boards/:id/images` — the click-to-image
  * lookup and the sheet-member picker both page through this. */
 export async function imagesInRankOrder(
-  boardId: string,
-  sort: Sort,
+  { boardId, order }: Build,
   from: number,
   count: number,
-  given?: RankOrder,
 ): Promise<{ rank: number; imageId: string }[]> {
-  const order = given ?? (await rankOrder(boardId, sort));
   const start = Math.max(0, from);
   const slots = [
     ...order.slotOfRank.subarray(

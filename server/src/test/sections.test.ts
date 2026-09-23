@@ -2,7 +2,7 @@
 // sections with the right rank ranges under p.number.year.asc.
 import { describe, expect, test } from 'bun:test';
 import type { Sort } from '@digsite/shared/board/sort';
-import { ensureRank } from '../boards/ranks.ts';
+import { buildOf, ensureRank } from '../boards/ranks.ts';
 import { sectionsFor } from '../boards/sections.ts';
 import { pool } from '../db/pool.ts';
 
@@ -44,7 +44,9 @@ describe('sections', () => {
     ]);
 
     await ensureRank(boardId, YEAR_SORT);
-    const { sections, truncated } = await sectionsFor(boardId, YEAR_SORT);
+    const { sections, truncated } = await sectionsFor(
+      await buildOf(boardId, YEAR_SORT),
+    );
 
     expect(truncated).toBe(false);
     expect(sections.length).toBe(6);
@@ -82,7 +84,7 @@ describe('sections', () => {
     ]);
 
     await ensureRank(boardId, YEAR_SORT);
-    const { sections } = await sectionsFor(boardId, YEAR_SORT);
+    const { sections } = await sectionsFor(await buildOf(boardId, YEAR_SORT));
 
     expect(sections.length).toBe(2);
     const [withYear, missing] = sections;

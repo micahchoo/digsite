@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { parseSortId, sortId } from '@digsite/shared/board/sort';
 import { findRanks } from '../boards/find.ts';
+import { buildOf } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 
 const boardId = crypto.randomUUID();
@@ -89,8 +90,7 @@ describe('find and typed property sorts', () => {
     });
 
     const byDate = await findRanks(
-      boardId,
-      requireSort('p.date.day.asc'),
+      await buildOf(boardId, requireSort('p.date.day.asc')),
       null,
       [],
     );
@@ -99,10 +99,9 @@ describe('find and typed property sorts', () => {
 
     // Concurrent searches agree on substring matching, including an interior
     // term, and a trigram index serves it (0022_image_search_text.sql).
+    const byDay = await buildOf(boardId, requireSort('p.date.day.asc'));
     const searches = await Promise.all(
-      Array.from({ length: 10 }, () =>
-        findRanks(boardId, requireSort('p.date.day.asc'), 'lph', []),
-      ),
+      Array.from({ length: 10 }, () => findRanks(byDay, 'lph', [])),
     );
     for (const result of searches) {
       expect(result.imageIds).toEqual([alphaId]);
@@ -114,8 +113,7 @@ describe('find and typed property sorts', () => {
     expect(indexes).toHaveLength(1);
 
     const matching = await findRanks(
-      boardId,
-      requireSort('p.list.tags.asc'),
+      await buildOf(boardId, requireSort('p.list.tags.asc')),
       null,
       [
         { key: 'year', op: 'between', value: [1980, 1990] },
@@ -128,8 +126,7 @@ describe('find and typed property sorts', () => {
     expect(matching.ranks).toHaveLength(1);
 
     const empty = await findRanks(
-      boardId,
-      requireSort('uploaded_at.desc'),
+      await buildOf(boardId, requireSort('uploaded_at.desc')),
       null,
       [{ key: 'site', op: 'eq', value: 'missing' }],
     );

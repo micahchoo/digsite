@@ -10,7 +10,7 @@
 // and lands in one trailing section labelled "—".
 import { type Sort, sortId } from '@digsite/shared/board/sort';
 import { pool } from '../db/pool.ts';
-import { type RankOrder, orderExpr, rankOrder } from './ranks.ts';
+import { type Build, type RankOrder, orderExpr } from './ranks.ts';
 
 const CAP = 500;
 
@@ -35,16 +35,14 @@ type Sections = { sections: Section[]; truncated: boolean };
 const memo = new Map<string, { version: string; result: Sections }>();
 const MEMO_ENTRIES = 256;
 
-export async function sectionsFor(
-  boardId: string,
-  sort: Sort,
-  /** The order to walk, when the caller names its build (C3). */
-  given?: RankOrder,
-): Promise<Sections> {
+export async function sectionsFor({
+  boardId,
+  sort,
+  order,
+}: Build): Promise<Sections> {
   // Every meaning position is distinct: a section per value would be one
   // per image. None until the arrangement's top groups become sections.
   if (sort.key === 'meaning') return { sections: [], truncated: false };
-  const order = given ?? (await rankOrder(boardId, sort));
   const key = `${boardId}:${sortId(sort)}`;
   const hit = memo.get(key);
   if (hit && hit.version === order.version) return hit.result;

@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test';
 // are tested without downloading CLIP. The model itself is exercised by the
 // stage-4 measurement (scripts/measure-meaning.ts).
 import type { Sort } from '@digsite/shared/board/sort';
+import { buildOf } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 import { MODEL, toVectorText } from '../meaning/model.ts';
 import { nearest, similarTo } from '../meaning/search.ts';
@@ -62,7 +63,11 @@ describe('meaning', () => {
       [0, 0.9, 0.1],
       [0.1, 0, 1],
     ]);
-    const matches = await nearest(boardId, byName, vector([1, 0, 0]), 3);
+    const matches = await nearest(
+      await buildOf(boardId, byName),
+      vector([1, 0, 0]),
+      3,
+    );
     expect(matches.map((m) => m.imageId).sort()).toEqual([...ids].sort());
   });
 
@@ -74,7 +79,11 @@ describe('meaning', () => {
       [0.7, 0.7, 0],
       [0, 0, 1],
     ]);
-    const matches = await nearest(boardId, byName, vector([1, 0, 0]), 3);
+    const matches = await nearest(
+      await buildOf(boardId, byName),
+      vector([1, 0, 0]),
+      3,
+    );
     expect(matches.map((m) => m.imageId)).toEqual(pick(ids, [0, 1, 3]));
     // name.asc reverses slots: slot s is rank (4 - s) of five.
     expect(matches.map((m) => m.rank)).toEqual([4, 3, 1]);
@@ -87,10 +96,14 @@ describe('meaning', () => {
       [0.8, 0.2],
       [0, 1],
     ]);
-    const matches = await similarTo(boardId, ids[0] as string, byName, 10);
+    const matches = await similarTo(
+      await buildOf(boardId, byName),
+      ids[0] as string,
+      10,
+    );
     expect(matches?.map((m) => m.imageId)).toEqual(pick(ids, [1, 2]));
     expect(
-      await similarTo(boardId, crypto.randomUUID(), byName, 10),
+      await similarTo(await buildOf(boardId, byName), crypto.randomUUID(), 10),
     ).toBeNull();
   });
 });

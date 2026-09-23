@@ -5,6 +5,7 @@
 // SQL and through the real save path, like snapshot.test.ts.
 import { describe, expect, test } from 'bun:test';
 import { findRanks } from '../boards/find.ts';
+import { buildOf } from '../boards/ranks.ts';
 import {
   aliasesOf,
   deleteAlias,
@@ -211,14 +212,19 @@ describe('making sense', () => {
     const { boardId, a, b, c, d } = await makeFixture();
     const sort = { key: 'name' as const, dir: 'asc' as const };
 
-    const roof = await findRanks(boardId, sort, null, [], {
+    const roof = await findRanks(await buildOf(boardId, sort), null, [], {
       label: 'roofline',
     });
     expect(roof.imageIds).toEqual([a]);
     await putAlias(boardId, 'label', 'roof line', 'roofline', 'tester');
-    const roofAliased = await findRanks(boardId, sort, null, [], {
-      label: 'roofline',
-    });
+    const roofAliased = await findRanks(
+      await buildOf(boardId, sort),
+      null,
+      [],
+      {
+        label: 'roofline',
+      },
+    );
     expect(roofAliased.imageIds.sort()).toEqual([a, c].sort());
 
     await putAlias(
@@ -228,12 +234,12 @@ describe('making sense', () => {
       'same place',
       'tester',
     );
-    const place = await findRanks(boardId, sort, null, [], {
+    const place = await findRanks(await buildOf(boardId, sort), null, [], {
       relation: 'same place',
     });
     expect(place.imageIds.sort()).toEqual([a, b, c].sort());
 
-    const annotated = await findRanks(boardId, sort, null, [], {
+    const annotated = await findRanks(await buildOf(boardId, sort), null, [], {
       annotated: true,
     });
     expect(annotated.imageIds.sort()).toEqual([a, b, c, d].sort());

@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test';
 // are literal.
 import type { Sort } from '@digsite/shared/board/sort';
 import { containsPattern, findRanks } from '../boards/find.ts';
+import { buildOf } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 
 const byName: Sort = { key: 'name', dir: 'asc' };
@@ -35,7 +36,7 @@ async function board(
 }
 
 async function names(boardId: string, q: string): Promise<string[]> {
-  const found = await findRanks(boardId, byName, q, []);
+  const found = await findRanks(await buildOf(boardId, byName), q, []);
   const { rows } = await pool.query(
     'SELECT id, name FROM images WHERE id = ANY($1::uuid[])',
     [found.imageIds],

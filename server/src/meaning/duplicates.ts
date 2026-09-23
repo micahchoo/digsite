@@ -17,9 +17,8 @@ import type { MeaningMatch } from '@digsite/shared/api';
 // counting the bars would halve every share. The ladder already holds the
 // 128-px cell for every image, so this costs no storage.
 import { LADDER, ladderAddress } from '@digsite/shared/board/ladder';
-import type { Sort } from '@digsite/shared/board/sort';
 import { withPage } from '../boards/ladder.ts';
-import type { RankOrder } from '../boards/ranks.ts';
+import type { Build } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 import { similarTo } from './search.ts';
 
@@ -68,12 +67,11 @@ export function changedFraction(a: Uint8Array, b: Uint8Array): number {
 /** Near-duplicates of `imageId` on its board, most similar first. Null when
  * the image is not embedded yet. `score` is the CLIP similarity. */
 export async function duplicatesOf(
-  boardId: string,
+  build: Build,
   imageId: string,
-  sort: Sort,
-  given?: RankOrder,
 ): Promise<MeaningMatch[] | null> {
-  const near = await similarTo(boardId, imageId, sort, CANDIDATES, given);
+  const { boardId } = build;
+  const near = await similarTo(build, imageId, CANDIDATES);
   if (near === null) return null;
   const candidates = near.filter((m) => m.score >= MIN_SIMILARITY);
   if (candidates.length === 0) return [];

@@ -6,6 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Sort } from '@digsite/shared/board/sort';
 import sharp from 'sharp';
 import { paintLadder } from '../boards/ladder.ts';
+import { buildOf } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
 import { changedFraction, duplicatesOf } from '../meaning/duplicates.ts';
 import { MODEL, toVectorText } from '../meaning/model.ts';
@@ -96,7 +97,10 @@ describe('duplicates', () => {
       // The same pixels, but meaning says otherwise: never reaches pixels.
       { bytes: base, cos: 0.9 },
     ]);
-    const found = await duplicatesOf(boardId, ids[0] as string, byName);
+    const found = await duplicatesOf(
+      await buildOf(boardId, byName),
+      ids[0] as string,
+    );
     expect(found?.map((m) => m.imageId)).toEqual([ids[1] as string]);
   });
 
@@ -104,6 +108,8 @@ describe('duplicates', () => {
     const { boardId } = await boardWith([
       { bytes: await screenshot(), cos: 1 },
     ]);
-    expect(await duplicatesOf(boardId, crypto.randomUUID(), byName)).toBeNull();
+    expect(
+      await duplicatesOf(await buildOf(boardId, byName), crypto.randomUUID()),
+    ).toBeNull();
   });
 });

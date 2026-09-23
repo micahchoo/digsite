@@ -115,7 +115,8 @@ import { withPage } from './ladder.ts';
 import { originalKey, previewKey } from './paths.ts';
 import { isProperties } from './properties.ts';
 import {
-  type RankOrder,
+  type Build,
+  buildOf,
   ensureRank,
   forceRebuildRank,
   imageIdsInRankBand,
@@ -123,7 +124,6 @@ import {
   imagesInRankOrder,
   orderToken,
   rankOf,
-  rankOrder,
 } from './ranks.ts';
 import { sectionsFor } from './sections.ts';
 import { tileFor } from './tiles.ts';
@@ -346,8 +346,8 @@ function parseSortOrDefault(id: string | null): Sort {
 /** Roadmap C3: every answer in ranks names the order build it used, as
  * the token a tile URL carries (`?v=`). A client that sees a token change
  * refetches what it holds in ranks; the tiles follow by URL. */
-function sayOrder(res: ServerResponse, order: RankOrder): void {
-  res.setHeader('X-Order-Version', orderToken(order.version));
+function sayOrder(res: ServerResponse, build: Build): void {
+  res.setHeader('X-Order-Version', build.token);
 }
 
 export function registerBoardRoutes(router: Router) {
@@ -847,8 +847,8 @@ export function registerBoardRoutes(router: Router) {
         const response: ListBoardImagesByIdsResponse = { images: [] };
         return json(ctx.res, 200, response);
       }
-      const order = await rankOrder(boardId, sort);
-      sayOrder(ctx.res, order);
+      const build = await buildOf(boardId, sort);
+      sayOrder(ctx.res, build);
       const { rows } = await pool.query(
         'SELECT * FROM images WHERE board_id = $1 AND id = ANY($2::uuid[])',
         [boardId, wanted],
@@ -859,7 +859,7 @@ export function registerBoardRoutes(router: Router) {
         .filter((r): r is NonNullable<typeof r> => !!r)
         .map((r) => {
           // Uploaded after this build: not on the map yet, so no rank.
-          const rank = rankOf(order, r.slot);
+          const rank = rankOf(build.order, r.slot);
           return { ...toBoardImage(r), rank: rank < 0 ? undefined : rank };
         });
       const response: ListBoardImagesByIdsResponse = { images };
@@ -871,9 +871,9 @@ export function registerBoardRoutes(router: Router) {
       Number(ctx.url.searchParams.get('count') ?? '50'),
       500,
     );
-    const order = await rankOrder(boardId, sort);
-    sayOrder(ctx.res, order);
-    const ranked = await imagesInRankOrder(boardId, sort, from, count, order);
+    const build = await buildOf(boardId, sort);
+    sayOrder(ctx.res, build);
+    const ranked = await imagesInRankOrder(build, from, count);
     const ids = ranked.map((r) => r.imageId);
     if (ids.length === 0) {
       const response: ListBoardImagesResponse = { images: [] };
@@ -1161,13 +1161,9 @@ export function registerBoardRoutes(router: Router) {
     const boardId = param(ctx, 'id');
     await boardForViewing(userId, boardId);
     const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
-    const order = await rankOrder(boardId, sort);
-    sayOrder(ctx.res, order);
-    const response: GetSectionsResponse = await sectionsFor(
-      boardId,
-      sort,
-      order,
-    );
+    const build = await buildOf(boardId, sort);
+    sayOrder(ctx.res, build);
+    const response: GetSectionsResponse = await sectionsFor(build);
     json(ctx.res, 200, response);
   });
 
@@ -1350,28 +1346,24 @@ export function registerBoardRoutes(router: Router) {
     // C3: the ranks were read off a map showing build `v`. If the order
     // has moved on, the same ranks are other images: refuse, and name the
     // build the client should refetch.
-    const order = await rankOrder(boardId, sort);
-    sayOrder(ctx.res, order);
-    if (body.v !== undefined && body.v !== orderToken(order.version)) {
+    const build = await buildOf(boardId, sort);
+    sayOrder(ctx.res, build);
+    if (body.v !== undefined && body.v !== build.token) {
       return json(ctx.res, 409, { error: 'the order has changed' });
     }
     const imageIds =
       body.mode === 'band'
         ? await imageIdsInRankBand(
-            boardId,
-            sort,
+            build,
             body.fromRank,
             body.toRank,
             SHEET_LIMIT,
-            order,
           )
         : await imageIdsInRankRange(
-            boardId,
-            sort,
+            build,
             body.fromRank,
             body.toRank,
             SELECTION_CAP,
-            order,
           );
     const response: SelectionRangeResponse = { imageIds };
     json(ctx.res, 200, response);
@@ -1419,20 +1411,13 @@ export function registerBoardRoutes(router: Router) {
           error: 'label and relation must be at most 200 characters',
         });
       }
-      const order = await rankOrder(boardId, sort);
-      const { ranks, imageIds, count } = await findRanks(
-        boardId,
-        sort,
-        q,
-        filter,
-        {
-          ...(label ? { label } : {}),
-          ...(relation ? { relation } : {}),
-          annotated: ctx.url.searchParams.get('annotated') === '1',
-        },
-        order,
-      );
-      sayOrder(ctx.res, order);
+      const build = await buildOf(boardId, sort);
+      const { ranks, imageIds, count } = await findRanks(build, q, filter, {
+        ...(label ? { label } : {}),
+        ...(relation ? { relation } : {}),
+        annotated: ctx.url.searchParams.get('annotated') === '1',
+      });
+      sayOrder(ctx.res, build);
       const response: FindBoardResponse = { ranks, imageIds, count };
       json(ctx.res, 200, response);
     } catch (err) {
@@ -1468,18 +1453,12 @@ export function registerBoardRoutes(router: Router) {
   for (const [path, find] of [
     [
       '/boards/:id/similar',
-      (
-        boardId: string,
-        image: string,
-        sort: Sort,
-        order: RankOrder,
-        ctx: { url: URL },
-      ) => similarTo(boardId, image, sort, meaningLimit(ctx), order),
+      (build: Build, image: string, ctx: { url: URL }) =>
+        similarTo(build, image, meaningLimit(ctx)),
     ],
     [
       '/boards/:id/duplicates',
-      (boardId: string, image: string, sort: Sort, order: RankOrder) =>
-        duplicatesOf(boardId, image, sort, order),
+      (build: Build, image: string) => duplicatesOf(build, image),
     ],
   ] as const) {
     router.get(path, async (ctx) => {
@@ -1500,9 +1479,9 @@ export function registerBoardRoutes(router: Router) {
         return json(ctx.res, 400, { error: 'image is not on this board' });
       }
       const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
-      const order = await rankOrder(boardId, sort);
-      sayOrder(ctx.res, order);
-      const matches = await find(boardId, image, sort, order, ctx);
+      const build = await buildOf(boardId, sort);
+      sayOrder(ctx.res, build);
+      const matches = await find(build, image, ctx);
       if (matches === null) {
         return json(ctx.res, 409, { error: 'image is not embedded yet' });
       }
@@ -1552,10 +1531,10 @@ export function registerBoardRoutes(router: Router) {
       return json(ctx.res, 400, { error: 'text must be 1 to 200 characters' });
     }
     const sort = parseSortOrDefault(ctx.url.searchParams.get('sort'));
-    const order = await rankOrder(boardId, sort);
-    sayOrder(ctx.res, order);
+    const build = await buildOf(boardId, sort);
+    sayOrder(ctx.res, build);
     const response: MeaningResponse = {
-      matches: await searchText(boardId, text, sort, meaningLimit(ctx), order),
+      matches: await searchText(build, text, meaningLimit(ctx)),
     };
     return json(ctx.res, 200, response);
   });

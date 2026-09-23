@@ -43,9 +43,10 @@ take it back.
   `no-store`, never `immutable`.
 - **A tile with a pending cell is not final**, and is never `immutable`.
 - **Every answer in ranks sets `X-Order-Version`** (`routes.ts#sayOrder`)
-  from the one order it read, passed down as `given`. A new rank reader
-  takes `given?: RankOrder`. Reading the order a second time can mix two
-  builds in one answer, which is C3.
+  from one `Build` (`ranks.ts#buildOf`), fetched once per request and
+  passed as the required first argument of every rank reader. A new rank
+  reader takes a `Build`, never a board and a sort: reading the order a
+  second time can mix two builds in one answer, which is C3.
 
 Verify with `cd server && bun test order-version tile-version invalidation`.
 The barrier test in `invalidation.test.ts` fails without `catchUp`.

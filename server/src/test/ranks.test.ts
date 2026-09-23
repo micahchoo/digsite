@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test';
 import { type Sort, sortId } from '@digsite/shared/board/sort';
 import {
+  buildOf,
   ensureRank,
   forceRebuildRank,
   imageIdsInRankBand,
@@ -68,8 +69,18 @@ describe('ranks', () => {
     const sort: Sort = { key: 'name', dir: 'asc' };
     await ensureRank(boardId, sort);
 
-    const forward = await imageIdsInRankBand(boardId, sort, 0, 18, 150);
-    const reverse = await imageIdsInRankBand(boardId, sort, 18, 0, 150);
+    const forward = await imageIdsInRankBand(
+      await buildOf(boardId, sort),
+      0,
+      18,
+      150,
+    );
+    const reverse = await imageIdsInRankBand(
+      await buildOf(boardId, sort),
+      18,
+      0,
+      150,
+    );
     const order = await slotsInOrder(boardId, sort);
     const expected = await idsAtSlots(
       boardId,
@@ -78,7 +89,12 @@ describe('ranks', () => {
     expect(forward).toEqual(expected);
     expect(reverse).toEqual(forward);
 
-    const capped = await imageIdsInRankBand(boardId, sort, 0, 255, 150);
+    const capped = await imageIdsInRankBand(
+      await buildOf(boardId, sort),
+      0,
+      255,
+      150,
+    );
     expect(capped).toHaveLength(150);
     const { rows: cappedRows } = await pool.query(
       'SELECT slot FROM images WHERE id = ANY($1::uuid[])',
@@ -88,7 +104,9 @@ describe('ranks', () => {
     expect(
       cappedRows.map((row) => rankOf(decoded, row.slot)).sort((a, b) => a - b),
     ).toEqual(Array.from({ length: 150 }, (_, rank) => rank));
-    expect(await imageIdsInRankBand(boardId, sort, 300, 302, 150)).toEqual([]);
+    expect(
+      await imageIdsInRankBand(await buildOf(boardId, sort), 300, 302, 150),
+    ).toEqual([]);
   });
 
   test('ranks are a permutation of slots; property sort NULLS LAST; stale marks a rebuild', async () => {
