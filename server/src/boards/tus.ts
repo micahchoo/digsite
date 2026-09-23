@@ -59,6 +59,7 @@ export const tusServer = new Server({
     'Upload-Length',
     'Tus-Resumable',
     'Location',
+    'Upload-Image-Id',
   ],
 
   generateUrl: (req, { id }) => {
@@ -141,8 +142,10 @@ export const tusServer = new Server({
       throw { status_code: result.status, body: `${result.reason}\n` };
     }
 
-    const contentType = upload.metadata?.filetype || 'application/octet-stream';
-    await uploadOne(
+    // Use the verified bytes, not optional client metadata. S3 preserves this
+    // type when the original is later served through a signed URL.
+    const contentType = `image/${result.type}`;
+    const image = await uploadOne(
       meta.boardId,
       meta.userId,
       filename,
@@ -152,6 +155,6 @@ export const tusServer = new Server({
     );
     await fileStore.remove(upload.id).catch(() => {});
 
-    return {};
+    return { headers: { 'Upload-Image-Id': image.id } };
   },
 });

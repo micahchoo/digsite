@@ -401,7 +401,7 @@ const SHEET_BOARD: Record<string, string> = { s1: 'b1', s2: 'b1' };
 const SHEET_CREATOR: Record<string, UserKey> = { s1: 'member', s2: 'listed' };
 let sheetSeq = 3;
 
-// biome-ignore lint/suspicious/noExplicitAny: minimal Excalidraw skeletons; restoreElements fills the rest client-side
+// biome-ignore lint/suspicious/noExplicitAny: minimal scene fixtures; the canvas fills optional fields client-side
 const el = (partial: Record<string, unknown>): any => ({
   version: 1,
   versionNonce: 1,
@@ -1137,6 +1137,38 @@ const httpServer = createServer(async (req, res) => {
         userId: USERS[k].id,
       })),
     );
+  }
+
+  const uploadStatuses = url.pathname.match(
+    /^\/boards\/([^/]+)\/images\/status$/,
+  );
+  if (uploadStatuses && req.method === 'POST') {
+    const user = sessionUser(req.headers.cookie);
+    if (!user) return json(401, { reason: 'sign in required' });
+    const boardId = uploadStatuses[1] ?? '';
+    const denied = boardForViewing(user, boardId);
+    if (denied) return json(403, denied);
+    const body = await readJson<{ ids?: unknown } | null>();
+    if (
+      !Array.isArray(body?.ids) ||
+      body.ids.length > 500 ||
+      !body.ids.every((id) => typeof id === 'string')
+    ) {
+      return json(400, { reason: 'ids must contain at most 500 image IDs' });
+    }
+    const byId = new Map(
+      images
+        .filter((image) => image.boardId === boardId)
+        .map((image) => [image.id, image]),
+    );
+    return json(200, {
+      images: body.ids.flatMap((id) => {
+        const image = byId.get(id);
+        return image
+          ? [{ id, status: image.status, error: image.error ?? null }]
+          : [];
+      }),
+    });
   }
 
   const boardImages = url.pathname.match(/^\/boards\/([^/]+)\/images$/);

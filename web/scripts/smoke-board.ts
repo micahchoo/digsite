@@ -291,7 +291,7 @@ async function main() {
     releaseSecondBatch = resolve;
   });
   let postBatches = 0;
-  await page.route('**/boards/b1/images', async (route, request) => {
+  await page.route('**/boards/b1/images*', async (route, request) => {
     if (request.method() === 'POST' && ++postBatches === 2) {
       secondBatchStarted();
       await blocked;
@@ -325,8 +325,8 @@ async function main() {
     { timeout: 5000 },
   );
   assert(
-    await page.locator('[data-testid="board-upload-button"]').isDisabled(),
-    'upload action should remain disabled while the second batch is held',
+    await page.locator('[data-testid="board-upload-button"]').isEnabled(),
+    'upload action should stay available to add files while a batch is in flight',
   );
   const queueLayout = await page
     .locator('[data-testid="upload-rows"]')
@@ -399,7 +399,7 @@ async function main() {
     countBeforeBatch + 12,
     { timeout: 5000 },
   );
-  await page.unroute('**/boards/b1/images');
+  await page.unroute('**/boards/b1/images*');
   await page.locator('[data-testid="upload-close"]').click();
   assert(
     (await page.locator('[data-testid="upload-rows"]').count()) === 0,
@@ -410,7 +410,7 @@ async function main() {
   });
 
   // A rejected batch keeps its per-file reason visible in the bounded queue.
-  await page.route('**/boards/b1/images', async (route, request) => {
+  await page.route('**/boards/b1/images*', async (route, request) => {
     if (request.method() === 'POST') {
       await route.fulfill({
         status: 413,
@@ -437,12 +437,12 @@ async function main() {
     'failed upload row should show the returned reason',
   );
   assert(
-    (await page.locator('.board-upload-failures').innerText()).includes(
-      '1 image could not be added',
+    (await page.locator('[data-testid="upload-counts"]').innerText()).includes(
+      '1 failed',
     ),
     'upload queue should summarize failed rows',
   );
-  await page.unroute('**/boards/b1/images');
+  await page.unroute('**/boards/b1/images*');
   await page.locator('[data-testid="upload-close"]').click();
   console.log('PASS: rejected upload shows its reason and failure count');
 

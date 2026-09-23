@@ -1,240 +1,766 @@
-// The upload button's orchestration (docs/phases/1-map.md section 1, "web
-// side"). `chooseUploadMethod` is the one pure decision — tested with no
-// network, no DOM, no tus-js-client — everything else here talks to the
-// server and is exercised by the smoke script instead.
+// Upload work outlives a board page. Keep one in-memory queue per board so
+// route changes do not orphan accepted IDs or start duplicate transfers.
 import * as tus from 'tus-js-client';
-import { type ImageStatus, SERVER_ORIGIN, api } from '../lib/api.ts';
+import { ApiError, type ImageStatus, SERVER_ORIGIN, api } from '../lib/api.ts';
 
-export const TUS_THRESHOLD_BYTES = 8 * 1024 * 1024; // 8 MB
+export const TUS_THRESHOLD_BYTES = 8 * 1024 * 1024;
 export const MULTIPART_BATCH_SIZE = 10;
-export const POLL_INTERVAL_MS = 1000;
-export const POLL_TIMEOUT_MS = 60_000;
+export const POLL_INTERVAL_MS = 1500;
+export const MAX_UPLOAD_CONCURRENCY = 2;
+export const VISIBLE_UPLOAD_ROWS = 80;
 
-/** Files over 8 MB go through tus (resumable, chunked); everything else is
- * one multipart request. The boundary the button and the smoke test agree on. */
 export function chooseUploadMethod(sizeBytes: number): 'tus' | 'multipart' {
   return sizeBytes > TUS_THRESHOLD_BYTES ? 'tus' : 'multipart';
 }
 
-// 'failed' is the server's terminal state (the ladder job gave up after
-// three attempts — @digsite/shared's ImageStatus); 'error' is ours, for a
-// transport failure the server never got to answer (a rejected fetch, a
-// missing response entry).
-export type RowStatus = 'uploading' | ImageStatus | 'error';
+export type RowStatus =
+  | 'queued'
+  | 'uploading'
+  | ImageStatus
+  | 'error'
+  | 'unknown'
+  | 'canceled';
 
 export interface UploadRow {
   clientId: string;
-  file: File;
+  name: string;
+  size: number;
+  file: File | null;
   method: 'tus' | 'multipart';
   status: RowStatus;
-  progress: number; // 0..100
+  progress: number;
   imageId?: string;
   error?: string;
+  statusMisses?: number;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+export interface UploadCounts {
+  queued: number;
+  uploading: number;
+  processing: number;
+  ready: number;
+  failed: number;
+  unknown: number;
+  canceled: number;
 }
 
-/** One tus upload. The stub server does not implement /boards/:id/uploads
- * (see web/stub/server.ts) — onError there is exactly the 404/network path a
- * real server would also hit if tus were ever unreachable, so a fallback to
- * multipart is the honest behaviour for both, not a stub-only shortcut. */
-function uploadOneTus(
-  boardId: string,
+export interface UploadSnapshot {
+  boardId: string;
+  rows: UploadRow[];
+  counts: UploadCounts;
+  visible: boolean;
+  canceling: boolean;
+  message: string;
+  version: number;
+  refreshVersion: number;
+}
+
+const EMPTY_COUNTS: UploadCounts = {
+  queued: 0,
+  uploading: 0,
+  processing: 0,
+  ready: 0,
+  failed: 0,
+  unknown: 0,
+  canceled: 0,
+};
+const EMPTY_SNAPSHOT: UploadSnapshot = {
+  boardId: '',
+  rows: [],
+  counts: EMPTY_COUNTS,
+  visible: false,
+  canceling: false,
+  message: '',
+  version: 0,
+  refreshVersion: 0,
+};
+
+interface QueueSession {
+  boardId: string;
+  rows: UploadRow[];
+  counts: UploadCounts;
+  listeners: Set<() => void>;
+  snapshot: UploadSnapshot;
+  visible: boolean;
+  canceling: boolean;
+  message: string;
+  retryAt: number;
+  retryTimer: number | null;
+  retrySeconds: number;
+  activeTasks: number;
+  activeControllers: Set<AbortController>;
+  activeTus: Set<tus.Upload>;
+  nextIndex: number;
+  refreshVersion: number;
+  dirty: boolean;
+  publishTimer: number | null;
+}
+
+const sessions = new Map<string, QueueSession>();
+let activeTransfers = 0;
+let nextSessionIndex = 0;
+const UPLOADS_PER_SESSION = 2;
+const STATUS_BATCH_SIZE = 500;
+let statusWorkers = 0;
+let statusAbortController: AbortController | null = null;
+let shuttingDown = false;
+let unloadAttached = false;
+let overview: UploadOverview[] = [];
+const overviewListeners = new Set<() => void>();
+
+export interface UploadOverview {
+  boardId: string;
+  counts: UploadCounts;
+}
+
+function sessionFor(boardId: string): QueueSession {
+  let session = sessions.get(boardId);
+  if (!session) {
+    session = {
+      boardId,
+      rows: [],
+      counts: { ...EMPTY_COUNTS },
+      listeners: new Set(),
+      snapshot: EMPTY_SNAPSHOT,
+      visible: false,
+      canceling: false,
+      message: '',
+      retryAt: 0,
+      retryTimer: null,
+      retrySeconds: 0,
+      activeTasks: 0,
+      activeControllers: new Set(),
+      activeTus: new Set(),
+      nextIndex: 0,
+      refreshVersion: 0,
+      dirty: false,
+      publishTimer: null,
+    };
+    sessions.set(boardId, session);
+  }
+  return session;
+}
+
+function bucket(status: RowStatus): keyof UploadCounts {
+  if (status === 'pending') return 'processing';
+  if (status === 'error' || status === 'failed') return 'failed';
+  if (status === 'uploading') return 'uploading';
+  return status;
+}
+
+function publish(session: QueueSession, immediate = false) {
+  if (!immediate) {
+    session.dirty = true;
+    if (session.publishTimer !== null) return;
+    session.publishTimer = window.setTimeout(() => {
+      session.publishTimer = null;
+      publish(session, true);
+    }, 100);
+    return;
+  }
+  if (session.publishTimer !== null) {
+    window.clearTimeout(session.publishTimer);
+    session.publishTimer = null;
+  }
+  session.dirty = false;
+  session.snapshot = {
+    boardId: session.boardId,
+    rows: session.rows,
+    counts: { ...session.counts },
+    visible: session.visible,
+    canceling: session.canceling,
+    message: session.message,
+    version: session.snapshot.version + 1,
+    refreshVersion: session.refreshVersion,
+  };
+  for (const listener of session.listeners) listener();
+  const nextOverview = [...sessions.values()]
+    .filter(
+      (item) =>
+        item.counts.queued +
+          item.counts.uploading +
+          item.counts.processing +
+          item.counts.failed +
+          item.counts.unknown >
+        0,
+    )
+    .map((item) => ({ boardId: item.boardId, counts: { ...item.counts } }));
+  if (JSON.stringify(nextOverview) !== JSON.stringify(overview)) {
+    overview = nextOverview;
+    for (const listener of overviewListeners) listener();
+  }
+  updateBeforeUnload();
+}
+
+function updateBeforeUnload() {
+  const active = [...sessions.values()].some(
+    (session) => session.counts.queued + session.counts.uploading > 0,
+  );
+  if (active && !unloadAttached) {
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    unloadAttached = true;
+  } else if (!active && unloadAttached) {
+    window.removeEventListener('beforeunload', warnBeforeUnload);
+    unloadAttached = false;
+  }
+}
+
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  event.preventDefault();
+  event.returnValue = '';
+}
+
+function setStatus(
+  session: QueueSession,
   row: UploadRow,
-  emit: () => void,
-): Promise<'ok' | 'fallback'> {
+  next: RowStatus,
+  error?: string,
+) {
+  if (row.status !== next) {
+    session.counts[bucket(row.status)] -= 1;
+    session.counts[bucket(next)] += 1;
+    row.status = next;
+  }
+  if (error !== undefined) row.error = error;
+}
+
+export function subscribeUploadQueue(boardId: string, listener: () => void) {
+  const session = sessionFor(boardId);
+  session.listeners.add(listener);
+  return () => session.listeners.delete(listener);
+}
+
+export function getUploadSnapshot(boardId: string): UploadSnapshot {
+  return sessions.get(boardId)?.snapshot ?? EMPTY_SNAPSHOT;
+}
+
+export function subscribeUploadOverview(listener: () => void) {
+  overviewListeners.add(listener);
+  return () => overviewListeners.delete(listener);
+}
+
+export function getUploadOverview(): UploadOverview[] {
+  return overview;
+}
+
+function hasQueued(session: QueueSession) {
+  return (
+    !shuttingDown &&
+    sessions.get(session.boardId) === session &&
+    !session.canceling &&
+    session.activeTasks < UPLOADS_PER_SESSION &&
+    session.counts.queued > 0
+  );
+}
+
+function nextBatch(session: QueueSession): UploadRow[] {
+  while (
+    session.nextIndex < session.rows.length &&
+    session.rows[session.nextIndex]?.status !== 'queued'
+  ) {
+    session.nextIndex += 1;
+  }
+  const firstIndex = session.nextIndex;
+  const first = session.rows[firstIndex];
+  if (!first) return [];
+  if (first.method === 'tus') {
+    session.nextIndex += 1;
+    return [first];
+  }
+  const batch: UploadRow[] = [];
+  while (batch.length < MULTIPART_BATCH_SIZE) {
+    const row = session.rows[session.nextIndex];
+    if (!row || row.status !== 'queued' || row.method !== 'multipart') break;
+    batch.push(row);
+    session.nextIndex += 1;
+  }
+  return batch;
+}
+
+function pickSession(): QueueSession | null {
+  const now = Date.now();
+  const available = [...sessions.values()];
+  for (let offset = 0; offset < available.length; offset += 1) {
+    const index = (nextSessionIndex + offset) % available.length;
+    const session = available[index];
+    if (session && hasQueued(session) && session.retryAt <= now) {
+      nextSessionIndex = (index + 1) % available.length;
+      return session;
+    }
+  }
+  return null;
+}
+
+function scheduleRetry(session: QueueSession, seconds: number) {
+  if (session.canceling || shuttingDown) return;
+  session.retrySeconds = Math.max(1, Math.ceil(seconds));
+  session.retryAt = Date.now() + session.retrySeconds * 1000;
+  session.message = `The upload limit is reached. Waiting ${session.retrySeconds} seconds before continuing.`;
+  if (session.retryTimer !== null) window.clearInterval(session.retryTimer);
+  session.retryTimer = window.setInterval(() => {
+    const remaining = Math.max(
+      0,
+      Math.ceil((session.retryAt - Date.now()) / 1000),
+    );
+    session.retrySeconds = remaining;
+    session.message = remaining
+      ? `The upload limit is reached. Waiting ${remaining} seconds before continuing.`
+      : '';
+    publish(session, true);
+    if (!remaining && session.retryTimer !== null) {
+      window.clearInterval(session.retryTimer);
+      session.retryTimer = null;
+      pumpTransfers();
+    }
+  }, 1000);
+  publish(session, true);
+}
+
+function startTus(
+  session: QueueSession,
+  row: UploadRow,
+): Promise<{
+  id: string | null;
+  error?: string;
+  status?: number;
+  retryAfter?: number;
+  fallback?: boolean;
+}> {
+  if (!row.file)
+    return Promise.resolve({ id: null, error: 'File is unavailable.' });
   return new Promise((resolve) => {
-    const upload = new tus.Upload(row.file, {
-      endpoint: `${SERVER_ORIGIN}/boards/${boardId}/uploads`,
+    let imageId: string | null = null;
+    const upload = new tus.Upload(row.file as File, {
+      endpoint: `${SERVER_ORIGIN}/boards/${sessionBoardForRow(row)}/uploads`,
       chunkSize: 4 * 1024 * 1024,
       retryDelays: [0, 1000, 3000],
-      metadata: { filename: row.file.name, properties: '{}' },
-      // tus-js-client 4.x has no top-level `withCredentials` option (dropped
-      // when it moved to an HttpStack abstraction); the underlying object is
-      // the XHR, so this is the equivalent of the fetch wrapper's
-      // `credentials: 'include'` for every other request.ts call.
+      metadata: { filename: row.name, properties: '{}' },
       onBeforeRequest: (req) => {
         const xhr = req.getUnderlyingObject();
         if (xhr && typeof xhr === 'object' && 'withCredentials' in xhr) {
           (xhr as XMLHttpRequest).withCredentials = true;
         }
       },
+      onAfterResponse: (_req, response) => {
+        imageId = response.getHeader('Upload-Image-Id') ?? imageId;
+      },
       onProgress: (sent, total) => {
         row.progress = total ? Math.round((sent / total) * 100) : 0;
-        emit();
-      },
-      onSuccess: () => {
-        row.status = 'pending';
-        row.progress = 100;
-        emit();
-        resolve('ok');
-      },
-      onError: (error) => {
-        console.warn(
-          `[upload] tus failed for "${row.file.name}": ${error.message} — falling back to multipart`,
-        );
-        resolve('fallback');
+        const session = sessions.get(sessionBoardForRow(row));
+        if (session) publish(session);
       },
     });
+    session.activeTus.add(upload);
+    const finish = (result: {
+      id: string | null;
+      error?: string;
+      status?: number;
+      retryAfter?: number;
+      fallback?: boolean;
+    }) => {
+      session.activeTus.delete(upload);
+      resolve(result);
+    };
+    upload.options.onSuccess = () => {
+      row.progress = 100;
+      finish({ id: imageId });
+    };
+    upload.options.onError = (error) => {
+      const detailed = error as tus.DetailedError;
+      const status = detailed.originalResponse?.getStatus();
+      let retryAfter = Number(
+        detailed.originalResponse?.getHeader('Retry-After') ?? Number.NaN,
+      );
+      if (!Number.isFinite(retryAfter)) {
+        try {
+          const body = JSON.parse(
+            detailed.originalResponse?.getBody() ?? 'null',
+          ) as {
+            retryAfter?: unknown;
+          } | null;
+          if (typeof body?.retryAfter === 'number')
+            retryAfter = body.retryAfter;
+        } catch {
+          // The server may return an HTML or empty error body.
+        }
+      }
+      const fallback =
+        status === 404 &&
+        detailed.originalRequest?.getMethod() === 'POST' &&
+        imageId === null;
+      finish({
+        id: imageId,
+        error: error.message,
+        status,
+        retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined,
+        fallback,
+      });
+    };
     upload.start();
   });
 }
 
-async function uploadMultipartBatches(
-  boardId: string,
-  rows: UploadRow[],
-  emit: () => void,
-): Promise<void> {
-  for (let i = 0; i < rows.length; i += MULTIPART_BATCH_SIZE) {
-    const batch = rows.slice(i, i + MULTIPART_BATCH_SIZE);
+// UploadRow doesn't carry board identity, so task-local lookup is explicit.
+const rowBoards = new WeakMap<UploadRow, string>();
+function sessionBoardForRow(row: UploadRow) {
+  return rowBoards.get(row) ?? '';
+}
+
+async function uploadBatch(session: QueueSession, batch: UploadRow[]) {
+  for (const row of batch) setStatus(session, row, 'uploading');
+  session.message = '';
+  publish(session, true);
+  if (batch[0]?.method === 'tus') {
+    const row = batch[0];
+    if (!row) return;
+    const result = await startTus(session, row);
+    if (result.fallback) {
+      row.method = 'multipart';
+      if (session.canceling) {
+        setStatus(session, row, 'canceled');
+        row.file = null;
+      } else {
+        setStatus(session, row, 'queued');
+        session.nextIndex = Math.min(
+          session.nextIndex,
+          session.rows.indexOf(row),
+        );
+      }
+      publish(session, true);
+      return;
+    }
+    if (result.status === 429 && !result.id) {
+      if (session.canceling) {
+        setStatus(session, row, 'canceled');
+        row.file = null;
+      } else {
+        setStatus(session, row, 'queued');
+        session.nextIndex = Math.min(
+          session.nextIndex,
+          session.rows.indexOf(row),
+        );
+        scheduleRetry(session, result.retryAfter ?? 60);
+      }
+      publish(session, true);
+      return;
+    }
+    if (!result.id) {
+      setStatus(
+        session,
+        row,
+        'unknown',
+        `Could not confirm the resumable upload. Refresh the board before selecting this file again.${result.error ? ` ${result.error}` : ''}`,
+      );
+      row.file = null;
+    } else {
+      row.imageId = result.id;
+      setStatus(session, row, 'pending');
+      row.file = null;
+      scheduleStatusPoll(session);
+    }
+    publish(session, true);
+    return;
+  }
+
+  for (;;) {
+    const controller = new AbortController();
+    session.activeControllers.add(controller);
     try {
       const accepted = await api.uploadImages(
-        boardId,
-        batch.map((r) => r.file),
+        session.boardId,
+        batch.map((row) => row.file).filter((file): file is File => !!file),
+        controller.signal,
       );
-      batch.forEach((row, j) => {
-        const entry = accepted[j];
+      for (const [index, row] of batch.entries()) {
+        const entry = accepted[index];
         if (entry) {
           row.imageId = entry.id;
-          row.status = entry.status;
-          row.progress = 100;
+          setStatus(session, row, entry.status);
+          session.refreshVersion += 1;
         } else {
-          row.status = 'error';
-          row.error = 'server returned no entry for this file';
-        }
-      });
-    } catch (err) {
-      for (const row of batch) {
-        row.status = 'error';
-        row.error = err instanceof Error ? err.message : String(err);
-      }
-    }
-    emit();
-  }
-}
-
-/** Rows still `pending` have no id (a tus upload) or a real one (multipart).
- * Poll the board's newest images and match: by id when we have one, else by
- * filename — tus's own success payload carries no image id (the ingest
- * happens server-side after the protocol's PATCH completes). Server agent:
- * if the tus completion can echo the created image id back some other way,
- * this name match goes away. */
-export async function pollUntilReady(
-  boardId: string,
-  rows: UploadRow[],
-  emit: () => void,
-  options: {
-    timeoutMs?: number;
-    intervalMs?: number;
-    now?: () => number;
-    wait?: (ms: number) => Promise<void>;
-    listImages?: typeof api.listBoardImages;
-  } = {},
-): Promise<{ timedOut: boolean; confirmationUnavailable: boolean }> {
-  const now = options.now ?? Date.now;
-  const deadline = now() + (options.timeoutMs ?? POLL_TIMEOUT_MS);
-  const wait = options.wait ?? sleep;
-  const listImages = options.listImages ?? api.listBoardImages;
-  const claimed = new Set<string>();
-  for (const row of rows) if (row.imageId) claimed.add(row.imageId);
-
-  let confirmationUnavailable = false;
-  while (now() < deadline) {
-    const pending = rows.filter((r) => r.status === 'pending');
-    if (!pending.length) {
-      return { timedOut: false, confirmationUnavailable: false };
-    }
-
-    let images: Awaited<ReturnType<typeof api.listBoardImages>>['images'];
-    try {
-      ({ images } = await listImages(
-        boardId,
-        'uploaded_at.desc',
-        0,
-        Math.max(rows.length, 1),
-      ));
-      confirmationUnavailable = false;
-    } catch {
-      // The upload POST already succeeded. A failed status read says nothing
-      // about whether the server stored the files, so retry within the same
-      // bounded window instead of turning accepted rows into failures.
-      confirmationUnavailable = true;
-      await wait(options.intervalMs ?? POLL_INTERVAL_MS);
-      continue;
-    }
-    for (const row of pending) {
-      const match = row.imageId
-        ? images.find((img) => img.id === row.imageId)
-        : images.find(
-            (img) => img.name === row.file.name && !claimed.has(img.id),
+          setStatus(
+            session,
+            row,
+            'unknown',
+            'The server did not identify this image. Refresh the board before selecting this file again.',
           );
-      if (match) {
-        row.imageId = match.id;
-        row.status = match.status;
-        if (match.status === 'failed') row.error = match.error ?? undefined;
-        claimed.add(match.id);
+        }
+        row.file = null;
+      }
+      publish(session, true);
+      scheduleStatusPoll(session);
+      return;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 429) {
+        if (session.canceling || shuttingDown) {
+          for (const row of batch) {
+            setStatus(session, row, 'canceled');
+            row.file = null;
+          }
+          publish(session, true);
+          return;
+        }
+        for (const row of batch) setStatus(session, row, 'queued');
+        session.nextIndex = Math.min(
+          session.nextIndex,
+          session.rows.indexOf(batch[0] as UploadRow),
+        );
+        publish(session, true);
+        scheduleRetry(session, error.retryAfter ?? 60);
+        return;
+      }
+      const definiteRejection =
+        error instanceof ApiError && error.status >= 400 && error.status < 500;
+      for (const row of batch) {
+        setStatus(
+          session,
+          row,
+          definiteRejection ? 'error' : 'unknown',
+          definiteRejection
+            ? error.message
+            : 'Could not confirm whether this upload was accepted. Refresh the board before selecting this file again.',
+        );
+        row.file = null;
+      }
+      publish(session, true);
+      return;
+    } finally {
+      session.activeControllers.delete(controller);
+    }
+  }
+}
+
+function pumpTransfers() {
+  while (activeTransfers < MAX_UPLOAD_CONCURRENCY) {
+    const session = pickSession();
+    if (!session) return;
+    const batch = nextBatch(session);
+    if (!batch.length) return;
+    session.activeTasks += 1;
+    activeTransfers += 1;
+    void uploadBatch(session, batch).finally(() => {
+      session.activeTasks -= 1;
+      activeTransfers -= 1;
+      if (session.canceling && session.activeTasks === 0) {
+        session.canceling = false;
+        session.message = session.counts.processing
+          ? 'Queued uploads stopped. Accepted images are still processing.'
+          : 'Queued uploads stopped.';
+      }
+      publish(session, true);
+      pumpTransfers();
+    });
+  }
+}
+
+let statusTimer: number | null = null;
+function scheduleStatusPoll(session: QueueSession) {
+  if (shuttingDown || statusTimer !== null || statusWorkers > 0) return;
+  statusTimer = window.setTimeout(() => {
+    statusTimer = null;
+    void pollStatuses();
+  }, POLL_INTERVAL_MS);
+  // Polling starts independently of uploads so accepted images settle while
+  // later batches continue through the bounded transfer pool.
+  async function pollStatuses() {
+    const pendingSessions = [...sessions.values()].filter(
+      (s) => s.counts.processing > 0,
+    );
+    if (!pendingSessions.length) return;
+    statusWorkers += 1;
+    const controller = new AbortController();
+    statusAbortController = controller;
+    for (const currentSession of pendingSessions) {
+      const pending = currentSession.rows.filter(
+        (row) => row.status === 'pending' && row.imageId,
+      );
+      for (let index = 0; index < pending.length; index += STATUS_BATCH_SIZE) {
+        const group = pending.slice(index, index + STATUS_BATCH_SIZE);
+        try {
+          const result = await api.uploadImageStatuses(
+            currentSession.boardId,
+            group.map((row) => row.imageId as string),
+            controller.signal,
+          );
+          const byId = new Map(result.images.map((image) => [image.id, image]));
+          for (const row of group) {
+            const image = row.imageId ? byId.get(row.imageId) : undefined;
+            if (!image) {
+              row.statusMisses = (row.statusMisses ?? 0) + 1;
+              if (row.statusMisses >= 5) {
+                setStatus(
+                  currentSession,
+                  row,
+                  'unknown',
+                  'No status was returned for this accepted image. Refresh the board before selecting this file again.',
+                );
+              }
+              continue;
+            }
+            row.statusMisses = 0;
+            setStatus(
+              currentSession,
+              row,
+              image.status,
+              image.error ?? undefined,
+            );
+            if (image.status === 'ready' || image.status === 'failed') {
+              row.file = null;
+              currentSession.refreshVersion += 1;
+            }
+          }
+          publish(currentSession, true);
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          // Status reads are safe to repeat: the IDs are known and immutable.
+          if (
+            error instanceof ApiError &&
+            error.status >= 400 &&
+            error.status < 500
+          ) {
+            currentSession.message =
+              'Could not confirm image processing because access is unavailable.';
+            for (const row of currentSession.rows) {
+              if (row.status !== 'pending') continue;
+              setStatus(
+                currentSession,
+                row,
+                'unknown',
+                'Could not check image status because access is unavailable. Reopen the board before trying again.',
+              );
+            }
+            publish(currentSession, true);
+            break;
+          }
+          currentSession.message =
+            'Couldn’t confirm image status. Checking again.';
+          publish(currentSession, true);
+        }
       }
     }
-    emit();
-    if (rows.every((r) => r.status !== 'pending' && r.status !== 'uploading')) {
-      return { timedOut: false, confirmationUnavailable: false };
+    statusWorkers -= 1;
+    if (statusAbortController === controller) statusAbortController = null;
+    if (shuttingDown) return;
+    const stillProcessing = [...sessions.values()].find(
+      (s) => s.counts.processing > 0,
+    );
+    if (stillProcessing) {
+      scheduleStatusPoll(stillProcessing);
     }
-    await wait(options.intervalMs ?? POLL_INTERVAL_MS);
   }
-  return {
-    timedOut: !confirmationUnavailable,
-    confirmationUnavailable,
-  };
 }
 
-export interface UploadResult {
-  rows: UploadRow[];
-  timedOut: boolean;
-  confirmationUnavailable: boolean;
-  allReady: boolean;
+export function enqueueUploads(boardId: string, files: File[]) {
+  shuttingDown = false;
+  const session = sessionFor(boardId);
+  if (
+    session.activeTasks === 0 &&
+    session.counts.queued === 0 &&
+    session.counts.processing === 0 &&
+    session.counts.failed === 0 &&
+    session.counts.unknown === 0
+  ) {
+    session.rows = [];
+    session.counts = { ...EMPTY_COUNTS };
+    session.nextIndex = 0;
+  }
+  session.visible = true;
+  if (session.activeTasks === 0) session.canceling = false;
+  session.message = '';
+  const base = Date.now();
+  for (const [index, file] of files.entries()) {
+    const row: UploadRow = {
+      clientId: `${base}-${index}-${file.name}`,
+      name: file.name,
+      size: file.size,
+      file,
+      method: chooseUploadMethod(file.size),
+      status: 'queued',
+      progress: 0,
+    };
+    rowBoards.set(row, boardId);
+    session.rows.push(row);
+    session.counts.queued += 1;
+  }
+  publish(session, true);
+  pumpTransfers();
 }
 
-/** Drives every file to `ready` (or `error`, or a 60s timeout), calling
- * `onRows` with a fresh snapshot after every state change so a caller can
- * render progress rows. Returns once nothing is left `pending`/`uploading`. */
-export async function runUpload(
-  boardId: string,
-  files: File[],
-  onRows: (rows: UploadRow[]) => void,
-): Promise<UploadResult> {
-  const rows: UploadRow[] = files.map((file, i) => ({
-    clientId: `${Date.now()}-${i}-${file.name}`,
-    file,
-    method: chooseUploadMethod(file.size),
-    status: 'uploading',
-    progress: 0,
-  }));
-  const emit = () => onRows(rows.slice());
-  emit();
-
-  const tusRows = rows.filter((r) => r.method === 'tus');
-  const fellBack = new Set<string>();
-  await Promise.all(
-    tusRows.map(async (row) => {
-      const result = await uploadOneTus(boardId, row, emit);
-      if (result === 'fallback') fellBack.add(row.clientId);
-    }),
-  );
-
-  const multipartRows = rows.filter(
-    (r) => r.method === 'multipart' || fellBack.has(r.clientId),
-  );
-  await uploadMultipartBatches(boardId, multipartRows, emit);
-
-  const { timedOut, confirmationUnavailable } = await pollUntilReady(
-    boardId,
-    rows,
-    emit,
-  );
-  const allReady = rows.every((r) => r.status === 'ready');
-  return { rows, timedOut, confirmationUnavailable, allReady };
+export function stopQueuedUploads(boardId: string) {
+  const session = sessions.get(boardId);
+  if (!session) return;
+  session.canceling = true;
+  if (session.retryTimer !== null) {
+    window.clearInterval(session.retryTimer);
+    session.retryTimer = null;
+    session.retryAt = 0;
+  }
+  for (const row of session.rows) {
+    if (row.status === 'queued') {
+      setStatus(session, row, 'canceled');
+      row.file = null;
+    }
+  }
+  session.message = session.activeTasks
+    ? 'Stopping after the current uploads finish…'
+    : 'Queued uploads stopped.';
+  if (session.activeTasks === 0) session.canceling = false;
+  publish(session, true);
 }
 
-export type { ImageStatus };
+export function stopAllUploadQueues() {
+  shuttingDown = true;
+  if (statusTimer !== null) {
+    window.clearTimeout(statusTimer);
+    statusTimer = null;
+  }
+  statusAbortController?.abort();
+  statusAbortController = null;
+  for (const session of sessions.values()) {
+    session.canceling = true;
+    if (session.retryTimer !== null) window.clearInterval(session.retryTimer);
+    session.retryTimer = null;
+    if (session.publishTimer !== null)
+      window.clearTimeout(session.publishTimer);
+    for (const controller of session.activeControllers) controller.abort();
+    for (const upload of session.activeTus) void upload.abort(false);
+    for (const row of session.rows) {
+      if (row.status === 'queued') {
+        setStatus(session, row, 'canceled');
+        row.file = null;
+      }
+    }
+    session.visible = false;
+  }
+  sessions.clear();
+  nextSessionIndex = 0;
+  overview = [];
+  for (const listener of overviewListeners) listener();
+  if (unloadAttached) {
+    window.removeEventListener('beforeunload', warnBeforeUnload);
+    unloadAttached = false;
+  }
+}
+
+export function dismissUploadActivity(boardId: string) {
+  const session = sessions.get(boardId);
+  if (
+    !session ||
+    session.activeTasks ||
+    session.counts.queued ||
+    session.counts.processing
+  )
+    return;
+  session.visible = false;
+  session.rows = [];
+  session.counts = { ...EMPTY_COUNTS };
+  session.nextIndex = 0;
+  publish(session, true);
+}
+
+export function uploadWorkActive(boardId: string): boolean {
+  const session = sessions.get(boardId);
+  return Boolean(
+    session && (session.activeTasks > 0 || session.counts.queued > 0),
+  );
+}

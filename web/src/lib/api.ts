@@ -49,6 +49,7 @@ import type {
   UpdateBoardResponse,
   UpdateImagePropertiesRequest,
   UpdateImagePropertiesResponse,
+  UploadImageStatusesResponse,
   UploadImagesResponse,
 } from '@digsite/shared/api';
 
@@ -183,6 +184,7 @@ export class ApiError extends Error {
      * can be tied back to a server log line without exposing anything else
      * about the failure. */
     public readonly requestId: string | null = null,
+    public readonly retryAfter: number | null = null,
   ) {
     super(reason);
     this.name = 'ApiError';
@@ -205,19 +207,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     let reason = res.statusText;
     let requestId = res.headers.get('X-Request-Id');
+    let retryAfter = Number(res.headers.get('Retry-After') ?? Number.NaN);
     try {
       const body = (await res.json()) as {
         reason?: string;
         error?: string;
         requestId?: string;
+        retryAfter?: number;
       };
       if (body.reason) reason = body.reason;
       else if (body.error) reason = body.error;
       if (body.requestId) requestId = body.requestId;
+      if (typeof body.retryAfter === 'number') retryAfter = body.retryAfter;
     } catch {
       // no JSON body; keep statusText
     }
-    throw new ApiError(res.status, reason, requestId);
+    throw new ApiError(
+      res.status,
+      reason,
+      requestId,
+      Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter : null,
+    );
   }
 
   if (res.status === 204) return undefined as T;
@@ -310,14 +320,20 @@ export const api = {
     request<AllowlistResponse>(`/boards/${boardId}/allowlist/${userId}`, {
       method: 'DELETE',
     }),
-  uploadImages: (boardId: string, files: File[]) => {
+  uploadImages: (boardId: string, files: File[], signal?: AbortSignal) => {
     const form = new FormData();
     for (const file of files) form.append('files', file);
-    return request<UploadImagesResponse>(`/boards/${boardId}/images`, {
+    return request<UploadImagesResponse>(`/boards/${boardId}/images?wait=0`, {
       method: 'POST',
       body: form,
+      signal,
     });
   },
+  uploadImageStatuses: (boardId: string, ids: string[], signal?: AbortSignal) =>
+    request<UploadImageStatusesResponse>(`/boards/${boardId}/images/status`, {
+      ...post({ ids }),
+      signal,
+    }),
   listBoardImages: (
     boardId: string,
     sort: string,

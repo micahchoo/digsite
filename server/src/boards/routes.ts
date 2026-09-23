@@ -34,6 +34,7 @@ import type {
   UpdateBoardResponse,
   UpdateImagePropertiesRequest,
   UpdateImagePropertiesResponse,
+  UploadImageStatusesResponse,
   UploadImagesResponse,
 } from '@digsite/shared/api';
 import { ZOOMS, type Zoom, cellPx } from '@digsite/shared/board/grid';
@@ -751,6 +752,37 @@ export function registerBoardRoutes(router: Router) {
     }
 
     json(ctx.res, 202, out);
+  });
+
+  router.post('/boards/:id/images/status', async (ctx) => {
+    const boardId = param(ctx, 'id');
+    await boardForViewing(requireAuth(ctx), boardId);
+    const body = await readJsonBody(ctx.req);
+    const ids =
+      body && typeof body === 'object' && 'ids' in body ? body.ids : undefined;
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 500 ||
+      !ids.every((id) => typeof id === 'string' && UUID_RE.test(id))
+    ) {
+      return json(ctx.res, 400, {
+        reason: 'ids must contain at most 500 image UUIDs',
+      });
+    }
+    const { rows } = await pool.query<
+      UploadImageStatusesResponse['images'][number]
+    >(
+      'SELECT id, status, error FROM images WHERE board_id = $1 AND id = ANY($2::uuid[])',
+      [boardId, ids],
+    );
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const response: UploadImageStatusesResponse = {
+      images: ids.flatMap((id) => {
+        const row = byId.get(id);
+        return row ? [row] : [];
+      }),
+    };
+    json(ctx.res, 200, response);
   });
 
   router.get('/boards/:id/images', async (ctx) => {

@@ -190,6 +190,12 @@ export type BoardImage = {
 };
 export type ListBoardImagesResponse = { images: BoardImage[] };
 
+/** POST /boards/:id/images/status: at most 500 accepted IDs; no rank rebuild. */
+export type UploadImageStatusesRequest = { ids: string[] };
+export type UploadImageStatusesResponse = {
+  images: Pick<BoardImage, 'id' | 'status' | 'error'>[];
+};
+
 export type GetImageResponse = BoardImage & { boardId: string };
 
 export type UpdateImagePropertiesRequest = { properties: Properties };
@@ -343,7 +349,7 @@ export type GetStatsResponse = {
 
 // -- Socket.IO: the sheet room -------------------------------------------
 
-/** Excalidraw's own element type is web's concern; shared only sees data. */
+/** Canvas implementation details are web's concern; shared only sees data. */
 export type SceneElements = unknown[];
 
 export type JoinPayload = { sheetId: string };

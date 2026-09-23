@@ -6,6 +6,7 @@
 // never unmounted by navigating between groups/boards/sheets.
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { Outlet } from 'react-router';
+import { stopAllUploadQueues } from '../board/upload.ts';
 import { authClient, useSession } from '../lib/auth.ts';
 import { ChannelColumn } from './ChannelColumn.tsx';
 import { GroupRail } from './GroupRail.tsx';
@@ -36,6 +37,7 @@ declare global {
 // session cache included — so there is nothing stale left to race a
 // reload against.
 async function signOut() {
+  stopAllUploadQueues();
   await authClient.signOut();
   window.location.href = '/';
 }
@@ -68,7 +70,7 @@ export function Shell() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         // Slice 2 follow-up (d): capture phase + stopPropagation, so this
-        // fires and consumes the event BEFORE it can reach Excalidraw's own
+        // fires and consumes the event before it can reach the canvas
         // bubble-phase keydown binding on the sheet canvas (its own
         // Ctrl/Cmd+K opens a "create link" dialog) — the seam
         // (sheet-canvas-seam.md) stays untouched; the shell wins the race

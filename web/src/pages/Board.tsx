@@ -51,7 +51,13 @@ import {
   sortId,
   worldExtent,
 } from '@digsite/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ContextMenu,
@@ -62,11 +68,16 @@ import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
 import { ThreadBrowser } from '../board/ThreadBrowser.tsx';
 import { Tray } from '../board/Tray.tsx';
+import { UploadActivity } from '../board/UploadActivity.tsx';
 import { ZoomControl, zoomIn, zoomOut } from '../board/ZoomControl.tsx';
 import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
 import { cellPolygon } from '../board/selection.ts';
-import { type UploadRow, runUpload } from '../board/upload.ts';
+import {
+  enqueueUploads,
+  getUploadSnapshot,
+  subscribeUploadQueue,
+} from '../board/upload.ts';
 import { useSelection } from '../board/useSelection.ts';
 import '../board/board.css';
 import { Confirm } from '../components/Confirm.tsx';
@@ -304,20 +315,38 @@ export function Board() {
   const [addSheetRequested, setAddSheetRequested] = useState(false);
 
   // -- upload ------------------------------------------------------------------
-  const [uploadRows, setUploadRows] = useState<UploadRow[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadNote, setUploadNote] = useState('');
-  const uploadGenerationRef = useRef(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: A board change invalidates old uploads and resets their display.
+  const uploadSnapshot = useSyncExternalStore(
+    (listener) => subscribeUploadQueue(boardId, listener),
+    () => getUploadSnapshot(boardId),
+    () => getUploadSnapshot(boardId),
+  );
+  const uploading =
+    uploadSnapshot.counts.queued > 0 || uploadSnapshot.counts.uploading > 0;
+  const lastUploadRefreshRef = useRef(0);
+
   useEffect(() => {
-    uploadGenerationRef.current++;
-    setUploadRows([]);
-    setUploading(false);
-    setUploadNote('');
+    if (!uploadSnapshot.refreshVersion) return;
+    let cancelled = false;
+    const delay = Math.max(
+      0,
+      1200 - (Date.now() - lastUploadRefreshRef.current),
+    );
+    const timer = window.setTimeout(() => {
+      lastUploadRefreshRef.current = Date.now();
+      void api
+        .getBoard(boardId)
+        .then((fresh) => {
+          if (cancelled) return;
+          setBoard(fresh);
+          setTileVersion((value) => value + 1);
+        })
+        .catch(() => {});
+    }, delay);
     return () => {
-      uploadGenerationRef.current++;
+      cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [boardId]);
+  }, [boardId, uploadSnapshot.refreshVersion]);
 
   // -- sheets (docs/phases/2-sheet.md section 6) ------------------------------
   const [sheets, setSheets] = useState<
@@ -1400,79 +1429,9 @@ export function Board() {
   }
 
   // -- upload ------------------------------------------------------------------
-  async function handleFiles(files: FileList | null) {
+  function handleFiles(files: FileList | File[] | null) {
     if (!files || !files.length || !board) return;
-    const uploadBoardId = boardId;
-    const uploadGeneration = ++uploadGenerationRef.current;
-    const isCurrentUpload = () =>
-      uploadGenerationRef.current === uploadGeneration &&
-      boardIdRef.current === uploadBoardId;
-    setUploading(true);
-    setUploadNote('');
-    let refreshRunning = false;
-    let refreshQueued = false;
-    let readyCountSeen = 0;
-
-    function requestBoardRefresh() {
-      if (!isCurrentUpload()) return;
-      if (refreshRunning) {
-        refreshQueued = true;
-        return;
-      }
-      refreshRunning = true;
-      void (async () => {
-        try {
-          do {
-            refreshQueued = false;
-            try {
-              const fresh = await api.getBoard(uploadBoardId);
-              if (isCurrentUpload()) {
-                setBoard(fresh);
-                setTileVersion((n) => n + 1);
-              }
-            } catch {
-              // The next completed batch and final refresh get another chance.
-            }
-          } while (refreshQueued);
-        } finally {
-          refreshRunning = false;
-          if (refreshQueued) requestBoardRefresh();
-        }
-      })();
-    }
-
-    try {
-      const result = await runUpload(boardId, Array.from(files), (rows) => {
-        if (!isCurrentUpload()) return;
-        setUploadRows(rows);
-        const completed = rows.filter(
-          (row) => row.status === 'ready' || row.status === 'failed',
-        ).length;
-        if (completed > readyCountSeen) {
-          readyCountSeen = completed;
-          requestBoardRefresh();
-        }
-      });
-      if (result.confirmationUnavailable && isCurrentUpload()) {
-        setUploadNote(
-          'Couldn’t confirm processing for accepted images. Refresh the board to check their status.',
-        );
-      }
-      if (result.timedOut && isCurrentUpload()) {
-        setUploadNote(
-          'Couldn’t confirm every image. The board may still be processing some.',
-        );
-      }
-    } catch {
-      if (isCurrentUpload()) {
-        setUploadNote(
-          'Unable to finish uploading. Check each image’s status before trying again.',
-        );
-      }
-    } finally {
-      if (isCurrentUpload()) setUploading(false);
-      requestBoardRefresh();
-    }
+    enqueueUploads(boardId, Array.from(files));
   }
 
   // -- tray actions: start a sheet (layout follows TRAY order — the order
@@ -1722,10 +1681,6 @@ export function Board() {
       ? '-'
       : `${((s.cacheHits / s.cacheTotal) * 100).toFixed(1)}%`;
 
-  const failedUploadCount = uploadRows.filter(
-    (row) => row.status === 'error' || row.status === 'failed',
-  ).length;
-
   return (
     // Fills the shell's page outlet (shell/shell.css's `.shell-page`) —
     // the board's own side panel now lives in the shell's right column
@@ -1853,7 +1808,6 @@ export function Board() {
             className="board-upload-button"
             data-testid="board-upload-button"
             aria-label="Add images"
-            disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
           >
             <svg aria-hidden="true" viewBox="0 0 20 20">
@@ -1862,8 +1816,8 @@ export function Board() {
             <span className="board-upload-label">
               {uploading ? (
                 <>
-                  Adding{' '}
-                  <span className="board-upload-image-word">images…</span>
+                  Add more{' '}
+                  <span className="board-upload-image-word">images</span>
                 </>
               ) : (
                 <>
@@ -1880,8 +1834,11 @@ export function Board() {
               multiple
               aria-label="Choose images to add to this board"
               tabIndex={-1}
-              disabled={uploading}
-              onChange={(e) => void handleFiles(e.target.files)}
+              onChange={(e) => {
+                const input = e.currentTarget;
+                handleFiles(input.files);
+                input.value = '';
+              }}
             />
           </label>
         </div>
@@ -2036,71 +1993,7 @@ export function Board() {
           ))}
         </div>
       )}
-      {uploadRows.length > 0 && (
-        <section
-          className="board-upload-queue"
-          data-testid="upload-rows"
-          aria-label="Image upload activity"
-        >
-          <div className="board-upload-heading">
-            <div>
-              <span className="board-eyebrow">UPLOAD ACTIVITY</span>
-              <b>{uploading ? 'Adding images' : 'Recent uploads'}</b>
-            </div>
-            <span className="board-upload-count">
-              {uploadRows.filter((row) => row.status === 'ready').length} /{' '}
-              {uploadRows.length} ready
-            </span>
-            {!uploading && (
-              <button
-                type="button"
-                className="board-upload-close"
-                aria-label="Dismiss upload activity"
-                data-testid="upload-close"
-                onClick={() => {
-                  setUploadRows([]);
-                  setUploadNote('');
-                }}
-              >
-                ×
-              </button>
-            )}
-          </div>
-          <div className="board-upload-list">
-            {uploadRows.map((r) => (
-              <div
-                key={r.clientId}
-                className="board-upload-row"
-                data-testid="upload-row"
-                data-status={r.status}
-              >
-                <span className="board-upload-file-name" title={r.file.name}>
-                  {r.file.name}
-                </span>
-                <span className="board-upload-method">
-                  {r.method === 'tus' && r.status === 'uploading'
-                    ? `${r.progress}%`
-                    : ''}
-                </span>
-                <span className="board-upload-state">{r.status}</span>
-                {(r.status === 'error' || r.status === 'failed') && r.error && (
-                  <span className="board-upload-reason">{r.error}</span>
-                )}
-              </div>
-            ))}
-          </div>
-          {failedUploadCount > 0 && (
-            <output className="board-upload-failures" aria-live="polite">
-              {failedUploadCount}{' '}
-              {failedUploadCount === 1
-                ? 'image could not be added.'
-                : 'images could not be added.'}{' '}
-              Check the failed rows before trying again.
-            </output>
-          )}
-          {uploadNote && <div className="muted">{uploadNote}</div>}
-        </section>
-      )}
+      <UploadActivity boardId={boardId} snapshot={uploadSnapshot} />
 
       <ZoomControl
         zoom={s.zoom}

@@ -260,6 +260,55 @@
   height: 100%;
 }
 
+.shell-upload-status {
+  position: relative;
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+}
+.shell-upload-status > summary {
+  cursor: pointer;
+  padding: 8px;
+  color: var(--text-primary);
+}
+.shell-upload-status > ul {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 110;
+  width: min(300px, calc(100vw - 24px));
+  max-height: 50vh;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 8px;
+  list-style: none;
+  background: var(--surface-overlay);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px #0002;
+}
+.shell-upload-status li {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+}
+.shell-upload-status li + li {
+  border-top: 1px solid var(--line);
+}
+.shell-upload-status li span {
+  color: var(--text-secondary);
+}
+@media (max-width: 480px) {
+  .shell-upload-label {
+    display: none;
+  }
+  .shell-upload-status > ul {
+    position: fixed;
+    top: 52px;
+    right: 12px;
+  }
+}
+
 .shell-topbar {
   flex: 0 0 48px;
   height: 48px;

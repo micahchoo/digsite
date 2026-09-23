@@ -104,6 +104,7 @@ export function createHttpServer(opts: HttpServerOptions = {}): Server {
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Expose-Headers': 'X-Request-Id, Retry-After',
   };
 
   const httpServer = createServer(async (req, res) => {
@@ -126,8 +127,9 @@ export function createHttpServer(opts: HttpServerOptions = {}): Server {
     // before the blanket CORS/OPTIONS handling below, which would otherwise
     // shadow both.
     if (isTusPath(url.pathname)) {
-      await tusServer.handle(req, res);
-      res.on('finish', () =>
+      // Completion can occur before handle() resolves, especially PATCH.
+      // Register first so accepted or rejected chunks cannot disappear from logs.
+      res.once('finish', () =>
         logRequest({
           requestId,
           method: req.method ?? '',
@@ -137,6 +139,7 @@ export function createHttpServer(opts: HttpServerOptions = {}): Server {
           userId: null,
         }),
       );
+      await tusServer.handle(req, res);
       return;
     }
 

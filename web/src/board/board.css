@@ -863,6 +863,7 @@
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-raised);
+  flex-wrap: wrap;
 }
 .board-upload-heading > div {
   display: flex;
@@ -881,7 +882,24 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.board-upload-heading > .board-upload-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  order: 2;
+  flex: 1 1 100%;
+  gap: 4px 9px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.board-upload-cancel {
+  margin-inline-start: auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: var(--text-2xs);
+}
 .board-upload-close {
+  margin-inline-start: auto;
   flex: 0 0 32px;
   width: 32px;
   min-width: 32px;
@@ -890,18 +908,28 @@
   box-shadow: none;
 }
 .board-upload-list {
+  position: relative;
+  flex: 0 1 260px;
   min-height: 0;
+  max-height: 260px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 3px 12px 8px;
+  padding: 0 12px;
+}
+.board-upload-spacer {
+  width: 1px;
+  pointer-events: none;
 }
 .board-upload-row {
+  position: absolute;
+  left: 12px;
+  right: 12px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 38px auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 6px 0;
+  padding: 5px 0;
   border-bottom: 1px solid var(--line);
   color: var(--text-primary);
   font-size: var(--text-xs);
@@ -936,6 +964,10 @@
   font-size: var(--text-2xs);
   line-height: 1.35;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
 }
 .board-upload-row[data-status="ready"] .board-upload-state {
   color: var(--claim-own);
@@ -948,12 +980,18 @@
   color: var(--danger);
 }
 .board-upload-queue > .muted,
-.board-upload-failures {
+.board-upload-failures,
+.board-upload-message,
+.board-upload-window-note {
   padding: 8px 12px 10px;
   border-top: 1px solid var(--line);
   background: var(--surface-raised);
   font-size: var(--text-xs);
   line-height: 1.4;
+}
+.board-upload-message,
+.board-upload-window-note {
+  color: var(--text-secondary);
 }
 .board-upload-failures {
   color: var(--danger);

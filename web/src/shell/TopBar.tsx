@@ -5,6 +5,7 @@
 // CSS-hidden outside their breakpoint, not conditionally rendered, so
 // there's nothing for a resize to remount.
 import { Link } from 'react-router';
+import { UploadIndicator } from './UploadIndicator.tsx';
 import type { ShellRoute } from './useShellData.ts';
 
 function Icon({ name }: { name: 'menu' | 'search' | 'panel' | 'more' }) {
@@ -141,6 +142,7 @@ export function TopBar({
         <Breadcrumb route={route} />
       </div>
       <div className="shell-topbar-spacer" />
+      <UploadIndicator />
       <button
         type="button"
         className="shell-search"
