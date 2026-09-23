@@ -179,20 +179,29 @@ async function runEmbedJob(payload: Record<string, unknown>): Promise<void> {
     [imageIds],
   );
   const storage = storageFromEnv();
-  // Loaded here, not at the top: only a worker with embeddings on pays for
-  // ONNX Runtime (meaning/model.ts).
-  const { embedImage } = await import('../meaning/clip.ts');
+  const found: { id: string; slot: number; bytes: Uint8Array }[] = [];
   for (const row of rows) {
     const bytes = await storage.get(originalKey(boardId, row.sha256));
-    if (!bytes) continue;
-    const vector = await embedImage(bytes);
-    await pool.query(
-      `INSERT INTO image_embeddings (image_id, model, board_id, slot, embedding)
-       VALUES ($1, $2, $3, $4, $5::halfvec)
-       ON CONFLICT (image_id, model) DO UPDATE SET embedding = EXCLUDED.embedding`,
-      [row.id, MODEL, boardId, row.slot, toVectorText(vector)],
-    );
+    if (bytes) found.push({ id: row.id, slot: row.slot, bytes });
   }
+  if (found.length === 0) return;
+  // Loaded here, not at the top: only a worker with embeddings on pays for
+  // ONNX Runtime (meaning/model.ts). One model call for the whole group.
+  const { embedImages } = await import('../meaning/clip.ts');
+  const vectors = await embedImages(found.map((f) => f.bytes));
+  await pool.query(
+    `INSERT INTO image_embeddings (image_id, model, board_id, slot, embedding)
+     SELECT u.id, $1, $2, u.slot, u.v::halfvec
+     FROM unnest($3::uuid[], $4::int[], $5::text[]) AS u(id, slot, v)
+     ON CONFLICT (image_id, model) DO UPDATE SET embedding = EXCLUDED.embedding`,
+    [
+      MODEL,
+      boardId,
+      found.map((f) => f.id),
+      found.map((f) => f.slot),
+      vectors.map(toVectorText),
+    ],
+  );
 }
 
 async function runLadderJob(payload: Record<string, unknown>): Promise<void> {

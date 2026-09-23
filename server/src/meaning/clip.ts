@@ -70,24 +70,41 @@ export function unit(values: Float32Array): Float32Array {
   return Float32Array.from(values, (v) => v * scale);
 }
 
-/** An image's embedding from its encoded bytes. libvips scales it, so the
- * model never sees more than INPUT x INPUT pixels of a large original. */
-export async function embedImage(bytes: Uint8Array): Promise<Float32Array> {
-  const { processor, model } = await loadVision();
+/** The model's input for one image. libvips scales it, so the model
+ * never sees more than INPUT x INPUT pixels of a large original. */
+async function toModelInput(bytes: Uint8Array): Promise<RawImage> {
   const { data, info } = await sharp(bytes)
     .rotate()
     .resize(INPUT, INPUT, { fit: 'inside' })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  const image = new RawImage(
+  return new RawImage(
     new Uint8ClampedArray(data.buffer, data.byteOffset, data.length),
     info.width,
     info.height,
     3,
   );
-  const { image_embeds } = await model(await processor(image));
-  return unit(image_embeds.data as Float32Array);
+}
+
+/** Embeddings for several images in ONE model call. Measured 2026-09-23:
+ * 29 ms per image one at a time, 10 ms in batches of 8-16, 6.6 ms at 32. */
+export async function embedImages(
+  images: Uint8Array[],
+): Promise<Float32Array[]> {
+  if (images.length === 0) return [];
+  const { processor, model } = await loadVision();
+  const inputs = await Promise.all(images.map(toModelInput));
+  const { image_embeds } = await model(await processor(inputs));
+  const flat = image_embeds.data as Float32Array;
+  const dims = flat.length / images.length;
+  return images.map((_, i) => unit(flat.subarray(i * dims, (i + 1) * dims)));
+}
+
+/** One image's embedding: `embedImages` with one image. */
+export async function embedImage(bytes: Uint8Array): Promise<Float32Array> {
+  const [vector] = await embedImages([bytes]);
+  return vector as Float32Array;
 }
 
 /** A text query's embedding, comparable with image embeddings. */
