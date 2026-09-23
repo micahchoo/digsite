@@ -93,7 +93,7 @@ import {
 import { checkLimit, tooManyRequests } from '../limits.ts';
 import { arrangementOf } from '../meaning/arrangement.ts';
 import { duplicatesOf } from '../meaning/duplicates.ts';
-import { suggestLabels } from '../meaning/labels.ts';
+import { suggestLabels, suggestRegionLabels } from '../meaning/labels.ts';
 import { searchText, similarTo } from '../meaning/search.ts';
 import { duplicateGroups } from '../meaning/sweep.ts';
 import { recordTileCache } from '../metrics.ts';
@@ -1739,9 +1739,11 @@ export function registerBoardRoutes(router: Router) {
     return json(ctx.res, 200, response);
   });
 
-  // GET /boards/:id/label-suggestions?image=&limit= (meaning/labels.ts):
-  // the board's own label terms that best describe the image, best first,
-  // as {suggestions: [{term, score}]}. Statuses as /similar.
+  // GET /boards/:id/label-suggestions?image=&limit=[&fx=&fy=&fw=&fh=]
+  // (meaning/labels.ts): the board's own label terms that best describe the
+  // image, or with fx..fh the region of it being drawn, best first, as
+  // {suggestions: [{term, score}]}. Statuses as /similar; a region needs
+  // no stored embedding, and a missing original is 404.
   router.get('/boards/:id/label-suggestions', async (ctx) => {
     const meaning = await askMeaning(ctx, true);
     if (!meaning) return;
@@ -1749,6 +1751,31 @@ export function registerBoardRoutes(router: Router) {
     const asked = Number(ctx.url.searchParams.get('limit') ?? 5);
     const limit =
       Number.isInteger(asked) && asked > 0 ? Math.min(asked, 50) : 5;
+    // fx, fy, fw, fh: the region being drawn, scored on its own.
+    const params = ctx.url.searchParams;
+    if (params.has('fx')) {
+      const region = parseFraction({
+        fx: Number(params.get('fx')),
+        fy: Number(params.get('fy')),
+        fw: Number(params.get('fw')),
+        fh: Number(params.get('fh')),
+      });
+      if (!region) {
+        return json(ctx.res, 400, {
+          error: 'fx, fy in 0..1 and fw, fh above 0 are required',
+        });
+      }
+      const { rows } = await pool.query(
+        'SELECT board_id, sha256 FROM images WHERE id = $1',
+        [image],
+      );
+      const found = await suggestRegionLabels(boardId, rows[0], region, limit);
+      if (found === null) {
+        return json(ctx.res, 404, { error: 'the original is missing' });
+      }
+      const response: LabelSuggestionsResponse = { suggestions: found };
+      return json(ctx.res, 200, response);
+    }
     const suggestions = await suggestLabels(boardId, image, limit);
     if (suggestions === null) {
       return json(ctx.res, 409, { error: 'image is not embedded yet' });

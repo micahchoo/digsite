@@ -8,6 +8,7 @@
 // slowly, and one CLIP text call costs milliseconds. Whole-image scoring;
 // a region's own embedding would suit better and is not built.
 import type { LabelSuggestion } from '@digsite/shared/api';
+import { type ExtractFraction, cropOf } from '../boards/extract.ts';
 import { vocabularyOf } from '../boards/vocabulary.ts';
 import { vectorOf } from './embeddings.ts';
 import { MODEL } from './model.ts';
@@ -61,6 +62,27 @@ export async function suggestLabels(
   const image = await vectorOf(imageId);
   if (!image) return null;
   return bestTerms(boardId, image, limit, embed);
+}
+
+export type EmbedPicture = (png: Uint8Array) => Promise<Float32Array>;
+
+/** Suggestions for one region of a picture, the one being drawn: the
+ * region is cropped from the original and embedded on its own, so a
+ * small detail is not lost in what the whole picture shows. Null when the
+ * original is gone. `embedPicture` is for tests; it is CLIP's image model. */
+export async function suggestRegionLabels(
+  boardId: string,
+  image: { board_id: string; sha256: string },
+  region: ExtractFraction,
+  limit: number,
+  embed: Embed = async (text) => (await import('./clip.ts')).embedText(text),
+  embedPicture: EmbedPicture = async (png) =>
+    (await import('./clip.ts')).embedImage(png),
+): Promise<LabelSuggestion[] | null> {
+  const crop = await cropOf(image, region);
+  if (!crop) return null;
+  const vector = await embedPicture(new Uint8Array(crop.png));
+  return bestTerms(boardId, vector, limit, embed);
 }
 
 /** The board's label terms nearest a vector, best first: one image's, or

@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 // meaning/labels.ts: the board's own label terms, canonical after aliases,
 // scored against an image's embedding. The text embedder is a fake, so no
 // CLIP download: each prompt maps to a fixed direction.
+import sharp from 'sharp';
+import { uploadOne } from '../boards/upload.ts';
 import { putAlias } from '../boards/vocabulary.ts';
 import { pool } from '../db/pool.ts';
 import {
   PROMPT,
   resetLabelCacheForTest,
   suggestLabels,
+  suggestRegionLabels,
 } from '../meaning/labels.ts';
 import { MODEL, toVectorText } from '../meaning/model.ts';
 
@@ -103,5 +106,51 @@ describe('label suggestions', () => {
     expect(
       await suggestLabels(unlabelled.boardId, unlabelled.imageId, 5, fakeEmbed),
     ).toEqual([]);
+  });
+
+  test('a region is scored on its own: each half of a picture gets its own term', async () => {
+    const { boardId } = await boardWith([1, 0, 0], ['pottery', 'doorway']);
+    // Red on the left, blue on the right.
+    const png = await sharp(
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect width="32" height="32" fill="#e00"/><rect x="32" width="32" height="32" fill="#00e"/></svg>',
+      ),
+    )
+      .png()
+      .toBuffer();
+    const stored = await uploadOne(
+      boardId,
+      'tester',
+      'split.png',
+      new Uint8Array(png),
+    );
+    const { rows } = await pool.query(
+      'SELECT board_id, sha256 FROM images WHERE id = $1',
+      [stored.id],
+    );
+    // A fake image model: red means pottery, blue means doorway.
+    const embedPicture = async (bytes: Uint8Array) => {
+      const { channels } = await sharp(bytes).stats();
+      const red = channels[0]?.mean ?? 0;
+      const blue = channels[2]?.mean ?? 0;
+      return unitVector(red > blue ? [1, 0, 0] : [0, 0, 1]);
+    };
+    const left = await suggestRegionLabels(
+      boardId,
+      rows[0],
+      { fx: 0, fy: 0, fw: 0.5, fh: 1 },
+      1,
+      fakeEmbed,
+      embedPicture,
+    );
+    const right = await suggestRegionLabels(
+      boardId,
+      rows[0],
+      { fx: 0.5, fy: 0, fw: 0.5, fh: 1 },
+      1,
+      fakeEmbed,
+      embedPicture,
+    );
+    expect([left?.[0]?.term, right?.[0]?.term]).toEqual(['pottery', 'doorway']);
   });
 });

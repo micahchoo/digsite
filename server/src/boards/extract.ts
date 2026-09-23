@@ -58,13 +58,13 @@ export type Extracted = UploadedImage & {
   height: number;
 };
 
-/** The new image, or null when the original is gone. */
-export async function extractRegion(
-  image: { id: string; board_id: string; sha256: string; name: string },
+/** A region of an image's original, upright, as PNG (nothing lost a
+ * second time), with its size; null when the original is gone. Extract
+ * and region label suggestions both crop through here. */
+export async function cropOf(
+  image: { board_id: string; sha256: string },
   f: ExtractFraction,
-  label: string,
-  userId: string,
-): Promise<Extracted | null> {
+): Promise<{ png: Buffer; width: number; height: number } | null> {
   const original = await storageFromEnv().get(
     originalKey(image.board_id, image.sha256),
   );
@@ -79,8 +79,21 @@ export async function extractRegion(
     turned ? meta.height : meta.width,
     turned ? meta.width : meta.height,
   );
-  // PNG, so nothing is lost a second time.
   const png = await input().rotate().extract(box).png().toBuffer();
+  return { png, width: box.width, height: box.height };
+}
+
+/** The new image, or null when the original is gone. */
+export async function extractRegion(
+  image: { id: string; board_id: string; sha256: string; name: string },
+  f: ExtractFraction,
+  label: string,
+  userId: string,
+): Promise<Extracted | null> {
+  const crop = await cropOf(image, f);
+  if (!crop) return null;
+  const { png } = crop;
+  const box = { width: crop.width, height: crop.height };
   const name = `${label.trim() || 'Region'} · ${image.name}`;
   const uploaded = await uploadOne(
     image.board_id,
