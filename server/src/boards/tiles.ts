@@ -16,8 +16,12 @@ import { Semaphore } from '../util/semaphore.ts';
 import { getResidentTile, loadResidentSortFromDisk } from './coarse-cache.ts';
 import { withPage } from './ladder.ts';
 import { coarseTilesPrefix } from './paths.ts';
-import { slotsForTile } from './ranks.ts';
-import { getComposedTile, setComposedTile } from './tiles-cache.ts';
+import { ensureRank, slotsForTile } from './ranks.ts';
+import {
+  composedGeneration,
+  getComposedTile,
+  setComposedTile,
+} from './tiles-cache.ts';
 
 // Shared with materialise.ts's scatter path, so a pending slot paints the
 // same cell whichever path composed the tile.
@@ -215,7 +219,13 @@ export async function tileFor(
   const cached = getComposedTile(cacheKey);
   if (cached) return { png: cached, cache: 'hit', rankMs: 0, composeMs: 0 };
 
+  // A rebuild this request triggers invalidates the board itself, so bring
+  // the order up to date first; THEN take the generation, before reading
+  // the order. A tile composed across any later invalidation is served but
+  // not cached (tiles-cache.ts, roadmap C2).
   const rankStart = performance.now();
+  await ensureRank(boardId, sort);
+  const since = composedGeneration(boardId);
   const slots = await slotsForTile(boardId, sort, z, x, y);
   const pendingSlots = await pendingSlotsFor(boardId, slots);
   const rankMs = performance.now() - rankStart;
@@ -224,6 +234,6 @@ export async function tileFor(
   const png = await composeTile(boardId, cellPx, slots, pendingSlots);
   const composeMs = performance.now() - composeStart;
 
-  if (pendingSlots.size === 0) setComposedTile(cacheKey, boardId, png);
+  if (pendingSlots.size === 0) setComposedTile(cacheKey, boardId, png, since);
   return { png, cache: 'miss', rankMs, composeMs };
 }

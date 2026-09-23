@@ -9,7 +9,11 @@ import {
   publish,
 } from '../boards/invalidation.ts';
 import { getPage, residentPagesForTest } from '../boards/ladder.ts';
-import { getComposedTile, setComposedTile } from '../boards/tiles-cache.ts';
+import {
+  composedGeneration,
+  getComposedTile,
+  setComposedTile,
+} from '../boards/tiles-cache.ts';
 
 const MODULE = join(import.meta.dir, '../boards/invalidation.ts');
 
@@ -57,7 +61,12 @@ describe('invalidation across processes', () => {
   test('ranks changed elsewhere drop composed tiles here', async () => {
     const boardId = crypto.randomUUID();
     const url = `/boards/${boardId}/tiles/name.asc/0/0/0.png`;
-    setComposedTile(url, boardId, Buffer.from('tile'));
+    setComposedTile(
+      url,
+      boardId,
+      Buffer.from('tile'),
+      composedGeneration(boardId),
+    );
     await publishFromChild({ kind: 'ranks', boardId });
     expect(await until(() => getComposedTile(url) === undefined)).toBe(true);
   });
