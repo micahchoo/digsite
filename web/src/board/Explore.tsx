@@ -153,8 +153,11 @@ export function Explore({
   }
 
   return (
-    <div className="card" data-testid="explore-panel" style={{ marginTop: 10 }}>
-      <b>Explore from here</b>
+    <section className="board-explore" data-testid="explore-panel">
+      <div className="board-detail-section-title">
+        <span className="board-eyebrow">RELATIONSHIP MAP</span>
+        <h3>Explore from here</h3>
+      </div>
       {error && <div className="error">{error}</div>}
       {pendingSelection && (
         <div
@@ -195,9 +198,9 @@ export function Explore({
           </div>
         </div>
       )}
-      <div className="row" style={{ marginTop: 6 }}>
+      <div className="board-explore-controls">
         <label>
-          hops:{' '}
+          <span>Hops</span>{' '}
           <select
             data-testid="explore-hops"
             value={hops}
@@ -211,7 +214,7 @@ export function Explore({
           </select>
         </label>
         <label>
-          relation:{' '}
+          <span>Relation</span>{' '}
           <select
             data-testid="explore-relation"
             value={relation}
@@ -231,7 +234,7 @@ export function Explore({
           disabled={loading}
           onClick={() => void explore()}
         >
-          {loading ? 'exploring…' : 'Explore'}
+          {loading ? 'Exploring…' : 'Explore'}
         </button>
       </div>
       {result && (
@@ -241,9 +244,13 @@ export function Explore({
             {result.truncated ? ' (capped)' : ''} ·{' '}
             {plural(result.edges.length, 'edge')}
           </span>
-          <form onSubmit={(e) => void newSheet(e)} style={{ marginTop: 6 }}>
+          <form
+            className="board-explore-sheet-form"
+            onSubmit={(e) => void newSheet(e)}
+          >
             <input
               data-testid="explore-sheet-name"
+              aria-label="New sheet name"
               placeholder="new sheet name"
               value={sheetName}
               onChange={(e) => setSheetName(e.target.value)}
@@ -255,18 +262,18 @@ export function Explore({
                 checked={copyConnections}
                 onChange={(e) => setCopyConnections(e.target.checked)}
               />
-              copy connections
+              Copy connections to sheet
             </label>
             <button
               type="submit"
               data-testid="explore-new-sheet"
               disabled={!sheetName.trim() || creating}
             >
-              New sheet
+              Create sheet
             </button>
           </form>
         </div>
       )}
-    </div>
+    </section>
   );
 }

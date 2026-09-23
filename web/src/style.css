@@ -12,6 +12,10 @@ body {
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--surface-canvas);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 a {
@@ -25,15 +29,85 @@ select {
 }
 
 button {
+  appearance: none;
   cursor: pointer;
-  border: 1px solid var(--line-strong);
+  min-height: 36px;
+  border: 1px solid var(--line);
   background: var(--surface-raised);
   color: var(--text-primary);
-  border-radius: var(--radius-s);
-  padding: 4px 10px;
+  border-radius: var(--radius-m);
+  padding: 0 12px;
+  font-size: var(--text-sm);
+  font-weight: 550;
+  line-height: 1.2;
+  box-shadow: var(--shadow-s);
+  transition-property: background-color, border-color, box-shadow, scale;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
 }
 
-button:hover {
+button:hover:not(:disabled) {
+  background: var(--surface-sunken);
+  border-color: var(--line-strong);
+}
+
+button:active:not(:disabled) {
+  scale: 0.98;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  border-color: var(--line);
+  background-color: var(--surface-sunken);
+  opacity: 1;
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea {
+  min-height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  padding: 0 10px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-faint);
+  opacity: 1;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+input[type="file"] {
+  max-width: 100%;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+input[type="file"]::file-selector-button {
+  min-height: 36px;
+  margin-inline-end: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: 550 var(--text-sm) / 1.2 var(--font-ui);
+  box-shadow: var(--shadow-s);
+  cursor: pointer;
+}
+
+input[type="file"]::file-selector-button:hover {
   background: var(--surface-sunken);
 }
 
@@ -41,9 +115,29 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .nav {
@@ -70,8 +164,9 @@ select:focus-visible,
   border: 1px solid var(--line);
   background: var(--surface-raised);
   border-radius: var(--radius-m);
-  padding: 12px;
-  margin-bottom: 12px;
+  padding: 14px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-s);
 }
 
 .row {
@@ -85,6 +180,12 @@ select:focus-visible,
 table {
   border-collapse: collapse;
   width: 100%;
+}
+
+th {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 th,
 td {
@@ -144,24 +245,13 @@ td {
   visibility: visible;
 }
 
-/* docs/ux/audit.md #4 (blocker, mobile): Board.tsx's side panel was a
-   fixed 300px inline style, eating ~77% of a 390px viewport and squeezing
-   the map canvas to a sliver. Slice 2 relocates its content (detail panel,
-   selection tray) into the shell's right column / bottom tray with a real
-   mobile treatment; until then, hide it below 768px so the map gets the
-   width — same fix as sheet/sheet.css's `.sheet-side`. */
-.board-side {
-  width: 300px;
-  border-left: 1px solid var(--line);
-  background: var(--surface-raised);
-  overflow: auto;
-  padding: 8px;
-}
-@media (max-width: 767px) {
-  .board-side {
-    display: none;
-  }
-}
+/* docs/ux/audit.md #4 (blocker, mobile): Board.tsx's side panel used to be
+   a fixed 300px inline style here, eating ~77% of a 390px viewport. Slice 2
+   (docs/ux/design.md §7) moved its content into the shell's right column
+   (board/board.css's `.board-right`, rendered inside shell/shell.css's
+   `.shell-right`, which already collapses to an overlay below 1280px and
+   hides behind a toggle below 768px) — nothing here needs the fixed-width
+   `.board-side` rule this comment used to describe. */
 
 .status-line {
   position: absolute;
@@ -173,6 +263,13 @@ td {
   font-family: var(--font-mono);
   z-index: 5;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
   pointer-events: none;
+}
+
+@media (max-width: 767px) {
+  .page {
+    padding: 14px;
+  }
 }

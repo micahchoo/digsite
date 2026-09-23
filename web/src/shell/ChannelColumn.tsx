@@ -159,7 +159,19 @@ export function ChannelColumn({
           aria-label="Group settings"
           data-testid="shell-group-settings"
         >
-          ⚙
+          <svg
+            aria-hidden="true"
+            className="shell-icon"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="10" cy="10" r="3" />
+            <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2m12.8-5.3-1.4 1.4M6.1 13.9l-1.4 1.4m10.6 0-1.4-1.4M6.1 6.1 4.7 4.7" />
+          </svg>
         </Link>
       </div>
       <ul className="shell-board-list">

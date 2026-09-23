@@ -3,6 +3,7 @@
 // `Inspector`, composed in one file per docs/phases/2-sheet.md section 7.
 // Styling is `sheet.css` classes only — no inline styles.
 import type { PropertyValue } from '@digsite/shared';
+import { Link } from 'react-router';
 import { RenameInline } from '../components/RenameInline.tsx';
 import { plural } from '../lib/plural.ts';
 import { Inspector } from './Inspector.tsx';
@@ -18,6 +19,14 @@ interface HeaderProps {
   userEmail: string | undefined;
   foreignCount: number;
   status: RoomStatus;
+  // Slice 2 (docs/ux/design.md §5.1 "Ways to select": "Sheet -> 'Show on
+  // board' returns to the board with that sheet's images selected, map
+  // scrolled to the first"). Board.tsx reads the `showSheet` query param on
+  // mount. A minimal link here, not a full `⋯` menu — that menu is slice
+  // 3's job (sheet chrome); this is the one item slice 2's own done-walk
+  // needs from the sheet side.
+  boardId: string;
+  sheetId: string;
 }
 
 function Header({
@@ -28,6 +37,8 @@ function Header({
   userEmail,
   foreignCount,
   status,
+  boardId,
+  sheetId,
 }: HeaderProps) {
   const lastSyncAt = Math.max(status.lastEmitAt ?? 0, status.lastRecvAt ?? 0);
   const lastSyncMs = lastSyncAt ? Date.now() - lastSyncAt : null;
@@ -47,6 +58,13 @@ function Header({
         style={{ fontWeight: 700 }}
       />
       <div className="sheet-header-meta">{plural(imageCount, 'image')}</div>
+      <Link
+        to={`/b/${boardId}?showSheet=${sheetId}`}
+        data-testid="show-on-board"
+        className="sheet-header-meta"
+      >
+        Show on board
+      </Link>
       {peers.length > 0 && (
         <div className="sheet-presence" data-testid="presence-strip">
           {/* docs/ux/audit.md #11: a peer with no name yet is skipped

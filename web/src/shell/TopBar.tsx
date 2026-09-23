@@ -7,6 +7,49 @@
 import { Link } from 'react-router';
 import type { ShellRoute } from './useShellData.ts';
 
+function Icon({ name }: { name: 'menu' | 'search' | 'panel' | 'more' }) {
+  const common = {
+    'aria-hidden': true as const,
+    className: 'shell-icon',
+    viewBox: '0 0 20 20',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  };
+  if (name === 'menu') {
+    return (
+      <svg {...common} aria-hidden="true">
+        <path d="M3 5.5h14M3 10h14M3 14.5h14" />
+      </svg>
+    );
+  }
+  if (name === 'search') {
+    return (
+      <svg {...common} aria-hidden="true">
+        <circle cx="8.7" cy="8.7" r="5.2" />
+        <path d="m12.6 12.6 4.1 4.1" />
+      </svg>
+    );
+  }
+  if (name === 'panel') {
+    return (
+      <svg {...common} aria-hidden="true">
+        <rect x="3" y="3.5" width="14" height="13" rx="2" />
+        <path d="M11.5 4v12" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common} aria-hidden="true">
+      <circle cx="4" cy="10" r=".8" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="10" r=".8" fill="currentColor" stroke="none" />
+      <circle cx="16" cy="10" r=".8" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 interface Props {
   route: ShellRoute;
   onOpenSwitcher: () => void;
@@ -92,7 +135,7 @@ export function TopBar({
         aria-label="Open groups and boards"
         data-testid="shell-hamburger"
       >
-        ☰
+        <Icon name="menu" />
       </button>
       <div className="shell-breadcrumb" data-testid="shell-breadcrumb">
         <Breadcrumb route={route} />
@@ -105,7 +148,8 @@ export function TopBar({
         aria-label="Jump to a group, board or sheet"
         data-testid="shell-search"
       >
-        🔍 <span className="shell-search-label">Jump to…</span>
+        <Icon name="search" />{' '}
+        <span className="shell-search-label">Jump to…</span>
       </button>
       {hasRightColumn && (
         <button
@@ -115,7 +159,7 @@ export function TopBar({
           aria-label="Toggle side panel"
           data-testid="shell-right-toggle"
         >
-          ▤
+          <Icon name="panel" />
         </button>
       )}
       <button
@@ -124,7 +168,7 @@ export function TopBar({
         aria-label="Page actions"
         data-testid="shell-overflow"
       >
-        ⋯
+        <Icon name="more" />
       </button>
     </div>
   );

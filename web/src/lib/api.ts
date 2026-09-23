@@ -5,6 +5,8 @@
 
 import type {
   AcceptInvitationResponse,
+  AddImagesToSheetRequest,
+  AddImagesToSheetResponse,
   AllowlistRequest,
   AllowlistResponse,
   BoardImage,
@@ -15,7 +17,10 @@ import type {
   CreateGroupResponse,
   CreateSheetRequest,
   CreateSheetResponse,
+  FindBoardResponse,
+  FindFilterClause,
   GetBoardResponse,
+  GetBoardSelectionResponse,
   GetImageResponse,
   GetNeighbourhoodResponse,
   GetSectionsResponse,
@@ -27,10 +32,15 @@ import type {
   InviteRequest,
   InviteResponse,
   ListBoardImagesResponse,
+  ListGroupSheetsResponse,
   ListGroupsResponse,
   ListMembersResponse,
   Member,
+  PutBoardSelectionRequest,
+  PutBoardSelectionResponse,
   Role,
+  SelectionRangeRequest,
+  SelectionRangeResponse,
   SheetSummary,
   UpdateBoardRequest,
   UpdateBoardResponse,
@@ -218,6 +228,10 @@ function patch(body: unknown): RequestInit {
   return { method: 'PATCH', body: JSON.stringify(body) };
 }
 
+function put(body: unknown): RequestInit {
+  return { method: 'PUT', body: JSON.stringify(body) };
+}
+
 export const api = {
   // -- groups --------------------------------------------------------------
   createGroup: (body: CreateGroupRequest) =>
@@ -259,6 +273,11 @@ export const api = {
     request<ListMembersResponse>(`/groups/${groupId}/members`),
   listRecentSheets: (groupId: string) =>
     request<ListRecentSheetsResponse>(`/groups/${groupId}/sheets/recent`),
+  // Slice 2 follow-up (b): every sheet of every board the viewer can see in
+  // the group, one request — replaces the shell's per-board `listSheets`
+  // loop (shell/useShellData.ts).
+  listGroupSheets: (groupId: string) =>
+    request<ListGroupSheetsResponse>(`/groups/${groupId}/sheets`),
 
   // -- boards ----------------------------------------------------------------
   listBoards: (groupId: string) =>
@@ -304,6 +323,18 @@ export const api = {
     request<GetSectionsResponse>(
       `/boards/${boardId}/sections?sort=${encodeURIComponent(sort)}`,
     ),
+  findBoard: (
+    boardId: string,
+    sort: string,
+    q: string,
+    filters: FindFilterClause[],
+  ) => {
+    const params = new URLSearchParams({ sort, q });
+    if (filters.length) params.set('filter', JSON.stringify(filters));
+    return request<FindBoardResponse>(
+      `/boards/${boardId}/find?${params.toString()}`,
+    );
+  },
   // Phase 2 section 4: see ListBoardImagesByIdsResponse's header comment —
   // `ids`/per-image `rank` are not in the real server's contract yet.
   getBoardImagesByIds: (boardId: string, sort: string, ids: string[]) =>
@@ -344,6 +375,29 @@ export const api = {
     request<void>(`/images/${imageId}`, { method: 'DELETE' }),
   tileUrl: (boardId: string, sortId: string, z: number, x: number, y: number) =>
     `${SERVER_ORIGIN}/boards/${boardId}/tiles/${sortId}/${z}/${x}/${y}.png`,
+  // Slice 2 (docs/ux/design.md §7 "Slice 2 — Board + selection"): the
+  // selection is a durable object, ids not ranks, per (board, viewer).
+  getBoardSelection: (boardId: string) =>
+    request<GetBoardSelectionResponse>(`/boards/${boardId}/selection`),
+  putBoardSelection: (boardId: string, body: PutBoardSelectionRequest) =>
+    request<PutBoardSelectionResponse>(
+      `/boards/${boardId}/selection`,
+      put(body),
+    ),
+  postSelectionRange: (boardId: string, body: SelectionRangeRequest) =>
+    request<SelectionRangeResponse>(
+      `/boards/${boardId}/selection/range`,
+      post(body),
+    ),
+  addSheetImages: (
+    boardId: string,
+    sheetId: string,
+    body: AddImagesToSheetRequest,
+  ) =>
+    request<AddImagesToSheetResponse>(
+      `/boards/${boardId}/sheets/${sheetId}/images`,
+      post(body),
+    ),
 
   // -- sheets ------------------------------------------------------------
   listSheets: (boardId: string) =>

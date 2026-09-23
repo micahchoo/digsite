@@ -224,6 +224,8 @@ export function Sheet() {
           userEmail: session?.user.email,
           foreignCount: foreign.shapes.length,
           status: room.getStatus(),
+          boardId: sheetInfo.boardId,
+          sheetId,
         }}
         dangling={tools.getDangling()}
         onRemoveDangling={() => tools.removeDangling()}

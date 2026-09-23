@@ -48,47 +48,59 @@ export function Detail({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
-    <div className="card" data-testid="detail-panel" style={{ marginTop: 10 }}>
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <b style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {image.name}
-        </b>
-        <button type="button" data-testid="detail-close" onClick={onClose}>
-          close
+    <section className="board-detail" data-testid="detail-panel">
+      <div className="board-panel-heading">
+        <span className="board-eyebrow">SELECTED IMAGE</span>
+        <button
+          type="button"
+          className="board-text-button"
+          aria-label="Close image details"
+          data-testid="detail-close"
+          onClick={onClose}
+        >
+          Close
         </button>
       </div>
-      {image.missing ? (
-        <div
-          data-testid="detail-missing"
-          style={{
-            width: '100%',
-            height: 120,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: '#eee',
-            color: '#888',
-          }}
-        >
-          missing
+      <div className="board-image-identity">
+        {image.missing ? (
+          <div
+            data-testid="detail-missing"
+            style={{
+              width: 56,
+              height: 56,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'var(--surface-sunken)',
+              color: 'var(--text-faint)',
+              borderRadius: 'var(--radius-s)',
+            }}
+          >
+            missing
+          </div>
+        ) : (
+          <img
+            src={originalUrl}
+            alt={image.name}
+            className="board-detail-thumb"
+          />
+        )}
+        <div className="board-image-identity-copy">
+          <div className="board-image-name">{image.name}</div>
+          <div className="muted">
+            {image.width} × {image.height}
+          </div>
+          <div className="muted">
+            Added {new Date(image.uploadedAt).toLocaleDateString()}
+          </div>
         </div>
-      ) : (
-        <img
-          src={originalUrl}
-          alt={image.name}
-          style={{ maxWidth: '100%', maxHeight: 220, objectFit: 'contain' }}
-        />
-      )}
-      <div className="muted">
-        {image.width}×{image.height} · uploaded{' '}
-        {new Date(image.uploadedAt).toLocaleString()}
       </div>
       {image.missing ? (
         <div className="muted" data-testid="detail-missing-note">
-          original removed
+          Original file is no longer available
         </div>
       ) : confirmingDelete ? (
-        <div className="row" style={{ marginTop: 6 }}>
+        <div className="board-detail-delete-confirm">
           <span className="error">delete this image?</span>
           <button
             type="button"
@@ -98,23 +110,24 @@ export function Detail({
             delete
           </button>
           <button type="button" onClick={() => setConfirmingDelete(false)}>
-            cancel
+            Cancel
           </button>
         </div>
       ) : (
         <button
           type="button"
           data-testid="detail-delete"
-          style={{ marginTop: 6 }}
+          className="board-danger-link"
           onClick={() => setConfirmingDelete(true)}
         >
-          delete image
+          Delete image
         </button>
       )}
 
-      <div style={{ marginTop: 10 }}>
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <b>properties</b>
+      <div className="board-property-section">
+        <div className="board-detail-section-title">
+          <span className="board-eyebrow">IMAGE RECORD</span>
+          <b>Properties</b>
           <span data-testid="detail-save-state" className="muted">
             {saveState === 'saving'
               ? 'saving…'
@@ -126,26 +139,16 @@ export function Detail({
           </span>
         </div>
         {Object.entries(image.properties).map(([k, v]) => (
-          <div
-            key={k}
-            style={{
-              display: 'flex',
-              gap: 4,
-              alignItems: 'center',
-              marginTop: 4,
-            }}
-          >
-            <span
-              style={{
-                width: 70,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
+          <div key={k} className="board-property-row">
+            <label
+              className="board-property-name"
+              htmlFor={`detail-property-${k}`}
             >
               {k}
-            </span>
+            </label>
             <select
               value={typeOf(v)}
+              aria-label={`Type of ${k}`}
               onChange={(e) =>
                 onSetProperty(
                   k,
@@ -161,8 +164,9 @@ export function Detail({
               <option value="boolean">boolean</option>
             </select>
             <input
+              id={`detail-property-${k}`}
               data-testid={`detail-prop-${k}`}
-              style={{ width: 90 }}
+              aria-label={k}
               value={String(v)}
               onChange={(e) =>
                 onSetProperty(k, coerce(e.target.value, typeOf(v)))
@@ -170,16 +174,19 @@ export function Detail({
             />
             <button
               type="button"
+              className="board-property-remove"
+              aria-label={`Remove ${k}`}
               data-testid={`detail-prop-remove-${k}`}
               onClick={() => onRemoveProperty(k)}
             >
-              x
+              ×
             </button>
           </div>
         ))}
-        <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+        <div className="board-property-add">
           <input
             data-testid="detail-new-key"
+            aria-label="New property name"
             placeholder="new key"
             value={newKey}
             onChange={(e) => setNewKey(e.target.value)}
@@ -193,10 +200,10 @@ export function Detail({
               setNewKey('');
             }}
           >
-            add
+            Add
           </button>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

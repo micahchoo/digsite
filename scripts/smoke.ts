@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// docs/phases/5-hardening.md section 6: runs the five web/scripts/smoke*.ts
+// docs/phases/5-hardening.md section 6: runs the web/scripts/smoke*.ts
 // definition-of-done scripts (web/README.md), each against its own fresh
 // stub (web/stub/server.ts) and its own vite dev server, on ports picked
 // free at runtime — never the owner's dev instances at 8800/5180. A fresh
@@ -8,6 +8,7 @@
 // self-contained against a stub nothing else has touched yet.
 //
 // `bun run smoke` at the repo root. Exits nonzero if any script fails.
+// Pass registered paths for a focused rerun, e.g. scripts/smoke-shell.ts.
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findFreePort, waitUp } from './net.ts';
@@ -38,6 +39,9 @@ const SCRIPTS = [
   // docs/ux/design.md §7 slice 1 — the shell (rail, channel column, top
   // bar, quick switcher, responsive collapse).
   'scripts/smoke-shell.ts',
+  // docs/ux/design.md §7 slice 2 — the board, the selection model and its
+  // tray, the zoom bar, the right-click/Actions menu.
+  'scripts/smoke-selection.ts',
 ];
 
 function log(msg: string): void {
@@ -105,8 +109,15 @@ async function runOne(script: string): Promise<boolean> {
 }
 
 async function main() {
+  const requested = process.argv.slice(2);
+  const scripts = requested.length ? [...new Set(requested)] : SCRIPTS;
+  for (const script of scripts) {
+    if (!SCRIPTS.includes(script)) {
+      throw new Error(`Unknown smoke script: ${script}`);
+    }
+  }
   const results: { script: string; pass: boolean }[] = [];
-  for (const script of SCRIPTS) {
+  for (const script of scripts) {
     const pass = await runOne(script);
     results.push({ script, pass });
     log(`${script}: ${pass ? 'PASS' : 'FAIL'}`);

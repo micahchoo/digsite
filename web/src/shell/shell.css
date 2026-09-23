@@ -540,3 +540,307 @@
 .shell-switcher-empty {
   padding: var(--space-3);
 }
+
+/* Digsite workbench shell. Navigation carries identity; the canvas and
+   document surfaces stay quiet, light and image-led. */
+.shell-root {
+  height: 100dvh;
+  background: var(--surface-app);
+}
+
+.shell-rail {
+  flex-basis: 68px;
+  width: 68px;
+  padding-block: 16px;
+  border-right: 1px solid var(--line-navigation);
+  background: var(--surface-navigation);
+  color: var(--text-navigation);
+}
+
+.shell-rail-list {
+  gap: 10px;
+}
+.shell-rail-item:has(.shell-rail-icon--active)::before {
+  left: -14px;
+  top: 9px;
+  bottom: 9px;
+  background: var(--focus-navigation);
+}
+
+.shell-rail-icon {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line-navigation);
+  border-radius: 14px;
+  background: var(--surface-navigation-active);
+  color: var(--text-navigation);
+  box-shadow: none;
+  transition-property: border-radius, background-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+.shell-rail-icon:hover {
+  border-radius: 12px;
+  background: #34495a;
+}
+.shell-rail-icon--active {
+  border-radius: 12px;
+  background: #344a58;
+  box-shadow: inset 0 0 0 1px var(--focus-navigation);
+}
+.shell-rail-add {
+  margin-top: 14px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-navigation-muted);
+}
+.shell-rail-add:hover {
+  color: var(--text-navigation);
+}
+
+.shell-channel-wrap {
+  flex-basis: 248px;
+  width: 248px;
+  border-right-color: var(--line-navigation);
+  background: var(--surface-navigation);
+  color: var(--text-navigation);
+}
+.shell-channel-header {
+  min-height: 56px;
+  padding: 0 16px;
+  border-bottom-color: var(--line-navigation);
+}
+.shell-channel-title {
+  color: var(--text-navigation);
+  font-size: var(--text-md);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.shell-channel-gear {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  color: var(--text-navigation-muted);
+}
+.shell-channel-gear:hover {
+  background: var(--surface-navigation-active);
+  color: var(--text-navigation);
+}
+.shell-board-list {
+  padding: 12px 10px 16px;
+}
+.shell-board {
+  margin-bottom: 4px;
+}
+.shell-board-row {
+  gap: 4px;
+}
+.shell-board-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 34px;
+  flex-basis: 28px;
+  min-height: 34px;
+  padding: 0;
+  color: var(--text-navigation-muted);
+  box-shadow: none;
+}
+.shell-board-toggle:hover {
+  background: var(--surface-navigation-active);
+  color: var(--text-navigation);
+}
+.shell-board-link {
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: var(--radius-m);
+  color: var(--text-navigation-muted);
+  font-weight: 500;
+}
+.shell-board-link:hover {
+  background: var(--surface-navigation-active);
+  color: var(--text-navigation);
+}
+.shell-board-link--active {
+  background: var(--surface-navigation-active);
+  box-shadow: inset 0 0 0 1px rgba(166, 213, 216, 0.24);
+  color: var(--text-navigation);
+}
+.shell-sheet-list {
+  margin: 4px 0 8px 13px;
+  padding: 4px 0 4px 12px;
+  border-left: 1px solid rgba(180, 192, 201, 0.28);
+}
+.shell-sheet-link,
+.shell-start-sheet {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 9px;
+  border-radius: var(--radius-s);
+}
+.shell-sheet-link {
+  color: var(--text-navigation-muted);
+}
+.shell-sheet-link:hover,
+.shell-sheet-link--active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-navigation);
+}
+.shell-sheet-link--active {
+  box-shadow: inset 2px 0 var(--focus-navigation);
+}
+.shell-start-sheet {
+  color: var(--focus-navigation);
+}
+.shell-start-sheet:hover {
+  color: #d4eff0;
+}
+.shell-channel-footer {
+  min-height: 58px;
+  padding: 8px 12px;
+  border-top-color: var(--line-navigation);
+  background: #172330;
+}
+.shell-user-email {
+  color: var(--text-navigation-muted);
+  font-size: var(--text-xs);
+}
+.shell-channel-footer button {
+  min-height: 30px;
+  padding-inline: 9px;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-navigation);
+  box-shadow: none;
+  font-size: var(--text-xs);
+}
+.shell-channel-footer button:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+.shell-channel-wrap a:focus-visible,
+.shell-channel-wrap button:focus-visible,
+.shell-rail a:focus-visible {
+  outline-color: var(--focus-navigation);
+}
+
+.shell-topbar {
+  height: 52px;
+  flex-basis: 52px;
+  padding-inline: 18px;
+  gap: 10px;
+  border-bottom-color: var(--line);
+  background: var(--surface-raised);
+}
+.shell-breadcrumb {
+  font-size: var(--text-md);
+  letter-spacing: -0.01em;
+}
+.shell-crumb-sep {
+  color: var(--text-faint);
+}
+.shell-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+.shell-search {
+  min-width: 174px;
+  min-height: 34px;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 0 10px;
+  border-color: var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface-app);
+  box-shadow: none;
+}
+.shell-search .shell-icon {
+  color: var(--accent);
+}
+.shell-search:hover {
+  background: var(--surface-sunken);
+}
+.shell-right-toggle,
+.shell-overflow {
+  display: inline-grid;
+  place-items: center;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: var(--radius-m);
+  box-shadow: none;
+}
+.shell-overflow {
+  border-color: transparent;
+  background: transparent;
+}
+.shell-main {
+  background: var(--surface-canvas);
+}
+.shell-page {
+  background: var(--surface-canvas);
+}
+.shell-right {
+  flex-basis: 304px;
+  width: 304px;
+  padding: 18px 16px 24px;
+  border-left-color: var(--line);
+  background: var(--surface-app);
+}
+.shell-right-header {
+  margin-bottom: 14px;
+  font-size: var(--text-md);
+}
+
+@media (max-width: 1279px) {
+  .shell-right {
+    top: 52px;
+  }
+  .shell-right-scrim--open {
+    inset-block-start: 52px;
+  }
+}
+
+@media (max-width: 767px) {
+  .shell-topbar {
+    height: 52px;
+    flex-basis: 52px;
+    padding-inline: 10px;
+  }
+  .shell-hamburger {
+    display: inline-grid;
+    place-items: center;
+    min-width: 38px;
+    min-height: 38px;
+    padding: 0;
+    border-radius: var(--radius-m);
+    box-shadow: none;
+  }
+  .shell-search {
+    min-width: 36px;
+    width: 36px;
+    justify-content: center;
+    padding: 0;
+  }
+  .shell-search-label {
+    display: none;
+  }
+  .shell-right {
+    width: 100%;
+  }
+  .shell-root--drawer-open .shell-channel-wrap {
+    left: 68px;
+    width: 212px;
+    flex-basis: 212px;
+  }
+  .shell-rail,
+  .shell-channel-wrap {
+    box-shadow: var(--shadow-l);
+  }
+}

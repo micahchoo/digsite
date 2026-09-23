@@ -4,13 +4,19 @@
 // URL mapping was verified there against deck.gl's tileset-2d source and is
 // reused unchanged: deck's {x,y,z} is the server's {z}/{x}/{y} verbatim.
 //
-// Phase 1 section 3 (docs/phases/1-map.md) adds sections, hover, selection
-// and detail on top of that skeleton. Every new piece of state that affects
-// what's drawn (sections, the selected ranks, zoom) feeds one `layers`
-// memo, pushed to the Deck instance in one effect — the TileLayer stays the
-// single source of tiles, the rest are plain overlays on top of it, never
-// baked into a tile (../.claude/rules/ladder-slot-vs-rank.md: "A pin or a
-// selection on the map is a client overlay").
+// Slice 2 (docs/ux/design.md §7 "Slice 2 — Board + selection"): the
+// selection is now a durable object — a set of IMAGE IDS per (board,
+// viewer), server-side, via `useSelection` (board/useSelection.ts) — not
+// the ranks this file used to keep in a `Set<number>` (the defect §7 names
+// first: a rank means a different image once the sort changes). The old
+// inline `.board-side` panel moved into the shell's right column
+// (shell/RightColumn.tsx); the bottom tray (board/Tray.tsx), the zoom bar
+// (board/ZoomControl.tsx) and the right-click/Actions menu
+// (board/ContextMenu.tsx) are new. Every new piece of state that affects
+// what's drawn still feeds the one `layers` memo/effect below — the
+// TileLayer stays the single source of tiles
+// (../.claude/rules/ladder-slot-vs-rank.md: "a selection on the map is a
+// client overlay").
 import {
   Deck,
   type LayersList,
@@ -27,9 +33,11 @@ import {
 } from '@deck.gl/layers';
 import {
   type BoardImage,
+  type BoardImageWithRank,
   CELL,
   COLS,
   DEFAULT_SORT,
+  type FindFilterClause,
   type GetImageResponse,
   type Properties,
   type PropertyValue,
@@ -37,24 +45,29 @@ import {
   type Section,
   type Sort,
   type SortKey,
+  cellOf,
   parseSortId,
   rankAtWorld,
   sortId,
   worldExtent,
 } from '@digsite/shared';
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import {
+  ContextMenu,
+  type MenuItem,
+  type MenuSection,
+} from '../board/ContextMenu.tsx';
 import { Detail } from '../board/Detail.tsx';
 import { Explore } from '../board/Explore.tsx';
+import { Tray } from '../board/Tray.tsx';
+import { ZoomControl, zoomIn, zoomOut } from '../board/ZoomControl.tsx';
 import { boardDeleteMessage, sheetDeleteMessage } from '../board/messages.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
-import {
-  addRanks,
-  cellPolygon,
-  rankRange,
-  toggleRank,
-} from '../board/selection.ts';
+import { cellPolygon } from '../board/selection.ts';
 import { type UploadRow, runUpload } from '../board/upload.ts';
+import { useSelection } from '../board/useSelection.ts';
+import '../board/board.css';
 import { Confirm } from '../components/Confirm.tsx';
 import {
   ErrorState,
@@ -71,11 +84,17 @@ import {
   api,
 } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
+import { notifySheetsChanged } from '../lib/sheetEvents.ts';
+import { useRightColumn } from '../shell/RightColumn.tsx';
 
 declare global {
   interface Window {
     __digsiteBoard?: {
       setZoom: (z: number) => void;
+      // Ranks, not ids — the debug surface stays rank-shaped (every
+      // existing smoke script reads/writes it that way) even though the
+      // selection itself is id-shaped underneath; ranks are resolved
+      // against the CURRENT sort at call time.
       getSelection: () => number[];
       select: (rank: number) => void;
       selectRange: (a: number, b: number) => void;
@@ -84,11 +103,8 @@ declare global {
       // Phase 2 section 4 (docs/phases/2-sheet.md): Explore.tsx's
       // "the result becomes the map selection" — resolves ranks through
       // ONE `GET /boards/:id/images?ids=` call (lib/api.ts's
-      // `getBoardImagesByIds`; not on the real server yet, see that
-      // file's header comment). Falls back to marking the selection by
-      // id in the side panel only when the server has no ranks to give
-      // back (the endpoint is missing, or answers with none).
-      selectImages: (ids: string[]) => void;
+      // `getBoardImagesByIds`).
+      selectImages: (ids: string[], mode?: 'replace' | 'add') => void;
     };
   }
 }
@@ -97,6 +113,7 @@ const MIN_ZOOM = -5;
 const MAX_ZOOM = 0;
 const TILE_SIZE = 256;
 const SELECTION_COLOR: [number, number, number, number] = [255, 90, 0, 255];
+const FLASH_COLOR: [number, number, number, number] = [79, 93, 255, 255];
 const SECTION_LINE_COLOR: [number, number, number, number] = [30, 30, 30, 160];
 const SECTION_TEXT_COLOR: [number, number, number, number] = [20, 20, 20, 230];
 
@@ -115,6 +132,12 @@ interface HoverTooltip {
   image: BoardImage;
 }
 
+interface OpenContextMenu {
+  x: number;
+  y: number;
+  sections: MenuSection[];
+}
+
 function storageKey(boardId: string): string {
   return `digsite:sort:${boardId}`;
 }
@@ -127,7 +150,21 @@ function storageKey(boardId: string): string {
  * images. Fit the box the images actually occupy instead: width capped to
  * what a single row holds, height from the row count `worldExtent` already
  * computed.
+ *
+ * docs/ux/audit.md #15: the mathematically tightest fit (width-driven, for
+ * any board whose one row is wider than the viewport) can render a single
+ * row as a near-invisible sliver — a `zoomX` that fits a wide row into the
+ * viewport width shrinks that row's on-screen HEIGHT by the exact same
+ * factor. Floor zoom at a fixed minimum on-screen cell size instead of
+ * deriving it from the viewport height: a floor derived from `h` (e.g.
+ * "zoom until 2 real cell-rows fill the viewport") degenerates to
+ * `MAX_ZOOM` for any board whose row COUNT is small — that was tried and
+ * measured to force full zoom-in (cellPx=128), hiding most of a merely
+ * medium-sized board's width behind an artificially tight crop. A fixed
+ * pixel floor has no such degenerate case: it only ever pulls zoom UP from
+ * a genuinely-too-coarse fit, by exactly enough to keep a cell legible.
  */
+const MIN_INITIAL_CELL_PX = 64; // half native size — comfortably legible, never a sliver
 function fitInitialViewState(
   count: number,
   worldH: number,
@@ -137,7 +174,10 @@ function fitInitialViewState(
   const h = window.innerHeight - 200;
   const zoomX = Math.log2(w / contentW);
   const zoomY = Math.log2(h / worldH);
-  const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(zoomX, zoomY)));
+  let zoom = Math.min(zoomX, zoomY);
+  const zoomFloor = Math.log2(MIN_INITIAL_CELL_PX / CELL);
+  zoom = Math.max(zoom, zoomFloor);
+  zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
   return {
     target: [contentW / 2, worldH / 2, 0],
     zoom,
@@ -147,8 +187,8 @@ function fitInitialViewState(
 }
 
 /** Per-sort cache of rank -> image (or null for an empty/failed lookup),
- * shared between hover and the selection panel so a rank fetched once by
- * either is never re-fetched by the other. */
+ * shared between hover and rank-resolving selection ops so a rank fetched
+ * once is never re-fetched. */
 function sortCache(
   store: Map<string, Map<number, BoardImage | null>>,
   sort: string,
@@ -161,12 +201,20 @@ function sortCache(
   return c;
 }
 
+function isTextInput(el: EventTarget | null): boolean {
+  const tag = (el as HTMLElement | null)?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
 export function Board() {
   const { id } = useParams<{ id: string }>();
   const boardId = id ?? '';
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selection = useSelection(boardId);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const deckRef = useRef<Deck<OrthographicView> | null>(null);
   const viewStateRef = useRef<OrthographicViewState | null>(null);
   const statusRef = useRef<Status>({
@@ -187,12 +235,13 @@ export function Board() {
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
   const [clickInfo, setClickInfo] = useState<string>('');
-  const [sheetName, setSheetName] = useState('');
   const [, forceRender] = useState(0);
 
   // -- sections --------------------------------------------------------------
   const [sections, setSections] = useState<Section[]>([]);
   const [sectionsTruncated, setSectionsTruncated] = useState(false);
+  const sectionsRef = useRef<Section[]>([]);
+  sectionsRef.current = sections;
 
   // -- hover -------------------------------------------------------------------
   const hoverTimerRef = useRef<number | null>(null);
@@ -201,14 +250,45 @@ export function Board() {
   );
   const [hoverTooltip, setHoverTooltip] = useState<HoverTooltip | null>(null);
 
-  // -- selection ---------------------------------------------------------------
-  const [selectedRanks, setSelectedRanks] = useState<Set<number>>(new Set());
-  const selectedRanksRef = useRef(selectedRanks);
-  selectedRanksRef.current = selectedRanks;
-  const [selectedImages, setSelectedImages] = useState<BoardImage[]>([]);
+  // -- selection: resolved images (order preserved by the server —
+  // lib/api.ts's getBoardImagesByIds) --------------------------------------
+  const [selectedImages, setSelectedImages] = useState<BoardImageWithRank[]>(
+    [],
+  );
+  const selectedImagesRef = useRef<BoardImageWithRank[]>([]);
+  selectedImagesRef.current = selectedImages;
   const [selectionNote, setSelectionNote] = useState('');
-  const shiftHeldRef = useRef(false);
-  const shiftDragRef = useRef<{ startRank: number } | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [filterKey, setFilterKey] = useState('');
+  const [filterOp, setFilterOp] = useState<'eq' | 'gte' | 'lte'>('eq');
+  const [filterValue, setFilterValue] = useState('');
+  const [findFilters, setFindFilters] = useState<FindFilterClause[]>([]);
+  const [findResult, setFindResult] = useState<{
+    ranks: number[];
+    imageIds: string[];
+    count: number;
+  } | null>(null);
+  const [findError, setFindError] = useState('');
+  const lastClickRankRef = useRef<number | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+
+  // -- focus: which image's detail/Explore the right column shows. Auto-set
+  // whenever the selection narrows to exactly one image; otherwise it's
+  // whatever the owner last clicked in the tray (board/Tray.tsx onClickItem)
+  // — the same click flies the map to that cell. -----------------------------
+  const [focusedImageId, setFocusedImageId] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reacts BY selectedImages changing; focusedImageId is read, not a trigger
+  useEffect(() => {
+    if (selectedImages.length === 1 && selectedImages[0]) {
+      setFocusedImageId(selectedImages[0].id);
+    } else if (
+      focusedImageId &&
+      !selectedImages.some((i) => i.id === focusedImageId)
+    ) {
+      setFocusedImageId(null);
+    }
+  }, [selectedImages]);
 
   // -- detail ------------------------------------------------------------------
   const [detailImage, setDetailImage] = useState<GetImageResponse | null>(null);
@@ -216,10 +296,27 @@ export function Board() {
     'idle' | 'saving' | 'saved' | 'error'
   >('idle');
 
+  // -- context menu --------------------------------------------------------
+  const [contextMenu, setContextMenu] = useState<OpenContextMenu | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const [startSheetRequested, setStartSheetRequested] = useState(false);
+  const [addSheetRequested, setAddSheetRequested] = useState(false);
+
   // -- upload ------------------------------------------------------------------
   const [uploadRows, setUploadRows] = useState<UploadRow[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState('');
+  const uploadGenerationRef = useRef(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A board change invalidates old uploads and resets their display.
+  useEffect(() => {
+    uploadGenerationRef.current++;
+    setUploadRows([]);
+    setUploading(false);
+    setUploadNote('');
+    return () => {
+      uploadGenerationRef.current++;
+    };
+  }, [boardId]);
 
   // -- sheets (docs/phases/2-sheet.md section 6) ------------------------------
   const [sheets, setSheets] = useState<
@@ -257,6 +354,7 @@ export function Board() {
       await api.deleteSheet(sheetDeleteConfirm.sheetId);
       setSheetDeleteConfirm(null);
       await refreshSheets();
+      notifySheetsChanged();
     } catch (err) {
       setSheetDeleteError(err instanceof ApiError ? err.reason : String(err));
     } finally {
@@ -289,6 +387,20 @@ export function Board() {
       cancelled = true;
     };
   }, [boardId]);
+
+  // -- 10s loading timeout -> the same error shape (docs/ux/design.md §4.10:
+  // "Every loading state that can hang... gets a 10s timeout"). ------------
+  useEffect(() => {
+    if (board || boardError) return;
+    const t = window.setTimeout(() => {
+      setBoardError({
+        status: 500,
+        resource: 'board',
+        reason: 'This is taking longer than expected.',
+      });
+    }, 10_000);
+    return () => window.clearTimeout(t);
+  }, [board, boardError]);
 
   // -- allowlist (docs/phases/3-groups.md section 3): only meaningful on a
   // private board, so only fetched once the board says it isn't open -------
@@ -375,83 +487,87 @@ export function Board() {
 
   // Refs, not the values themselves: `window.__digsiteBoard` is assigned
   // once with an empty dependency array (see that effect's own comment —
-  // every function there closes over refs so it never goes stale), and
-  // `selectImagesById` needs the CURRENT boardId/sort at call time.
+  // every function there closes over refs or the selection hook's own
+  // STABLE function identities, never a piece of state directly, so it
+  // never goes stale).
   const boardIdRef = useRef(boardId);
   boardIdRef.current = boardId;
   const currentSortIdRef = useRef(currentSortId);
   currentSortIdRef.current = currentSortId;
-
-  // Explore.tsx's "the result becomes the map selection" (docs/phases/2-sheet.md
-  // section 4): resolves ranks through ONE `GET /boards/:id/images?ids=`
-  // call (lib/api.ts's getBoardImagesByIds — a param the real server
-  // doesn't have yet, see that file's header comment). When the server
-  // gives back no ranks at all (the param is unsupported, or every id came
-  // back rank-less), falls back to marking the selection by id in the side
-  // panel only, per the task's own fallback.
-  //
-  // `mode` (docs/ux/audit.md #6): 'replace' is the original behaviour and
-  // every existing caller's default (`window.__digsiteBoard.selectImages`
-  // included, so smoke-explore.ts and the ux-audit repro scripts are
-  // unaffected); Explore.tsx passes 'add' only after the owner picks "Add
-  // to selection" on its own confirm, never silently.
-  const selectImagesById = useCallback(
-    async (ids: string[], mode: 'replace' | 'add' = 'replace') => {
-      if (!ids.length) return;
-      try {
-        const { images: found } = await api.getBoardImagesByIds(
-          boardIdRef.current,
-          currentSortIdRef.current,
-          ids,
-        );
-        const cache = sortCache(
-          imageCacheRef.current,
-          currentSortIdRef.current,
-        );
-        const ranks: number[] = [];
-        for (const img of found) {
-          if (typeof img.rank === 'number') {
-            ranks.push(img.rank);
-            cache.set(img.rank, img);
-          }
-        }
-        if (ranks.length) {
-          setSelectedRanks((prev) =>
-            mode === 'add' ? addRanks(prev, ranks) : new Set(ranks),
-          );
-        } else {
-          // No rank came back for anything (the `ids` param isn't honoured,
-          // or nothing matched under this sort) — mark the selection by id
-          // in the side panel only. Deliberately does NOT touch
-          // `selectedRanks`: that state drives the map's own polygon
-          // overlay AND the effect that re-derives `selectedImages` from
-          // it, so clearing it here would have that effect overwrite this
-          // fallback moments later with an empty list.
-          setSelectedImages((prev) => {
-            if (mode !== 'add') return found;
-            const byId = new Map(prev.map((i) => [i.id, i]));
-            for (const img of found) byId.set(img.id, img);
-            return [...byId.values()];
-          });
-        }
-      } catch {
-        // the ids param isn't supported by this server; nothing to select
-      }
-    },
-    [],
-  );
 
   function changeSort(next: Sort) {
     setSort(next);
     localStorage.setItem(storageKey(boardId), sortId(next));
   }
 
+  // -- resolve the image at a rank under the CURRENT sort, caching per sort --
+  const resolveImageAtRank = useCallback(async (rank: number) => {
+    const b = boardRef.current;
+    if (!b || rank < 0 || rank >= b.imageCount) return null;
+    const cache = sortCache(imageCacheRef.current, currentSortIdRef.current);
+    const cached = cache.get(rank);
+    if (cached !== undefined) return cached;
+    try {
+      const { images } = await api.listBoardImages(
+        boardIdRef.current,
+        currentSortIdRef.current,
+        rank,
+        1,
+      );
+      const img = images[0] ?? null;
+      cache.set(rank, img);
+      return img;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // -- a shift+click / band drag range, resolved SERVER-SIDE (design.md
+  // §5.1: "Range and band selects resolve server-side... a million-cell
+  // board never pages ranks to the client"). -------------------------------
+  const rangeSelect = useCallback(
+    async (a: number, b: number) => {
+      try {
+        const { imageIds } = await api.postSelectionRange(boardIdRef.current, {
+          sort: currentSortIdRef.current,
+          fromRank: a,
+          toRank: b,
+        });
+        selection.add(imageIds);
+        const span = Math.abs(b - a) + 1;
+        setSelectionNote(
+          imageIds.length > 0 && imageIds.length < span
+            ? `selection capped at ${plural(imageIds.length, 'image')}`
+            : '',
+        );
+      } catch {
+        // range endpoint unreachable this tick; nothing selected
+      }
+    },
+    [selection],
+  );
+
+  const sectionSelect = useCallback(
+    (section: Section) => void rangeSelect(section.fromRank, section.toRank),
+    [rangeSelect],
+  );
+
   // -- deck.gl mount, once ---------------------------------------------------
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberately mount-once; handleClick/handleHover/rangeSelect close over refs and the selection hook's stable functions, never stale
   useEffect(() => {
     if (!canvasRef.current || !board) return;
     if (deckRef.current) return;
     const [, , , h] = worldExtent(board.imageCount);
     viewStateRef.current = fitInitialViewState(board.imageCount, h);
+    // deck.gl's onViewStateChange (below) only fires on a user-driven
+    // change, never for the `initialViewState` passed at construction —
+    // without this, `statusRef.current.zoom` stays at its literal `0`
+    // default until the first pan/zoom, so ZoomControl's "zoom in"
+    // disabled-when-at-max check (`zoom >= maxZoom`, maxZoom=0) reads
+    // TRUE from the moment the page loads whenever the real initial fit
+    // is negative (the common case) — the button was stuck disabled.
+    statusRef.current.zoom = viewStateRef.current.zoom as number;
+    forceRender((n) => n + 1);
     deckRef.current = new Deck({
       canvas: canvasRef.current,
       views: new OrthographicView({ id: 'board' }),
@@ -464,7 +580,7 @@ export function Board() {
           .zoom as number;
         forceRender((n) => n + 1);
       },
-      onClick: (info) => handleClick(info),
+      onClick: (info, event) => handleClick(info, event),
       onHover: (info) => handleHover(info),
       onDragStart: (info, event) => {
         if (!shiftHeldRef.current || !boardRef.current || !info.coordinate)
@@ -479,19 +595,64 @@ export function Board() {
         if (!drag || !info.coordinate) return;
         const [wx, wy] = info.coordinate as [number, number];
         const endRank = rankAtWorld(wx, wy);
-        commitRangeSelection(drag.startRank, endRank);
+        void rangeSelect(drag.startRank, endRank);
       },
     });
     return () => {
       deckRef.current?.finalize();
       deckRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board]);
+
+  // -- "Show on board" (design.md §5.1: a sheet's own top bar returns here
+  // with the sheet's images selected, the map scrolled to the first) — a
+  // `?showSheet=<id>` query param, consumed once and stripped from the URL.
+  // Only meant to re-run when the BOARD loads/changes — `searchParams`/
+  // `setSearchParams` are read and written, not reacted to; including them
+  // would re-fire this on every OTHER query-param change too.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
+  useEffect(() => {
+    const sheetIdParam = searchParams.get('showSheet');
+    if (!sheetIdParam || !board) return;
+    void showSheetOnBoard(sheetIdParam);
+    const next = new URLSearchParams(searchParams);
+    next.delete('showSheet');
+    setSearchParams(next, { replace: true });
+  }, [board]);
+
+  async function showSheetOnBoard(sheetIdParam: string) {
+    try {
+      const sheet = await api.getSheet(sheetIdParam);
+      const ids = sheet.images.map((i) => i.id);
+      selection.replace(ids);
+      const first = ids[0];
+      if (!first || !deckRef.current) return;
+      const { images: found } = await api.getBoardImagesByIds(
+        boardId,
+        currentSortId,
+        [first],
+      );
+      const firstImg = found[0];
+      if (firstImg && typeof firstImg.rank === 'number') {
+        const { col, row } = cellOf(firstImg.rank);
+        const next: OrthographicViewState = {
+          ...(viewStateRef.current ?? {}),
+          target: [col * CELL + CELL / 2, row * CELL + CELL / 2, 0],
+        };
+        viewStateRef.current = next;
+        deckRef.current.setProps({ viewState: next });
+        forceRender((n) => n + 1);
+      }
+    } catch {
+      // sheet unreachable this tick; nothing selected
+    }
+  }
 
   // -- shift toggles the controller's drag-to-pan off, so a shift-drag can
   // become a range selection instead of a pan. Set proactively on keydown,
   // before the gesture starts, so there's no race with the first pan tick. --
+  const shiftHeldRef = useRef(false);
+  const shiftDragRef = useRef<{ startRank: number } | null>(null);
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Shift' || shiftHeldRef.current) return;
@@ -511,19 +672,35 @@ export function Board() {
     };
   }, []);
 
-  // -- Escape closes the detail panel -----------------------------------------
+  // -- Escape closes the detail panel; Ctrl/Cmd+Z undoes/redoes the
+  // SELECTION only (design.md §5.1: "nothing else on the board is
+  // undoable"), skipped while a text field has focus so it doesn't fight
+  // an input's own undo. -----------------------------------------------------
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setDetailImage(null);
+      if (e.key === 'Escape') {
+        setDetailImage(null);
+        setContextMenu(null);
+        return;
+      }
+      if (isTextInput(e.target)) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) selection.redo();
+        else selection.undo();
+      }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [selection]);
 
   // A debug-only hook for the smoke script's screenshots — NOT part of the
   // fixed window.__digsite contract (that is sheet-only, see sheet/tools.ts).
-  // Assigned once: every function here closes over refs or stable setters,
-  // never a piece of state directly, so it never goes stale.
+  // Assigned once: every function here closes over refs, or the selection
+  // hook's stable function identities (useSelection.ts: `commit`'s deps
+  // never change, so `toggle`/`replace`/`add`/`clear` are stable across
+  // renders) — never a piece of state read directly — so it never goes
+  // stale despite the empty dependency array.
   useEffect(() => {
     window.__digsiteBoard = {
       setZoom: (z: number) => {
@@ -534,23 +711,27 @@ export function Board() {
         forceRender((n) => n + 1);
       },
       getSelection: () =>
-        Array.from(selectedRanksRef.current).sort((a, b) => a - b),
-      select: (rank: number) =>
-        setSelectedRanks((prev) => toggleRank(prev, rank)),
-      selectRange: (a: number, b: number) => commitRangeSelection(a, b),
-      clear: () => setSelectedRanks(new Set()),
+        selectedImagesRef.current
+          .map((i) => i.rank)
+          .filter((r): r is number => typeof r === 'number')
+          .sort((a, b) => a - b),
+      select: (rank: number) => {
+        void resolveImageAtRank(rank).then((img) => {
+          if (img) selection.toggle(img.id);
+        });
+      },
+      selectRange: (a: number, b: number) => void rangeSelect(a, b),
+      clear: () => selection.clear(),
       getLayerIds: () =>
         ((deckRef.current?.props.layers ?? []) as { id?: string }[])
           .map((l) => l?.id)
           .filter((x): x is string => !!x),
-      selectImages: (ids: string[]) => void selectImagesById(ids),
+      selectImages: (ids: string[], mode: 'replace' | 'add' = 'replace') => {
+        if (mode === 'add') selection.add(ids);
+        else selection.replace(ids);
+      },
     };
-    // selectImagesById is itself a stable useCallback (empty deps, reads
-    // boardId/currentSortId through refs) — including it here costs
-    // nothing and keeps this effect honest with the linter, per this
-    // effect's own "every function here closes over refs or stable
-    // setters" comment above.
-  }, [selectImagesById]);
+  }, [resolveImageAtRank, rangeSelect, selection]);
 
   // -- sections: refetch on sort change -----------------------------------
   useEffect(() => {
@@ -573,6 +754,37 @@ export function Board() {
       cancelled = true;
     };
   }, [board, boardId, currentSortId]);
+
+  // Search and typed property filters use the current rank table. Debounce
+  // keystrokes and discard any response for criteria that are now stale.
+  useEffect(() => {
+    if (!findOpen || (!findQuery.trim() && !findFilters.length)) {
+      setFindResult(null);
+      setFindError('');
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void api
+        .findBoard(boardId, currentSortId, findQuery.trim(), findFilters)
+        .then((result) => {
+          if (!cancelled) {
+            setFindResult(result);
+            setFindError('');
+          }
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) {
+            setFindResult(null);
+            setFindError(err instanceof Error ? err.message : 'Search failed');
+          }
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [boardId, currentSortId, findOpen, findQuery, findFilters]);
 
   // -- hover tooltip goes stale across a sort change (the rank means a
   // different image) --------------------------------------------------------
@@ -623,6 +835,29 @@ export function Board() {
     };
   }, [currentSortId, tileVersion]);
 
+  // -- resolve the selection's ids to images (with rank under the CURRENT
+  // sort) whenever the ids or the sort change — the tray, the map outline,
+  // fly-to and window.__digsiteBoard.getSelection() all read this. --------
+  useEffect(() => {
+    let cancelled = false;
+    if (!selection.imageIds.length) {
+      setSelectedImages([]);
+      return;
+    }
+    void api
+      .getBoardImagesByIds(boardId, currentSortId, selection.imageIds)
+      .then(({ images: found }) => {
+        if (cancelled) return;
+        setSelectedImages(found);
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedImages([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selection.imageIds, boardId, currentSortId]);
+
   // -- one layers array: tiles + sections + the selection outline -----------
   const zoom = statusRef.current.zoom;
   useEffect(() => {
@@ -652,6 +887,19 @@ export function Board() {
     });
 
     const list: LayersList = [tileLayer];
+
+    if (findResult?.ranks.length) {
+      list.push(
+        new PolygonLayer({
+          id: 'find-matches',
+          data: findResult.ranks.map((rank) => cellPolygon(rank)),
+          getPolygon: (d) => d,
+          stroked: false,
+          filled: true,
+          getFillColor: [79, 93, 255, 54],
+        }),
+      );
+    }
 
     if (sections.length && sectionsVisible(zoom)) {
       const markers = sectionMarkers(sections);
@@ -683,12 +931,14 @@ export function Board() {
       );
     }
 
-    if (selectedRanks.size) {
-      const polygons = Array.from(selectedRanks, (rank) => cellPolygon(rank));
+    const outlineRanks = selectedImages
+      .map((i) => i.rank)
+      .filter((r): r is number => typeof r === 'number');
+    if (outlineRanks.length) {
       list.push(
         new PolygonLayer({
           id: 'selection-outline',
-          data: polygons,
+          data: outlineRanks.map((rank) => cellPolygon(rank)),
           getPolygon: (d) => d,
           stroked: true,
           filled: false,
@@ -699,6 +949,24 @@ export function Board() {
       );
     }
 
+    if (flashId) {
+      const flashImg = selectedImages.find((i) => i.id === flashId);
+      if (flashImg && typeof flashImg.rank === 'number') {
+        list.push(
+          new PolygonLayer({
+            id: 'tray-flash',
+            data: [cellPolygon(flashImg.rank)],
+            getPolygon: (d) => d,
+            stroked: true,
+            filled: false,
+            getLineColor: FLASH_COLOR,
+            getLineWidth: 3,
+            lineWidthUnits: 'pixels',
+          }),
+        );
+      }
+    }
+
     deckRef.current.setProps({ layers: list });
     forceRender((n) => n + 1);
   }, [
@@ -707,7 +975,9 @@ export function Board() {
     tileVersion,
     fetchTile,
     sections,
-    selectedRanks,
+    selectedImages,
+    flashId,
+    findResult,
     zoom,
   ]);
 
@@ -736,29 +1006,19 @@ export function Board() {
   }
 
   async function resolveHover(rank: number, x: number, y: number) {
-    const cache = sortCache(imageCacheRef.current, currentSortId);
-    if (cache.has(rank)) {
-      const image = cache.get(rank) ?? null;
-      setHoverTooltip(image ? { x, y, rank, image } : null);
-      return;
-    }
-    try {
-      const { images } = await api.listBoardImages(
-        boardId,
-        currentSortId,
-        rank,
-        1,
-      );
-      const image = images[0] ?? null;
-      cache.set(rank, image);
-      setHoverTooltip(image ? { x, y, rank, image } : null);
-    } catch {
-      // the pointer likely moved on already; nothing to show
-    }
+    const image = await resolveImageAtRank(rank);
+    setHoverTooltip(image ? { x, y, rank, image } : null);
   }
 
-  // -- selection ---------------------------------------------------------------
-  function handleClick(info: PickingInfo) {
+  // -- click: plain replaces (toggles off if it's already the sole
+  // selection), Ctrl/Cmd toggles without clearing, Shift extends a range
+  // from the last-clicked rank under the current sort (design.md §5.1). ----
+  function handleClick(
+    info: PickingInfo,
+    event: {
+      srcEvent?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean };
+    },
+  ) {
     const b = boardRef.current;
     if (!b || !info.coordinate) return;
     const [wx, wy] = info.coordinate as [number, number];
@@ -768,68 +1028,318 @@ export function Board() {
       return;
     }
     setClickInfo(`rank ${rank} toggled`);
-    setSelectedRanks((prev) => toggleRank(prev, rank));
+    const native = event?.srcEvent;
+    const ctrl = !!(native?.ctrlKey || native?.metaKey);
+    const shift = !!native?.shiftKey;
+    void resolveClick(rank, ctrl, shift);
   }
 
-  function commitRangeSelection(a: number, b: number) {
-    const { ranks, truncated } = rankRange(a, b, SHEET_LIMIT);
-    setSelectedRanks((prev) => addRanks(prev, ranks));
-    setSelectionNote(
-      truncated ? `selection capped at ${plural(SHEET_LIMIT, 'image')}` : '',
-    );
-  }
-
-  // -- resolve selected ranks to images for the side panel --------------------
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      const b = boardRef.current;
-      const cache = sortCache(imageCacheRef.current, currentSortId);
-      const ranks = Array.from(selectedRanks);
-      const missing = ranks.filter((r) => !cache.has(r));
-      await Promise.all(
-        missing.map(async (r) => {
-          if (!b || r < 0 || r >= b.imageCount) {
-            cache.set(r, null);
-            return;
-          }
-          try {
-            const { images } = await api.listBoardImages(
-              boardId,
-              currentSortId,
-              r,
-              1,
-            );
-            cache.set(r, images[0] ?? null);
-          } catch {
-            cache.set(r, null);
-          }
-        }),
-      );
-      if (cancelled) return;
-      const list = ranks
-        .map((r) => cache.get(r))
-        .filter((img): img is BoardImage => !!img);
-      setSelectedImages(list);
+  async function resolveClick(rank: number, ctrl: boolean, shift: boolean) {
+    if (shift && lastClickRankRef.current !== null) {
+      await rangeSelect(lastClickRankRef.current, rank);
+      lastClickRankRef.current = rank;
+      return;
     }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedRanks, currentSortId, boardId]);
+    const img = await resolveImageAtRank(rank);
+    if (!img) return;
+    lastClickRankRef.current = rank;
+    if (ctrl) {
+      selection.toggle(img.id);
+      return;
+    }
+    const cur = selection.imageIds;
+    if (cur.length === 1 && cur[0] === img.id) {
+      selection.clear();
+    } else {
+      selection.replace([img.id]);
+    }
+  }
 
   function clearSelection() {
-    setSelectedRanks(new Set());
+    selection.clear();
     setSelectionNote('');
   }
 
+  function selectAllMatches() {
+    if (!findResult?.imageIds.length) return;
+    selection.replace(findResult.imageIds);
+    setSelectionNote(
+      findResult.count > findResult.imageIds.length
+        ? `Selected the first ${findResult.imageIds.length} of ${findResult.count} matches`
+        : '',
+    );
+  }
+
+  function applyPropertyFilter() {
+    if (!filterKey || !filterValue.trim()) return;
+    const property = board?.sortableKeys.find(
+      (key) => typeof key.key !== 'string' && key.key.property === filterKey,
+    );
+    const isNumber =
+      property &&
+      typeof property.key !== 'string' &&
+      property.key.type === 'number';
+    const value: unknown = isNumber ? Number(filterValue) : filterValue.trim();
+    if (typeof value === 'number' && !Number.isFinite(value)) return;
+    setFindFilters((current) => [
+      ...current.filter((clause) => clause.key !== filterKey),
+      { key: filterKey, op: filterOp, value },
+    ]);
+    setFilterValue('');
+  }
+
+  async function invertSelection() {
+    const b = boardRef.current;
+    if (!b) return;
+    try {
+      const { images: all } = await api.listBoardImages(
+        boardId,
+        currentSortId,
+        0,
+        b.imageCount,
+      );
+      const have = new Set(selection.imageIds);
+      selection.replace(all.filter((i) => !have.has(i.id)).map((i) => i.id));
+    } catch {
+      // nothing to invert against
+    }
+  }
+
+  async function selectSheetImages(sheetId: string) {
+    try {
+      const sheet = await api.getSheet(sheetId);
+      selection.replace(sheet.images.map((i) => i.id));
+    } catch {
+      // sheet unreachable; leave the selection untouched
+    }
+  }
+
+  // -- zoom control ----------------------------------------------------------
+  function applyZoom(next: number) {
+    if (!deckRef.current || !viewStateRef.current) return;
+    viewStateRef.current = { ...viewStateRef.current, zoom: next };
+    deckRef.current.setProps({ viewState: viewStateRef.current });
+    statusRef.current.zoom = next;
+    forceRender((n) => n + 1);
+  }
+  function fitView() {
+    if (!board) return;
+    const [, , , h] = worldExtent(board.imageCount);
+    const next = fitInitialViewState(board.imageCount, h);
+    viewStateRef.current = next;
+    deckRef.current?.setProps({ viewState: next });
+    statusRef.current.zoom = next.zoom as number;
+    forceRender((n) => n + 1);
+  }
+  function zoomToSelection() {
+    if (!deckRef.current) return;
+    const ranks = selectedImages
+      .map((i) => i.rank)
+      .filter((r): r is number => typeof r === 'number');
+    if (!ranks.length) return;
+    const cells = ranks.map((r) => cellOf(r));
+    const minCol = Math.min(...cells.map((c) => c.col));
+    const maxCol = Math.max(...cells.map((c) => c.col));
+    const minRow = Math.min(...cells.map((c) => c.row));
+    const maxRow = Math.max(...cells.map((c) => c.row));
+    const x0 = minCol * CELL;
+    const x1 = (maxCol + 1) * CELL;
+    const y0 = minRow * CELL;
+    const y1 = (maxRow + 1) * CELL;
+    const w = Math.max(x1 - x0, CELL);
+    const h = Math.max(y1 - y0, CELL);
+    const vw = window.innerWidth;
+    const vh = window.innerHeight - 200;
+    const nz = Math.max(
+      MIN_ZOOM,
+      Math.min(
+        MAX_ZOOM,
+        Math.min(Math.log2(vw / (w + CELL)), Math.log2(vh / (h + CELL))),
+      ),
+    );
+    const next: OrthographicViewState = {
+      ...(viewStateRef.current ?? {}),
+      target: [(x0 + x1) / 2, (y0 + y1) / 2, 0],
+      zoom: nz,
+    };
+    viewStateRef.current = next;
+    deckRef.current.setProps({ viewState: next });
+    statusRef.current.zoom = nz;
+    forceRender((n) => n + 1);
+  }
+  function flyToImage(imgId: string) {
+    const img = selectedImages.find((i) => i.id === imgId);
+    if (!img || typeof img.rank !== 'number' || !deckRef.current) return;
+    const { col, row } = cellOf(img.rank);
+    const cx = col * CELL + CELL / 2;
+    const cy = row * CELL + CELL / 2;
+    const next: OrthographicViewState = {
+      ...(viewStateRef.current ?? {}),
+      target: [cx, cy, 0],
+    };
+    viewStateRef.current = next;
+    deckRef.current.setProps({ viewState: next });
+    forceRender((n) => n + 1);
+    setFocusedImageId(imgId);
+  }
+
+  // -- right-click / Actions menu (design.md §5.2) --------------------------
+  function worldCoordAt(x: number, y: number): [number, number] | null {
+    const vp = deckRef.current?.getViewports()?.[0];
+    if (!vp) return null;
+    return vp.unproject([x, y]) as [number, number];
+  }
+
+  function buildEmptyCanvasMenu(): MenuSection[] {
+    const fitGroup: MenuItem[] = [
+      { label: 'Fit everything', onSelect: fitView },
+    ];
+    if (selection.imageIds.length) {
+      fitGroup.push({
+        label: 'Zoom to the selection',
+        onSelect: zoomToSelection,
+      });
+    }
+    const matchGroup: MenuItem[] = [
+      {
+        label: findResult
+          ? `Select all matches (${Math.min(findResult.count, findResult.imageIds.length)})`
+          : 'Find and filter…',
+        onSelect: findResult ? selectAllMatches : () => setFindOpen(true),
+        disabled: findResult !== null && findResult.imageIds.length === 0,
+      },
+    ];
+    if (selection.imageIds.length) {
+      matchGroup.push({ label: 'Clear selection', onSelect: clearSelection });
+    }
+    const uploadGroup: MenuItem[] = [
+      { label: 'Upload images', onSelect: () => fileInputRef.current?.click() },
+    ];
+    const undoGroup: MenuItem[] = [
+      {
+        label: 'Undo selection',
+        onSelect: () => selection.undo(),
+        disabled: !selection.canUndo,
+      },
+      {
+        label: 'Redo selection',
+        onSelect: () => selection.redo(),
+        disabled: !selection.canRedo,
+      },
+    ];
+    return [fitGroup, matchGroup, uploadGroup, undoGroup];
+  }
+
+  function buildImageMenu(img: BoardImage, rank: number): MenuSection[] {
+    const inSelection = selection.imageIds.includes(img.id);
+    const actingIds =
+      inSelection && selection.imageIds.length > 1
+        ? selection.imageIds
+        : [img.id];
+    const section = sectionsRef.current.find(
+      (s) => rank >= s.fromRank && rank <= s.toRank,
+    );
+    const exploreGroup: MenuItem[] = [
+      {
+        label: 'Explore connections',
+        onSelect: () => setFocusedImageId(img.id),
+      },
+      {
+        label: 'Select neighbourhood…',
+        onSelect: () => setFocusedImageId(img.id),
+      },
+    ];
+    if (section) {
+      exploreGroup.push({
+        label: `Select this section ("${section.label}")`,
+        onSelect: () => sectionSelect(section),
+      });
+    }
+    const sheetGroup: MenuItem[] = [
+      {
+        label: 'Start a sheet',
+        onSelect: () => {
+          selection.replace(actingIds);
+          setStartSheetRequested(true);
+        },
+      },
+      {
+        label: 'Add to sheet…',
+        onSelect: () => {
+          selection.replace(actingIds);
+          setAddSheetRequested(true);
+        },
+      },
+    ];
+    const openGroup: MenuItem[] = [
+      {
+        label: 'Open image',
+        onSelect: () => window.open(api.originalUrl(img.id), '_blank'),
+      },
+    ];
+    const propsGroup: MenuItem[] = [
+      { label: 'Properties', onSelect: () => selection.replace([img.id]) },
+    ];
+    const copyGroup: MenuItem[] = [
+      {
+        label: 'Copy to another board…',
+        onSelect: () => {},
+        disabled: true,
+        disabledReason: 'Not built yet.',
+      },
+      {
+        label: 'Download',
+        onSelect: () => {},
+        disabled: true,
+        disabledReason: 'Not built yet.',
+      },
+    ];
+    return [exploreGroup, sheetGroup, openGroup, propsGroup, copyGroup];
+  }
+
+  function openActionsMenu(x: number, y: number) {
+    setContextMenu({ x, y, sections: buildEmptyCanvasMenu() });
+  }
+
+  function clearLongPress() {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }
+
+  async function openContextMenu(
+    clientX: number,
+    clientY: number,
+    coord: [number, number] | null,
+  ) {
+    const b = boardRef.current;
+    let rank = -1;
+    if (b && coord) {
+      const r = rankAtWorld(coord[0], coord[1]);
+      if (r >= 0 && r < b.imageCount) rank = r;
+    }
+    const img = rank >= 0 ? await resolveImageAtRank(rank) : null;
+    const sections2 = img ? buildImageMenu(img, rank) : buildEmptyCanvasMenu();
+    setContextMenu({ x: clientX, y: clientY, sections: sections2 });
+  }
+
   // -- detail ------------------------------------------------------------------
-  function openDetail(imageId: string) {
-    void api.getImage(imageId).then((img) => {
+  useEffect(() => {
+    if (!focusedImageId) {
+      setDetailImage(null);
+      return;
+    }
+    let cancelled = false;
+    void api.getImage(focusedImageId).then((img) => {
+      if (cancelled) return;
       setDetailImage(img);
       setDetailSaveState('idle');
     });
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [focusedImageId]);
 
   async function saveDetailProperties(next: Properties) {
     if (!detailImage) return;
@@ -863,9 +1373,8 @@ export function Board() {
   // -- image delete (docs/phases/3-groups.md section 4): the row, slot and
   // every claim stay; only `missing` flips. The map answers with a tile
   // refetch (bump `tileVersion`, same as after an upload); every cached
-  // copy of this image (hover, the selection panel) is patched in place so
-  // the dimmed "missing" state shows without a full reload. The sheet's own
-  // missing-placeholder handling is in sheet/Sheet.tsx's `loadImages`. -----
+  // copy of this image (hover, resolveImageAtRank) is patched in place so
+  // the dimmed "missing" state shows without a full reload. ------------------
   async function deleteDetailImage() {
     if (!detailImage) return;
     const imageId = detailImage.id;
@@ -875,6 +1384,7 @@ export function Board() {
       setDetailSaveState('error');
       return;
     }
+    setFocusedImageId(null);
     setDetailImage(null);
     setTileVersion((n) => n + 1);
     for (const cache of imageCacheRef.current.values()) {
@@ -891,182 +1401,129 @@ export function Board() {
   // -- upload ------------------------------------------------------------------
   async function handleFiles(files: FileList | null) {
     if (!files || !files.length || !board) return;
+    const uploadBoardId = boardId;
+    const uploadGeneration = ++uploadGenerationRef.current;
+    const isCurrentUpload = () =>
+      uploadGenerationRef.current === uploadGeneration &&
+      boardIdRef.current === uploadBoardId;
     setUploading(true);
     setUploadNote('');
-    const result = await runUpload(boardId, Array.from(files), setUploadRows);
-    setUploading(false);
-    if (result.timedOut) {
-      setUploadNote('upload: still processing after 60s — tiles will catch up');
+    let refreshRunning = false;
+    let refreshQueued = false;
+    let readyCountSeen = 0;
+
+    function requestBoardRefresh() {
+      if (!isCurrentUpload()) return;
+      if (refreshRunning) {
+        refreshQueued = true;
+        return;
+      }
+      refreshRunning = true;
+      void (async () => {
+        try {
+          do {
+            refreshQueued = false;
+            try {
+              const fresh = await api.getBoard(uploadBoardId);
+              if (isCurrentUpload()) {
+                setBoard(fresh);
+                setTileVersion((n) => n + 1);
+              }
+            } catch {
+              // The next completed batch and final refresh get another chance.
+            }
+          } while (refreshQueued);
+        } finally {
+          refreshRunning = false;
+          if (refreshQueued) requestBoardRefresh();
+        }
+      })();
     }
-    const fresh = await api.getBoard(boardId);
-    setBoard(fresh);
-    setTileVersion((n) => n + 1);
+
+    try {
+      const result = await runUpload(boardId, Array.from(files), (rows) => {
+        if (!isCurrentUpload()) return;
+        setUploadRows(rows);
+        const completed = rows.filter(
+          (row) => row.status === 'ready' || row.status === 'failed',
+        ).length;
+        if (completed > readyCountSeen) {
+          readyCountSeen = completed;
+          requestBoardRefresh();
+        }
+      });
+      if (result.timedOut && isCurrentUpload()) {
+        setUploadNote(
+          'Couldn’t confirm every image. The board may still be processing some.',
+        );
+      }
+    } catch {
+      if (isCurrentUpload()) {
+        setUploadNote(
+          'Unable to finish uploading. Check each image’s status before trying again.',
+        );
+      }
+    } finally {
+      if (isCurrentUpload()) setUploading(false);
+      requestBoardRefresh();
+    }
   }
 
-  async function createSheetFromSelection(e: React.FormEvent) {
-    e.preventDefault();
-    if (!sheetName.trim() || !selectedImages.length) return;
+  // -- tray actions: start a sheet (layout follows TRAY order — the order
+  // of `selectedImages`, i.e. selection order), add to an existing sheet ---
+  async function startSheetFromTray(name: string) {
+    const ids = selectedImages.slice(0, SHEET_LIMIT).map((i) => i.id);
+    if (!name.trim() || !ids.length) return;
     const { id: newId } = await api.createSheet(boardId, {
-      name: sheetName.trim(),
-      imageIds: selectedImages.map((i) => i.id),
+      name: name.trim(),
+      imageIds: ids,
     });
+    notifySheetsChanged();
     navigate(`/s/${newId}`);
   }
-
-  async function renameSheet(id: string, name: string) {
-    await api.updateSheet(id, { name });
+  async function addSelectionToSheet(sheetId: string) {
+    const ids = selectedImages.map((i) => i.id);
+    if (!ids.length) return;
+    await api.addSheetImages(boardId, sheetId, { imageIds: ids });
     await refreshSheets();
+    notifySheetsChanged();
   }
 
-  if (boardError) return <ErrorState info={boardError} />;
-  if (!board) return <div className="page">loading…</div>;
+  async function renameSheet(sheetId: string, name: string) {
+    await api.updateSheet(sheetId, { name });
+    await refreshSheets();
+    notifySheetsChanged();
+  }
 
-  const s = statusRef.current;
-  const cacheRatio =
-    s.cacheTotal === 0
-      ? '-'
-      : `${((s.cacheHits / s.cacheTotal) * 100).toFixed(1)}%`;
-
-  return (
-    // Fills the shell's page outlet (shell/shell.css's `.shell-page`) —
-    // no bare top nav to subtract anymore (docs/ux/design.md §3).
-    <div style={{ display: 'flex', height: '100%' }}>
-      <div style={{ flex: 1, position: 'relative' }}>
-        <canvas
-          ref={canvasRef}
-          style={{ width: '100%', height: '100%', display: 'block' }}
-        />
-        <div className="status-line" data-testid="status">
-          zoom={s.zoom.toFixed(2)} tiles={s.tilesRequested} cache={cacheRatio}{' '}
-          ttft=
-          {s.ttftMs === null ? '-' : `${s.ttftMs.toFixed(0)}ms`}
-          {sectionsTruncated ? ' · sections truncated at 500' : ''}
-        </div>
-        <div className="row" style={{ position: 'absolute', top: 8, left: 8 }}>
-          <select
-            data-testid="sort-key"
-            value={JSON.stringify(sort.key)}
-            onChange={(e) =>
-              changeSort({
-                ...sort,
-                key: JSON.parse(e.target.value) as SortKey,
-              })
-            }
-          >
-            {board.sortableKeys.map((k) => (
-              <option key={JSON.stringify(k.key)} value={JSON.stringify(k.key)}>
-                {k.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            data-testid="sort-dir"
-            onClick={() =>
-              changeSort({ ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })
-            }
-          >
-            {sort.dir}
-          </button>
-          <label className="row" style={{ margin: 0 }}>
-            <input
-              data-testid="upload-input"
-              type="file"
-              multiple
-              disabled={uploading}
-              onChange={(e) => void handleFiles(e.target.files)}
-            />
-          </label>
-        </div>
-        {clickInfo && (
-          <div
-            className="status-line"
-            data-testid="click-info"
-            style={{ bottom: 40 }}
-          >
-            {clickInfo}
+  // -- the right column's content (design.md §3.4/§7 slice 2: "move
+  // Board.tsx's inline side panel into the shell's right column"). --------
+  useRightColumn(
+    board && (
+      <div className="board-right" data-testid="board-side">
+        <div className="board-inspector-heading">
+          <div className="board-inspector-title-row">
+            <span className="board-inspector-label">Board access</span>
+            <button
+              type="button"
+              className="board-icon-button board-delete-button"
+              data-testid="board-delete"
+              aria-label="Delete board"
+              title="Delete board"
+              onClick={() => void openBoardDeleteConfirm()}
+            >
+              <svg aria-hidden="true" viewBox="0 0 20 20">
+                <path d="M4.5 5.5h11M8 5.5V4h4v1.5m2.5 0-.7 10.2a1.5 1.5 0 0 1-1.5 1.3H7.7a1.5 1.5 0 0 1-1.5-1.3L5.5 5.5m3 3v5m3-5v5" />
+              </svg>
+            </button>
           </div>
-        )}
-        {hoverTooltip && (
-          <div
-            className="status-line"
-            data-testid="hover-tooltip"
-            data-rank={hoverTooltip.rank}
-            style={{
-              position: 'absolute',
-              left: hoverTooltip.x + 12,
-              top: hoverTooltip.y + 12,
-              bottom: 'auto',
-              maxWidth: 220,
-              pointerEvents: 'none',
-            }}
-          >
-            <div>
-              <b>{hoverTooltip.image.name}</b>
-            </div>
-            {Object.entries(hoverTooltip.image.properties).map(([k, v]) => (
-              <div key={k}>
-                {k}: {String(v)}
-              </div>
-            ))}
+          <div className="board-inspector-meta">
+            <span className="board-open-status">
+              <span aria-hidden="true" />
+              {board.open ? 'Shared with group' : 'Private board'}
+            </span>
+            <span>{plural(board.imageCount, 'image')}</span>
           </div>
-        )}
-        {uploadRows.length > 0 && (
-          <div
-            data-testid="upload-rows"
-            style={{
-              position: 'absolute',
-              top: 40,
-              left: 8,
-              background: 'rgba(255,255,255,0.95)',
-              border: '1px solid #ccc',
-              borderRadius: 4,
-              padding: 6,
-              fontSize: 12,
-              maxWidth: 260,
-            }}
-          >
-            {uploadRows.map((r) => (
-              <div
-                key={r.clientId}
-                className="row"
-                data-testid="upload-row"
-                data-status={r.status}
-                style={{ margin: '2px 0' }}
-              >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {r.file.name}
-                </span>
-                <span className="muted">
-                  {r.method}
-                  {r.method === 'tus' && r.status === 'uploading'
-                    ? ` ${r.progress}%`
-                    : ''}
-                </span>
-                <span className="muted">{r.status}</span>
-              </div>
-            ))}
-            {uploadNote && <div className="muted">{uploadNote}</div>}
-          </div>
-        )}
-      </div>
-      <div className="board-side">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <RenameInline
-            name={board.name}
-            onRename={renameBoard}
-            testId="board-rename"
-            style={{ fontSize: 18, fontWeight: 700 }}
-          />
-          <button
-            type="button"
-            data-testid="board-delete"
-            onClick={() => void openBoardDeleteConfirm()}
-          >
-            delete board
-          </button>
         </div>
-        <div className="muted">{plural(board.imageCount, 'image')}</div>
         {boardDeleteConfirm && (
           <Confirm
             testId="board-delete-confirm"
@@ -1137,83 +1594,28 @@ export function Board() {
           </div>
         )}
 
-        <h4>selection ({selectedImages.length})</h4>
-        {selectionNote && <div className="muted">{selectionNote}</div>}
-        <ul
-          data-testid="selection-list"
-          style={{ listStyle: 'none', padding: 0 }}
-        >
-          {selectedImages.map((i) => (
-            <li key={i.id}>
-              <button
-                type="button"
-                data-testid="selection-item"
-                data-missing={i.missing}
-                onClick={() => openDetail(i.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  width: '100%',
-                  textAlign: 'left',
-                  background: 'none',
-                  border: 'none',
-                  padding: '2px 0',
-                  opacity: i.missing ? 0.5 : 1,
-                }}
-              >
-                {i.missing ? (
-                  <span
-                    style={{
-                      width: 28,
-                      height: 28,
-                      display: 'inline-block',
-                      background: '#eee',
-                    }}
-                  />
-                ) : (
-                  <img
-                    src={api.originalUrl(i.id)}
-                    alt=""
-                    style={{ width: 28, height: 28, objectFit: 'cover' }}
-                  />
-                )}
-                {i.name}
-                {i.missing ? ' (missing)' : ''}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <div className="row">
-          <button
-            type="button"
-            data-testid="clear-selection"
-            onClick={clearSelection}
-            disabled={!selectedImages.length}
+        <section className="board-inspector-section board-sheets-section">
+          <div className="board-section-heading">
+            <div>
+              <span className="board-eyebrow">WORKSPACES</span>
+              <h4>
+                Sheets <span>{sheets.length}</span>
+              </h4>
+            </div>
+          </div>
+          <ul
+            data-testid="sheet-list"
+            className="board-sheet-list"
+            style={{ listStyle: 'none', padding: 0 }}
           >
-            Clear
-          </button>
-        </div>
-        <form onSubmit={(e) => void createSheetFromSelection(e)}>
-          <input
-            data-testid="sheet-name"
-            placeholder="new sheet name"
-            value={sheetName}
-            onChange={(e) => setSheetName(e.target.value)}
-          />
-          <button type="submit" disabled={!selectedImages.length}>
-            new sheet
-          </button>
-        </form>
-
-        <h4>sheets ({sheets.length})</h4>
-        <ul data-testid="sheet-list" style={{ listStyle: 'none', padding: 0 }}>
-          {sheets.map((sheet) => (
-            <Fragment key={sheet.id}>
+            {sheets.map((sheet) => (
               <li
+                key={sheet.id}
                 data-testid="sheet-list-item"
+                className="board-sheet-row"
                 style={{
                   display: 'flex',
+                  flexWrap: 'wrap',
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   gap: 6,
@@ -1231,17 +1633,27 @@ export function Board() {
                     ? new Date(sheet.savedAt).toLocaleTimeString()
                     : 'unsaved'}
                 </span>
-                <Link to={`/s/${sheet.id}`}>open</Link>
+                <Link className="board-sheet-open" to={`/s/${sheet.id}`}>
+                  Open <span aria-hidden="true">↗</span>
+                </Link>
                 <button
                   type="button"
+                  className="board-sheet-select"
+                  data-testid={`sheet-select-${sheet.id}`}
+                  title="Select everything on this sheet"
+                  onClick={() => void selectSheetImages(sheet.id)}
+                >
+                  select
+                </button>
+                <button
+                  type="button"
+                  className="board-sheet-delete"
                   data-testid={`sheet-delete-${sheet.id}`}
                   onClick={() => void openSheetDeleteConfirm(sheet.id)}
                 >
                   delete
                 </button>
-              </li>
-              {sheetDeleteConfirm?.sheetId === sheet.id && (
-                <li>
+                {sheetDeleteConfirm?.sheetId === sheet.id && (
                   <Confirm
                     testId={`sheet-delete-confirm-${sheet.id}`}
                     message={sheetDeleteMessage(
@@ -1253,11 +1665,16 @@ export function Board() {
                     onConfirm={() => void confirmDeleteSheet()}
                     onCancel={() => setSheetDeleteConfirm(null)}
                   />
-                </li>
-              )}
-            </Fragment>
-          ))}
-        </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+          {sheets.length === 0 && (
+            <p className="board-empty-note">
+              Sheets gather images into a focused, collaborative thread.
+            </p>
+          )}
+        </section>
 
         {detailImage && (
           <Detail
@@ -1267,7 +1684,7 @@ export function Board() {
             onSetProperty={setDetailProperty}
             onRemoveProperty={removeDetailProperty}
             onDelete={() => void deleteDetailImage()}
-            onClose={() => setDetailImage(null)}
+            onClose={() => setFocusedImageId(null)}
           />
         )}
         {detailImage && !detailImage.missing && (
@@ -1275,10 +1692,430 @@ export function Board() {
             boardId={boardId}
             imageId={detailImage.id}
             currentSelectionCount={selectedImages.length}
-            onSelectImages={selectImagesById}
+            onSelectImages={(ids, mode) => {
+              if (mode === 'add') selection.add(ids);
+              else selection.replace(ids ?? []);
+            }}
           />
         )}
       </div>
+    ),
+  );
+
+  if (boardError) return <ErrorState info={boardError} />;
+  if (!board) return <div className="page">loading…</div>;
+
+  const s = statusRef.current;
+  const cacheRatio =
+    s.cacheTotal === 0
+      ? '-'
+      : `${((s.cacheHits / s.cacheTotal) * 100).toFixed(1)}%`;
+
+  return (
+    // Fills the shell's page outlet (shell/shell.css's `.shell-page`) —
+    // the board's own side panel now lives in the shell's right column
+    // (useRightColumn above), so this is canvas + floating chrome only.
+    <div className="board-canvas-wrap">
+      <canvas
+        ref={canvasRef}
+        style={{ width: '100%', height: '100%', display: 'block' }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
+          const coord = worldCoordAt(
+            e.clientX - rect.left,
+            e.clientY - rect.top,
+          );
+          void openContextMenu(e.clientX, e.clientY, coord);
+        }}
+        onTouchStart={(e) => {
+          clearLongPress();
+          const touch = e.touches[0];
+          if (!touch) return;
+          const { clientX, clientY } = touch;
+          const canvas = e.currentTarget;
+          longPressTimerRef.current = window.setTimeout(() => {
+            const rect = canvas.getBoundingClientRect();
+            const coord = worldCoordAt(clientX - rect.left, clientY - rect.top);
+            void openContextMenu(clientX, clientY, coord);
+            longPressTimerRef.current = null;
+          }, 550);
+        }}
+        onTouchMove={clearLongPress}
+        onTouchEnd={clearLongPress}
+        onTouchCancel={clearLongPress}
+      />
+      <div
+        className="status-line board-debug-status"
+        data-testid="status"
+        aria-hidden="true"
+      >
+        zoom={s.zoom.toFixed(2)} tiles={s.tilesRequested} cache={cacheRatio}{' '}
+        ttft=
+        {s.ttftMs === null ? '-' : `${s.ttftMs.toFixed(0)}ms`}
+        {sectionsTruncated ? ' · sections truncated at 500' : ''}
+      </div>
+      <header className="board-toolbar">
+        <div className="board-toolbar-copy">
+          <div className="board-toolbar-title-row">
+            <h1>
+              <RenameInline
+                name={board.name}
+                onRename={renameBoard}
+                testId="board-rename"
+                style={{ fontSize: 17, fontWeight: 680 }}
+              />
+            </h1>
+            <span className="board-count-badge">
+              {plural(board.imageCount, 'image')}
+            </span>
+          </div>
+        </div>
+        <div className="board-toolbar-controls">
+          <button
+            type="button"
+            className="board-tool-button board-tool-icon"
+            aria-label="Board actions"
+            data-testid="board-actions-button"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              openActionsMenu(rect.left, rect.bottom + 4);
+            }}
+          >
+            <span aria-hidden="true">···</span>
+          </button>
+          <button
+            type="button"
+            className={`board-tool-button board-tool-icon${findOpen ? ' is-active' : ''}`}
+            aria-label={findOpen ? 'Close find and filter' : 'Find and filter'}
+            data-testid="board-find-toggle"
+            onClick={() => setFindOpen((open) => !open)}
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <circle cx="8.6" cy="8.6" r="5.6" />
+              <path d="m13 13 4 4" />
+            </svg>
+          </button>
+          <div className="board-sort-control">
+            <span className="board-sort-label">Arrange by</span>
+            <select
+              aria-label="Arrange images by"
+              data-testid="sort-key"
+              value={JSON.stringify(sort.key)}
+              onChange={(e) =>
+                changeSort({
+                  ...sort,
+                  key: JSON.parse(e.target.value) as SortKey,
+                })
+              }
+            >
+              {board.sortableKeys.map((k) => (
+                <option
+                  key={JSON.stringify(k.key)}
+                  value={JSON.stringify(k.key)}
+                >
+                  {k.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="board-sort-direction"
+              aria-label={`Sort ${sort.dir === 'asc' ? 'descending' : 'ascending'}`}
+              data-testid="sort-dir"
+              onClick={() =>
+                changeSort({
+                  ...sort,
+                  dir: sort.dir === 'asc' ? 'desc' : 'asc',
+                })
+              }
+            >
+              <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>
+            </button>
+          </div>
+          <button
+            type="button"
+            className="board-upload-button"
+            data-testid="board-upload-button"
+            aria-label="Add images"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <path d="M10 13V3m0 0L6.5 6.5M10 3l3.5 3.5M4 12.5v3A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-3" />
+            </svg>
+            <span className="board-upload-label">
+              {uploading ? (
+                <>
+                  Adding{' '}
+                  <span className="board-upload-image-word">images…</span>
+                </>
+              ) : (
+                <>
+                  Add <span className="board-upload-image-word">images</span>
+                </>
+              )}
+            </span>
+          </button>
+          <label className="board-file-input-label">
+            <input
+              ref={fileInputRef}
+              data-testid="upload-input"
+              type="file"
+              multiple
+              aria-label="Choose images to add to this board"
+              tabIndex={-1}
+              disabled={uploading}
+              onChange={(e) => void handleFiles(e.target.files)}
+            />
+          </label>
+        </div>
+      </header>
+      {findOpen && (
+        <div className="board-find" data-testid="board-find">
+          <div className="row">
+            <input
+              aria-label="Search image names and properties"
+              data-testid="board-find-query"
+              placeholder="Search names and properties"
+              value={findQuery}
+              onChange={(e) => setFindQuery(e.target.value)}
+            />
+            <select
+              aria-label="Property to filter"
+              data-testid="board-filter-key"
+              value={filterKey}
+              onChange={(e) => setFilterKey(e.target.value)}
+            >
+              <option value="">Property…</option>
+              {board.sortableKeys.flatMap((item) =>
+                typeof item.key === 'string'
+                  ? []
+                  : [
+                      <option key={item.key.property} value={item.key.property}>
+                        {item.label}
+                      </option>,
+                    ],
+              )}
+            </select>
+            <select
+              aria-label="Filter comparison"
+              data-testid="board-filter-op"
+              value={filterOp}
+              onChange={(e) =>
+                setFilterOp(e.target.value as 'eq' | 'gte' | 'lte')
+              }
+            >
+              <option value="eq">is</option>
+              <option value="gte">at least</option>
+              <option value="lte">at most</option>
+            </select>
+            <input
+              aria-label="Filter value"
+              data-testid="board-filter-value"
+              placeholder="Value"
+              value={filterValue}
+              onChange={(e) => setFilterValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applyPropertyFilter();
+              }}
+            />
+            <button
+              type="button"
+              data-testid="board-filter-add"
+              onClick={applyPropertyFilter}
+              disabled={!filterKey || !filterValue.trim()}
+            >
+              Add filter
+            </button>
+            <button
+              type="button"
+              data-testid="board-filter-clear"
+              onClick={() => {
+                setFindQuery('');
+                setFindFilters([]);
+              }}
+            >
+              Clear
+            </button>
+          </div>
+          {findFilters.length > 0 && (
+            <div className="row board-find-chips">
+              {findFilters.map((clause) => (
+                <button
+                  type="button"
+                  key={clause.key}
+                  data-testid={`board-filter-chip-${clause.key}`}
+                  onClick={() =>
+                    setFindFilters((current) =>
+                      current.filter((item) => item.key !== clause.key),
+                    )
+                  }
+                >
+                  {clause.key} {clause.op} {String(clause.value)} ×
+                </button>
+              ))}
+            </div>
+          )}
+          {(findQuery.trim() || findFilters.length > 0) && (
+            <div className="row board-find-result" aria-live="polite">
+              {findError ? (
+                <output>{findError}</output>
+              ) : findResult ? (
+                <>
+                  <span data-testid="board-find-count">
+                    {findResult.count}{' '}
+                    {findResult.count === 1 ? 'match' : 'matches'}
+                    {findResult.ranks.length < findResult.count
+                      ? ` · showing first ${findResult.ranks.length} on map`
+                      : ''}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="board-find-select-matches"
+                    onClick={selectAllMatches}
+                    disabled={!findResult.imageIds.length}
+                  >
+                    {findResult.count > findResult.imageIds.length
+                      ? `Select first ${findResult.imageIds.length} of ${findResult.count}`
+                      : `Select ${findResult.count} ${findResult.count === 1 ? 'match' : 'matches'}`}
+                  </button>
+                </>
+              ) : (
+                <span>Searching…</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {clickInfo && (
+        <div
+          className="status-line"
+          data-testid="click-info"
+          style={{ bottom: 40 }}
+        >
+          {clickInfo}
+        </div>
+      )}
+      {hoverTooltip && (
+        <div
+          className="status-line"
+          data-testid="hover-tooltip"
+          data-rank={hoverTooltip.rank}
+          style={{
+            position: 'absolute',
+            left: hoverTooltip.x + 12,
+            top: hoverTooltip.y + 12,
+            bottom: 'auto',
+            maxWidth: 220,
+            pointerEvents: 'none',
+          }}
+        >
+          <div>
+            <b>{hoverTooltip.image.name}</b>
+          </div>
+          {Object.entries(hoverTooltip.image.properties).map(([k, v]) => (
+            <div key={k}>
+              {k}: {String(v)}
+            </div>
+          ))}
+        </div>
+      )}
+      {uploadRows.length > 0 && (
+        <section
+          className="board-upload-queue"
+          data-testid="upload-rows"
+          aria-label="Image upload activity"
+        >
+          <div className="board-upload-heading">
+            <div>
+              <span className="board-eyebrow">UPLOAD ACTIVITY</span>
+              <b>{uploading ? 'Adding images' : 'Recent uploads'}</b>
+            </div>
+            <span className="board-upload-count">
+              {uploadRows.filter((row) => row.status === 'ready').length} /{' '}
+              {uploadRows.length} ready
+            </span>
+            {!uploading && (
+              <button
+                type="button"
+                className="board-upload-close"
+                aria-label="Dismiss upload activity"
+                data-testid="upload-close"
+                onClick={() => {
+                  setUploadRows([]);
+                  setUploadNote('');
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+          <div className="board-upload-list">
+            {uploadRows.map((r) => (
+              <div
+                key={r.clientId}
+                className="board-upload-row"
+                data-testid="upload-row"
+                data-status={r.status}
+              >
+                <span className="board-upload-file-name" title={r.file.name}>
+                  {r.file.name}
+                </span>
+                <span className="board-upload-method">
+                  {r.method === 'tus' && r.status === 'uploading'
+                    ? `${r.progress}%`
+                    : ''}
+                </span>
+                <span className="board-upload-state">{r.status}</span>
+              </div>
+            ))}
+          </div>
+          {uploadNote && <div className="muted">{uploadNote}</div>}
+        </section>
+      )}
+
+      <ZoomControl
+        zoom={s.zoom}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
+        onZoomIn={() => applyZoom(zoomIn(s.zoom, MAX_ZOOM))}
+        onZoomOut={() => applyZoom(zoomOut(s.zoom, MIN_ZOOM))}
+        onReset={() => applyZoom(0)}
+        onFit={fitView}
+      />
+
+      <Tray
+        items={selectedImages}
+        sheets={sheets}
+        onRemove={(id) => selection.remove([id])}
+        onReorder={(ids) => selection.reorder(ids)}
+        onHoverItem={(id) => setFlashId(id)}
+        onClickItem={flyToImage}
+        onClear={clearSelection}
+        onInvert={() => void invertSelection()}
+        onStartSheet={startSheetFromTray}
+        onAddToSheet={addSelectionToSheet}
+        startRequested={startSheetRequested}
+        onStartRequested={() => setStartSheetRequested(false)}
+        addRequested={addSheetRequested}
+        onAddRequested={() => setAddSheetRequested(false)}
+      />
+
+      {selectionNote && (
+        <div className="status-line" style={{ bottom: 96, left: 8 }}>
+          {selectionNote}
+        </div>
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          sections={contextMenu.sections}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

@@ -22,6 +22,7 @@ import {
 // below for the canvas's imperative handle; `httpApi` is the one HTTP call
 // (rename) among all these scene-only tools.
 import { api as httpApi } from '../lib/api.ts';
+import { notifySheetsChanged } from '../lib/sheetEvents.ts';
 import type { CanvasHandle, PatchOp, SceneElement } from './canvas/types.ts';
 import { isDangling } from './dangling.ts';
 import { type Tool, rectFromDrag } from './gestures.ts';
@@ -484,6 +485,9 @@ export function createTools(deps: ToolsDeps): Tools {
     if (!trimmed) return;
     await httpApi.updateSheet(getSheetId(), { name: trimmed });
     onRenamed(trimmed);
+    // Slice 2 follow-up (a): the channel column's own sheet name is stale
+    // until it refetches — an event, not a poll.
+    notifySheetsChanged();
   }
 
   return {

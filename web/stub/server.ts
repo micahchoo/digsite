@@ -6,6 +6,7 @@
 import { createServer } from 'node:http';
 import {
   type EdgeRow,
+  type FindFilterClause,
   SHEET_LIMIT,
   type SceneElement,
   type Sort,
@@ -25,6 +26,9 @@ import { centreToTopLeft, fitScale } from '../src/board/explore-layout.ts';
 const PORT = Number(process.env.PORT) || 8800;
 const WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:5180';
 const IMAGE_COUNT = 60;
+// Slice 2: board b4's own image count — strictly more than SHEET_LIMIT so
+// "Start a sheet" can genuinely be asked to truncate.
+const BIG_BOARD_IMAGE_COUNT = SHEET_LIMIT + 12;
 const COOKIE_PREFIX = 'digsite.stub_session';
 // The worker's pending -> ready delay (docs/phases/1-map.md section 1). Real
 // uploads accept at 202 and flip to ready once the ladder is painted; here
@@ -167,6 +171,20 @@ const BOARDS: Board[] = [
     defaultSort: 'uploaded_at.desc',
     groupId: 'g2',
   },
+  // Slice 2 (docs/ux/design.md §7, §5.1 "Over the cap"): the only board
+  // with more images than SHEET_LIMIT (150), so smoke-selection.ts can
+  // exercise "Start a sheet with the first 150 of N" against a real
+  // selection instead of faking the count. Own id namespace (`img-big-*`,
+  // below) so it never collides with b1's `img-<slot>` ids.
+  {
+    id: 'b4',
+    name: 'Big',
+    open: true,
+    imageCount: BIG_BOARD_IMAGE_COUNT,
+    createdBy: 'owner',
+    defaultSort: 'uploaded_at.desc',
+    groupId: 'g1',
+  },
 ];
 // Finds' allowlist deliberately excludes `owner` — the prototype's matrix:
 // "an owner not on a private board's allowlist is denied. Ownership does
@@ -175,6 +193,16 @@ const ALLOWLIST: Record<string, Set<UserKey>> = {
   b2: new Set<UserKey>(['admin', 'listed']),
 };
 let boardSeq = BOARDS.length + 1;
+
+// -- selection (docs/ux/design.md §7 slice 2 / docs/phases/6-product.md
+// "Selection"): a set of image ids per (board, viewer), saved server-side —
+// survives sort/filter/zoom/reload. Keyed by `${boardId}:${userId}`;
+// `imageIds` order is tray order (design.md §5.1). ---------------------
+const SELECTIONS: Record<string, string[]> = {};
+function selectionKey(boardId: string, userId: string): string {
+  return `${boardId}:${userId}`;
+}
+const SELECTION_RANGE_CAP = 5000;
 
 // -- access: one predicate per intent, mirroring server/src/access/index.ts
 // (../.claude/rules/access-one-function-per-intent.md) so the stub's rules
@@ -255,22 +283,32 @@ interface Img {
   status: ImageStatus;
   error: string | null;
 }
-const makeImg = (boardId: string, slot: number): Img => ({
-  id: `img-${slot}`,
+const makeImg = (
+  boardId: string,
+  slot: number,
+  opts?: { idPrefix?: string; count?: number },
+): Img => ({
+  id: `${opts?.idPrefix ?? 'img'}-${slot}`,
   boardId,
   slot,
   name: `image-${slot}`,
   width: 256,
   height: 256,
   uploadedAt: new Date(
-    Date.now() - (IMAGE_COUNT - slot) * 60_000,
+    Date.now() - ((opts?.count ?? IMAGE_COUNT) - slot) * 60_000,
   ).toISOString(),
   properties: { year: 1900 + (slot % 60), site: `site-${slot % 5}` },
   missing: false,
   status: 'ready',
   error: null,
 });
-let images: Img[] = range(0, IMAGE_COUNT).map((slot) => makeImg('b1', slot));
+let images: Img[] = [
+  ...range(0, IMAGE_COUNT).map((slot) => makeImg('b1', slot)),
+  // b4 ("Big"): own id namespace so it never collides with b1's `img-N`.
+  ...range(0, BIG_BOARD_IMAGE_COUNT).map((slot) =>
+    makeImg('b4', slot, { idPrefix: 'img-big', count: BIG_BOARD_IMAGE_COUNT }),
+  ),
+];
 
 const SORTABLE_KEYS = [
   { key: 'name' as const, label: 'name' },
@@ -657,7 +695,11 @@ const httpServer = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader(
     'Access-Control-Allow-Methods',
-    'GET,POST,PATCH,DELETE,OPTIONS',
+    // Slice 2: PUT /boards/:id/selection needs a preflight that actually
+    // allows PUT — its absence here made every PUT fail the browser's own
+    // preflight check silently (the OPTIONS response still came back 204,
+    // so nothing server-side ever saw a rejected request to log).
+    'GET,POST,PUT,PATCH,DELETE,OPTIONS',
   );
   res.setHeader('Access-Control-Expose-Headers', 'X-Cache, Server-Timing');
   if (req.method === 'OPTIONS') {
@@ -997,6 +1039,9 @@ const httpServer = createServer(async (req, res) => {
       if ((SHEET_BOARD[id] ?? 'b1') === board.id) deleteSheetRows(id);
     }
     delete ALLOWLIST[board.id];
+    for (const key of Object.keys(SELECTIONS)) {
+      if (key.startsWith(`${board.id}:`)) delete SELECTIONS[key];
+    }
     const idx = BOARDS.findIndex((b) => b.id === board.id);
     if (idx >= 0) BOARDS.splice(idx, 1);
     return json(200, {});
@@ -1175,6 +1220,258 @@ const httpServer = createServer(async (req, res) => {
       202,
       created.map((i) => ({ id: i.id, slot: i.slot, status: i.status })),
     );
+  }
+
+  // GET/PUT /boards/:id/selection — docs/ux/design.md §7 slice 2. A viewer's
+  // selection is ids, not ranks, so it survives a sort change untouched.
+  const boardSelection = url.pathname.match(/^\/boards\/([^/]+)\/selection$/);
+  if (boardSelection && req.method === 'GET') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = boardSelection[1] ?? '';
+    const denied = boardForViewing(u, boardId);
+    if (denied) return json(403, denied);
+    if (!boardOf(boardId)) return json(404, { reason: 'not found' });
+    const imageIds = SELECTIONS[selectionKey(boardId, USERS[u].id)] ?? [];
+    return json(200, { imageIds });
+  }
+  if (boardSelection && req.method === 'PUT') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = boardSelection[1] ?? '';
+    const denied = boardForViewing(u, boardId);
+    if (denied) return json(403, denied);
+    if (!boardOf(boardId)) return json(404, { reason: 'not found' });
+    const body = await readJson<{ imageIds: string[] }>();
+    // Drop anything that isn't (or is no longer) an image on this board —
+    // never trust the client to have an honest set.
+    const boardImageIds = new Set(
+      images.filter((i) => i.boardId === boardId).map((i) => i.id),
+    );
+    const imageIds = (body.imageIds ?? []).filter((id) =>
+      boardImageIds.has(id),
+    );
+    SELECTIONS[selectionKey(boardId, USERS[u].id)] = imageIds;
+    return json(200, { imageIds });
+  }
+
+  // POST /boards/:id/selection/range {sort, fromRank, toRank} — resolves a
+  // rank range to ids SERVER-SIDE (design.md §5.1), capped, so a band/
+  // shift-click select over a huge board never pages ranks to the client.
+  const selectionRange = url.pathname.match(
+    /^\/boards\/([^/]+)\/selection\/range$/,
+  );
+  if (selectionRange && req.method === 'POST') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = selectionRange[1] ?? '';
+    const denied = boardForViewing(u, boardId);
+    if (denied) return json(403, denied);
+    const body = await readJson<{
+      sort: string;
+      fromRank: number;
+      toRank: number;
+    }>();
+    const sort = parseSortId(body.sort) ?? {
+      key: 'uploaded_at' as const,
+      dir: 'desc' as const,
+    };
+    const ranked = rankedImages(boardId, sort);
+    const lo = Math.max(0, Math.min(body.fromRank, body.toRank));
+    const hi = Math.min(
+      ranked.length - 1,
+      Math.max(body.fromRank, body.toRank),
+    );
+    const imageIds: string[] = [];
+    for (let r = lo; r <= hi && imageIds.length < SELECTION_RANGE_CAP; r++) {
+      const img = ranked[r];
+      if (img) imageIds.push(img.id);
+    }
+    return json(200, { imageIds });
+  }
+
+  // POST /boards/:id/sheets/:sheetId/images {imageIds} — "Add to sheet…"
+  // (design.md §5.1's "What a selection can become"): skips ids already on
+  // the sheet, places the rest to the right of its existing content.
+  const sheetAddImages = url.pathname.match(
+    /^\/boards\/([^/]+)\/sheets\/([^/]+)\/images$/,
+  );
+  if (sheetAddImages && req.method === 'POST') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = sheetAddImages[1] ?? '';
+    const sheetId = sheetAddImages[2] ?? '';
+    const denied = boardForViewing(u, boardId); // boardForCreatingSheet: same rule
+    if (denied) return json(403, denied);
+    if (!SHEET_NAME[sheetId] || (SHEET_BOARD[sheetId] ?? 'b1') !== boardId) {
+      return json(404, { reason: 'not found' });
+    }
+    const body = await readJson<{ imageIds: string[] }>();
+    const existing = elementsBySheet[sheetId] ?? [];
+    const existingImageIds = new Set(
+      existing
+        .filter((e) => (e.customData as { kind?: string })?.kind === 'image')
+        .map((e) => (e.customData as { imageId?: string })?.imageId)
+        .filter((x): x is string => !!x),
+    );
+    const seen = new Set<string>();
+    const wanted = (body.imageIds ?? []).filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    const room = Math.max(0, SHEET_LIMIT - existingImageIds.size);
+    const toAdd = wanted
+      .filter((id) => !existingImageIds.has(id))
+      .slice(0, room);
+    const skipped = wanted.filter(
+      (id) => existingImageIds.has(id) || !toAdd.includes(id),
+    );
+    const ordered = toAdd
+      .map((imgId) =>
+        images.find((i) => i.id === imgId && i.boardId === boardId),
+      )
+      .filter((i): i is Img => !!i);
+
+    // "placed to the right of existing content": lay the new images out in
+    // a row starting past the current rightmost edge.
+    let rightEdge = 0;
+    for (const e of existing) {
+      const ex = (e as { x?: number }).x ?? 0;
+      const ew = (e as { width?: number }).width ?? 0;
+      rightEdge = Math.max(rightEdge, ex + ew);
+    }
+    let cursorX = rightEdge + SHEET_CELL / 2;
+    const newEls = ordered.map((img) => {
+      const scale = fitScale(img.width, img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      const x = cursorX;
+      const y = 0;
+      cursorX += SHEET_CELL;
+      return el({
+        id: `el-img-${img.id}`,
+        type: 'image',
+        x,
+        y,
+        width: w,
+        height: h,
+        fileId: fileId(img.id),
+        customData: { kind: 'image', imageId: img.id },
+        groupIds: [imageGroupId(img.id)],
+      });
+    });
+    elementsBySheet[sheetId] = [...existing, ...newEls];
+    SHEET_IMAGES[sheetId] = [
+      ...(SHEET_IMAGES[sheetId] ?? []),
+      ...ordered.map((i) => i.slot),
+    ];
+    sheetSavedAt[sheetId] = new Date().toISOString();
+    return json(200, { added: ordered.map((i) => i.id), skipped });
+  }
+
+  // GET /groups/:id/sheets — every sheet of every board the viewer can see
+  // in the group, one request (slice 2 follow-up b: replaces the shell's
+  // per-board `listSheets` loop).
+  const groupSheets = url.pathname.match(/^\/groups\/([^/]+)\/sheets$/);
+  if (groupSheets && req.method === 'GET') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const groupId = groupSheets[1] ?? '';
+    if (!groupOf(groupId)) return json(404, { reason: 'not found' });
+    const denied = groupForViewing(u, groupId);
+    if (denied) return json(403, denied);
+    const visibleBoardIds = new Set(
+      BOARDS.filter(
+        (b) => b.groupId === groupId && !boardForViewing(u, b.id),
+      ).map((b) => b.id),
+    );
+    const list = Object.keys(SHEET_NAME)
+      .filter((id) => visibleBoardIds.has(SHEET_BOARD[id] ?? 'b1'))
+      .map((id) => ({
+        id,
+        name: SHEET_NAME[id],
+        createdAt: new Date().toISOString(),
+        imageCount: (SHEET_IMAGES[id] ?? []).length,
+        savedAt: sheetSavedAt[id] ?? null,
+        boardId: SHEET_BOARD[id] ?? 'b1',
+        boardName: boardOf(SHEET_BOARD[id] ?? 'b1')?.name ?? '',
+      }));
+    return json(200, list);
+  }
+
+  // GET /boards/:id/find?sort=&q=&filter= — bounded rank highlights plus
+  // the first SHEET_LIMIT image ids for selection, and the uncapped count.
+  const boardFind = url.pathname.match(/^\/boards\/([^/]+)\/find$/);
+  if (boardFind && req.method === 'GET') {
+    const u = sessionUser(req.headers.cookie);
+    if (!u) return json(401, { reason: 'sign in required' });
+    const boardId = boardFind[1] ?? '';
+    const denied = boardForViewing(u, boardId);
+    if (denied) return json(403, denied);
+    if (!boardOf(boardId)) return json(404, { reason: 'not found' });
+    const sort = parseSortId(url.searchParams.get('sort') ?? '') ?? {
+      key: 'uploaded_at' as const,
+      dir: 'desc' as const,
+    };
+    const query = (url.searchParams.get('q') ?? '').trim().toLocaleLowerCase();
+    let filters: FindFilterClause[] = [];
+    try {
+      const raw = url.searchParams.get('filter');
+      if (raw) filters = JSON.parse(raw) as FindFilterClause[];
+      if (!Array.isArray(filters)) throw new Error('filter must be an array');
+    } catch {
+      return json(400, { reason: 'invalid filter' });
+    }
+    const matchesFilter = (img: Img, clause: FindFilterClause): boolean => {
+      const actual = (img.properties as Record<string, unknown>)[clause.key];
+      const expected = clause.value;
+      switch (clause.op) {
+        case 'eq':
+          return actual === expected;
+        case 'neq':
+          return actual !== expected;
+        case 'lt':
+          return typeof actual === 'number' && actual < Number(expected);
+        case 'lte':
+          return typeof actual === 'number' && actual <= Number(expected);
+        case 'gt':
+          return typeof actual === 'number' && actual > Number(expected);
+        case 'gte':
+          return typeof actual === 'number' && actual >= Number(expected);
+        case 'between':
+          return (
+            Array.isArray(expected) &&
+            typeof actual === 'number' &&
+            actual >= Number(expected[0]) &&
+            actual <= Number(expected[1])
+          );
+        case 'in':
+          return Array.isArray(expected) && expected.includes(actual);
+        case 'has':
+          return Array.isArray(actual) && actual.includes(expected);
+      }
+    };
+    const matched = rankedImages(boardId, sort).filter((img) => {
+      const haystack = [img.name, ...Object.values(img.properties).map(String)]
+        .join(' ')
+        .toLocaleLowerCase();
+      return (
+        (!query || haystack.includes(query)) &&
+        filters.every((f) => matchesFilter(img, f))
+      );
+    });
+    return json(200, {
+      ranks: matched
+        .slice(0, 10_000)
+        .map((img) =>
+          rankedImages(boardId, sort).findIndex(
+            (ranked) => ranked.id === img.id,
+          ),
+        ),
+      imageIds: matched.slice(0, SHEET_LIMIT).map((img) => img.id),
+      count: matched.length,
+    });
   }
 
   const boardSections = url.pathname.match(/^\/boards\/([^/]+)\/sections$/);

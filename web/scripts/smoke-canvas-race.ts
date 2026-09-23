@@ -59,8 +59,13 @@ async function main() {
     await page.evaluate((n) => window.__digsiteBoard?.select(n), attempt);
     await page.evaluate((n) => window.__digsiteBoard?.select(n + 20), attempt);
     await page.waitForTimeout(150);
+    // Slice 2: the board's inline "new sheet" form moved into the
+    // selection tray (board/Tray.tsx) — "Start a sheet" reveals a
+    // name-in-place input, same two-step shape as the old form's own
+    // fill-then-submit.
+    await page.click('[data-testid="board-tray-start-sheet"]');
     await page.fill(
-      '[data-testid="sheet-name"]',
+      '[data-testid="board-tray-sheet-name"]',
       `race-${attempt}-${Date.now()}`,
     );
 
@@ -70,11 +75,7 @@ async function main() {
     await client.send('Emulation.setCPUThrottlingRate', {
       rate: CPU_THROTTLE_RATE,
     });
-    await page
-      .locator('form')
-      .filter({ has: page.locator('[data-testid="sheet-name"]') })
-      .getByRole('button', { name: 'new sheet' })
-      .click();
+    await page.click('[data-testid="board-tray-sheet-create"]');
     await page.waitForURL(/\/s\//, { timeout: 10000 });
     await page.waitForFunction(
       () => typeof window.__digsite !== 'undefined',

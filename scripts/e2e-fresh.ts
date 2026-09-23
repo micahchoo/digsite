@@ -2,8 +2,8 @@
 // docs/phases/5-hardening.md section 6: creates a fresh database on the
 // running `digsite-db` container, migrates, seeds through the real HTTP API
 // (server/src/seed.ts's own pattern), starts server and web on free ports
-// with a temp DATA_DIR, runs the three scripted e2e suites
-// (e2e/src/{run,groups-life,sheet-hour}.ts) against them, then tears
+// with a temp DATA_DIR, runs the scripted e2e suites
+// (e2e/src/{board-selection,run,groups-life,sheet-hour}.ts), then tears
 // everything down: stops both processes, drops the database, deletes the
 // temp dir. Exits nonzero on any suite failure or setup error.
 //
@@ -215,9 +215,10 @@ async function main() {
     await waitUp(webOrigin);
     log('web up');
 
-    // -- the three scripted suites -----------------------------------------------
+    // -- scripted suites --------------------------------------------------------
     const suiteEnv = { SERVER_ORIGIN: serverOrigin, WEB_ORIGIN: webOrigin };
     const suites: { cmd: string[]; env?: Record<string, string> }[] = [
+      { cmd: ['bun', 'run', 'src/board-selection.ts'], env: suiteEnv },
       { cmd: ['bun', 'run', 'src/run.ts'], env: suiteEnv },
       { cmd: ['bun', 'run', 'src/groups-life.ts'], env: suiteEnv },
       {
@@ -275,7 +276,9 @@ async function main() {
     console.log('\ne2e-fresh: FAIL');
     process.exit(1);
   }
-  console.log('\ne2e-fresh: PASS (run.ts, groups-life.ts, sheet-hour.ts)');
+  console.log(
+    '\ne2e-fresh: PASS (board-selection.ts, run.ts, groups-life.ts, sheet-hour.ts)',
+  );
   process.exit(0);
 }
 

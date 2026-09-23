@@ -273,6 +273,142 @@ async function main() {
     `PASS: tiles refetched after upload (${tilesBeforeUpload} -> ${tileRequests.length} /tiles/ requests)`,
   );
 
+  // -- batch progress: reflect accepted images before a later batch finishes,
+  // and keep a large upload queue scrollable and readable in dark mode ------
+  const countText = await page.locator('.board-count-badge').innerText();
+  const countBeforeBatch = Number.parseInt(countText, 10);
+  assert(
+    Number.isFinite(countBeforeBatch),
+    `unexpected board count "${countText}"`,
+  );
+
+  let secondBatchStarted!: () => void;
+  let releaseSecondBatch!: () => void;
+  const secondBatch = new Promise<void>((resolve) => {
+    secondBatchStarted = resolve;
+  });
+  const blocked = new Promise<void>((resolve) => {
+    releaseSecondBatch = resolve;
+  });
+  let postBatches = 0;
+  await page.route('**/boards/b1/images', async (route, request) => {
+    if (request.method() === 'POST' && ++postBatches === 2) {
+      secondBatchStarted();
+      await blocked;
+    }
+    await route.continue();
+  });
+
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'dark';
+  });
+  const manyFiles = Array.from({ length: 12 }, (_, i) => ({
+    name: `batch-${i + 1}.bin`,
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(`batch-file-${i + 1}`),
+  }));
+  await page.setInputFiles('[data-testid="upload-input"]', manyFiles);
+  await Promise.race([
+    secondBatch,
+    page.waitForTimeout(15_000).then(() => {
+      throw new Error('second upload batch was not reached');
+    }),
+  ]);
+  await page.waitForFunction(
+    (expectedCount: number) => {
+      const badge = document.querySelector('.board-count-badge');
+      return (
+        badge && Number.parseInt(badge.textContent ?? '', 10) === expectedCount
+      );
+    },
+    countBeforeBatch + 10,
+    { timeout: 5000 },
+  );
+  assert(
+    await page.locator('[data-testid="board-upload-button"]').isDisabled(),
+    'upload action should remain disabled while the second batch is held',
+  );
+  const queueLayout = await page
+    .locator('[data-testid="upload-rows"]')
+    .evaluate((el) => {
+      const queue = el as HTMLElement;
+      const list = queue.querySelector('.board-upload-list') as HTMLElement;
+      return {
+        queueHeight: queue.getBoundingClientRect().height,
+        listHeight: list.clientHeight,
+        listScrollHeight: list.scrollHeight,
+        queueBackground: getComputedStyle(queue).backgroundColor,
+        queueForeground: getComputedStyle(queue).color,
+        expectedBackground: (() => {
+          const probe = document.createElement('span');
+          probe.style.backgroundColor = 'var(--surface-raised)';
+          document.body.append(probe);
+          const color = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return color;
+        })(),
+      };
+    });
+  assert(
+    queueLayout.queueHeight <= 362,
+    `upload queue is unbounded (${queueLayout.queueHeight}px)`,
+  );
+  assert(
+    queueLayout.listScrollHeight > queueLayout.listHeight,
+    '12 upload rows should scroll inside the bounded queue',
+  );
+  assert(
+    queueLayout.queueBackground === queueLayout.expectedBackground,
+    'upload queue must use the active theme surface token',
+  );
+  assert(
+    queueLayout.queueBackground !== 'rgb(255, 255, 255)',
+    'dark upload queue should not use a hard-coded white surface',
+  );
+  assert(
+    queueLayout.queueForeground !== queueLayout.queueBackground,
+    'upload text must remain distinct from its surface',
+  );
+  await page.screenshot({
+    path: new URL('board-upload-queue.png', SCREEN_DIR).pathname,
+  });
+  console.log(
+    'PASS: first 10 uploads update the board while batch 2 is held; dark queue is bounded and scrollable',
+  );
+  releaseSecondBatch();
+  await page.waitForFunction(
+    () => {
+      const rows = Array.from(
+        document.querySelectorAll('[data-testid="upload-row"]'),
+      );
+      return (
+        rows.length === 12 &&
+        rows.every((r) => r.getAttribute('data-status') === 'ready')
+      );
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+  await page.waitForFunction(
+    (expectedCount: number) => {
+      const badge = document.querySelector('.board-count-badge');
+      return (
+        badge && Number.parseInt(badge.textContent ?? '', 10) === expectedCount
+      );
+    },
+    countBeforeBatch + 12,
+    { timeout: 5000 },
+  );
+  await page.unroute('**/boards/b1/images');
+  await page.locator('[data-testid="upload-close"]').click();
+  assert(
+    (await page.locator('[data-testid="upload-rows"]').count()) === 0,
+    'completed upload activity can be dismissed',
+  );
+  await page.evaluate(() => {
+    delete document.documentElement.dataset.theme;
+  });
+
   await browser.close();
   console.log('smoke-board: all assertions passed');
 }

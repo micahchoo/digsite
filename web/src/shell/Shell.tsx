@@ -4,12 +4,13 @@
 // /g/:id, /b/:id, /s/:id under it as a layout route) — a route change
 // swaps only the <Outlet/> content, so the rail and channel column are
 // never unmounted by navigating between groups/boards/sheets.
-import { useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { Outlet } from 'react-router';
 import { authClient, useSession } from '../lib/auth.ts';
 import { ChannelColumn } from './ChannelColumn.tsx';
 import { GroupRail } from './GroupRail.tsx';
 import { QuickSwitcher } from './QuickSwitcher.tsx';
+import { RightColumnSetter } from './RightColumn.tsx';
 import './shell.css';
 import { TopBar } from './TopBar.tsx';
 import { useShellData } from './useShellData.ts';
@@ -23,6 +24,20 @@ declare global {
   interface Window {
     __digsiteShell?: { mounts: number };
   }
+}
+
+// Slice 2 follow-up (c): after "sign out", a reload must show the sign-in
+// page every time. `authClient.signOut()` alone raced — the session
+// nanostore could still read "signed in" for a tick after the cookie
+// cleared (smoke-groups.ts's own header comment on the flake it worked
+// around by clearing the cookie directly instead of using this button).
+// Awaiting the request, THEN hard-navigating with `window.location.href`
+// (never `navigate()`) throws away every in-memory store — better-auth's
+// session cache included — so there is nothing stale left to race a
+// reload against.
+async function signOut() {
+  await authClient.signOut();
+  window.location.href = '/';
 }
 
 export function Shell() {
@@ -52,6 +67,13 @@ export function Shell() {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        // Slice 2 follow-up (d): capture phase + stopPropagation, so this
+        // fires and consumes the event BEFORE it can reach Excalidraw's own
+        // bubble-phase keydown binding on the sheet canvas (its own
+        // Ctrl/Cmd+K opens a "create link" dialog) — the seam
+        // (sheet-canvas-seam.md) stays untouched; the shell wins the race
+        // by going first, globally, on every page.
+        e.stopPropagation();
         setSwitcherOpen(true);
         return;
       }
@@ -60,25 +82,20 @@ export function Shell() {
         setRightOpen(false);
       }
     }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
 
   const closeSwitcher = useCallback(() => setSwitcherOpen(false), []);
 
-  // docs/ux/design.md §3.4: the right column exists only on a board or
-  // sheet page. NOT rendered yet, even there: Board.tsx and Sheet.tsx
-  // already carry their own inline right-side panel (selection/allowlist,
-  // the sheet Inspector) at their existing fixed width, predating the
-  // shell. Stacking an empty shell-owned column next to that live one
-  // double-counted the width on every board/sheet page — it doesn't just
-  // look wrong, it shrinks deck.gl's canvas and Excalidraw's stage enough
-  // to move where a click/hover/drag lands, which broke every
-  // coordinate-sensitive existing smoke (selection rank, region drag,
-  // foreign-shape hit test). Moving that inline content INTO this column
-  // is slice 2/3's job (design.md §7); until then the frame stays built
-  // (below) but unused, so nothing here needs revisiting once that lands.
-  const hasRightColumn = false;
+  // docs/ux/design.md §3.4: the right column exists on a board or sheet
+  // page. Slice 2 turns it on for BOARDS — Board.tsx now feeds it the
+  // detail panel, Explore and the sheet list through `useRightColumn`
+  // (RightColumn.tsx), replacing its old inline `.board-side` column.
+  // Sheet.tsx still carries its own inline panel (the Inspector) — moving
+  // that in is slice 3's job, tracked there, not here.
+  const [rightContent, setRightContent] = useState<ReactNode>(null);
+  const hasRightColumn = route.kind === 'board';
 
   return (
     <div
@@ -109,7 +126,7 @@ export function Shell() {
           </span>
           <button
             type="button"
-            onClick={() => void authClient.signOut()}
+            onClick={() => void signOut()}
             data-testid="shell-sign-out"
           >
             sign out
@@ -125,7 +142,9 @@ export function Shell() {
           hasRightColumn={hasRightColumn}
         />
         <div className="shell-page" data-testid="shell-page">
-          <Outlet />
+          <RightColumnSetter value={setRightContent}>
+            <Outlet context={route} />
+          </RightColumnSetter>
         </div>
       </div>
       {hasRightColumn && (
@@ -158,7 +177,8 @@ export function Shell() {
                 ×
               </button>
             </div>
-            <div className="muted shell-right-empty">Nothing here yet.</div>
+            <div className="muted shell-right-empty">Nobody else yet.</div>
+            {rightContent}
           </aside>
         </>
       )}

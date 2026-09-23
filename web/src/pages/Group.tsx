@@ -10,7 +10,7 @@ import type { Role } from '@digsite/shared/api';
 // handles 403 with the reason"). A row's own error, not a global banner, is
 // where that reason lands.
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useOutletContext, useParams } from 'react-router';
 import {
   ErrorState,
   type ErrorStateInfo,
@@ -20,12 +20,15 @@ import { ApiError, api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
 import { isValidEmail } from '../lib/email.ts';
 import { plural } from '../lib/plural.ts';
+import type { ShellRoute } from '../shell/useShellData.ts';
+import './group.css';
 
 const ROLES: Role[] = ['owner', 'admin', 'member'];
 
 export function Group() {
   const { id } = useParams<{ id: string }>();
   const groupId = id ?? '';
+  const { groupName } = useOutletContext<ShellRoute>();
   const { data: session } = useSession();
 
   const [boards, setBoards] = useState<
@@ -203,160 +206,314 @@ export function Group() {
   if (pageError) return <ErrorState info={pageError} />;
 
   return (
-    <div className="page">
-      <h1>group</h1>
-      {error && <div className="error">{error}</div>}
-
-      <div className="card">
-        <h3>boards</h3>
-        <table data-testid="board-list">
-          <tbody>
-            {boards.map((b) => (
-              <tr key={b.id}>
-                <td>
-                  <Link to={`/b/${b.id}`}>{b.name}</Link>
-                </td>
-                <td className="muted">{b.open ? 'open' : 'private'}</td>
-                <td className="muted">{plural(b.imageCount, 'image')}</td>
-                <td className="muted">{plural(b.sheetCount, 'sheet')}</td>
-                <td className="muted">
-                  {b.lastActivity
-                    ? new Date(b.lastActivity).toLocaleString()
-                    : 'no activity'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="card">
-        <h3>create a board</h3>
-        <form className="row" onSubmit={(e) => void createBoard(e)}>
-          <input
-            data-testid="board-name"
-            placeholder="name"
-            value={boardName}
-            onChange={(e) => setBoardName(e.target.value)}
-          />
-          <button type="submit">create</button>
-        </form>
-        <label className="row" style={{ marginBottom: 2 }}>
-          <input
-            type="radio"
-            name="board-open"
-            checked={boardOpen}
-            onChange={() => setBoardOpen(true)}
-          />
-          <span>
-            <b>Open</b> — every member of this group can see this board.
-          </span>
-        </label>
-        <label className="row">
-          <input
-            type="radio"
-            name="board-open"
-            checked={!boardOpen}
-            onChange={() => setBoardOpen(false)}
-          />
-          <span>
-            <b>Private</b> — only the members you add to its allowlist can see
-            it.
-          </span>
-        </label>
-      </div>
-
-      <div className="card">
-        <h3>recent sheets</h3>
-        {recentSheets.length === 0 && <div className="muted">none yet</div>}
-        <ul
-          style={{ listStyle: 'none', padding: 0 }}
-          data-testid="recent-sheets"
-        >
-          {recentSheets.map((s) => (
-            <li key={s.id} className="row">
-              <Link to={`/s/${s.id}`}>{s.name}</Link>
-              <span className="muted">on {s.boardName}</span>
-              {s.savedAt && (
-                <span className="muted">
-                  {new Date(s.savedAt).toLocaleString()}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="card">
-        <h3>invite</h3>
-        <div className="row">
-          <input
-            data-testid="invite-email"
-            placeholder="email, or leave blank for a link anyone can use"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-          />
-          <button
-            type="button"
-            data-testid="invite-send"
-            onClick={() => void sendInvite()}
-          >
-            create invite link
-          </button>
+    <div className="page group-home">
+      <header className="group-heading">
+        <div>
+          <div className="group-eyebrow">Image workspace</div>
+          <h1>{groupName ?? 'Group'}</h1>
+          <p className="group-heading-meta">
+            {plural(boards.length, 'board')} <span aria-hidden="true">·</span>{' '}
+            {plural(members.length, 'member')}
+          </p>
         </div>
-        {inviteError && <div className="error">{inviteError}</div>}
-        {inviteUrl && (
-          <div className="row">
-            <input
-              data-testid="invite-url"
-              readOnly
-              value={inviteUrl}
-              style={{ flex: 1 }}
-            />
-            <button
-              type="button"
-              data-testid="invite-copy"
-              onClick={() => void copyInviteUrl()}
-            >
-              {inviteCopied ? 'copied' : 'copy'}
-            </button>
-          </div>
-        )}
+        <a className="group-create-shortcut" href="#group-create-board">
+          <span aria-hidden="true">＋</span> Create a board
+        </a>
+      </header>
+      {error && <div className="error group-page-error">{error}</div>}
 
-        <h4>pending</h4>
-        {pendingError && <div className="error">{pendingError}</div>}
-        {!pendingError && pending.length === 0 && (
-          <div className="muted">none</div>
-        )}
-        <ul
-          data-testid="pending-invitations"
-          style={{ listStyle: 'none', padding: 0 }}
-        >
-          {pending.map((inv) => (
-            <li key={inv.id} className="row">
-              <span className="muted">{inv.email ?? '(link only)'}</span>
+      <div className="group-layout">
+        <main className="group-main">
+          <section
+            className="group-section"
+            aria-labelledby="group-boards-heading"
+          >
+            <div className="group-section-heading">
+              <div>
+                <h2 id="group-boards-heading">Boards</h2>
+                <p>Collections of images for your group to explore.</p>
+              </div>
+              <span className="group-count">{boards.length}</span>
+            </div>
+            {boards.length === 0 ? (
+              <div className="group-empty">
+                <h3>Under construction.</h3>
+                <p>This group hasn’t started a board yet.</p>
+                <a href="#group-create-board">Create the first board</a>
+              </div>
+            ) : (
+              <ul className="group-board-list" data-testid="board-list">
+                {boards.map((b) => (
+                  <li className="group-board-card" key={b.id}>
+                    <Link className="group-board-link" to={`/b/${b.id}`}>
+                      <span className="group-board-mark" aria-hidden="true">
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          aria-hidden="true"
+                        >
+                          <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+                          <rect
+                            x="13.5"
+                            y="3.5"
+                            width="7"
+                            height="7"
+                            rx="1.5"
+                          />
+                          <rect
+                            x="3.5"
+                            y="13.5"
+                            width="7"
+                            height="7"
+                            rx="1.5"
+                          />
+                          <rect
+                            x="13.5"
+                            y="13.5"
+                            width="7"
+                            height="7"
+                            rx="1.5"
+                          />
+                        </svg>
+                      </span>
+                      <span className="group-board-copy">
+                        <span className="group-board-title">{b.name}</span>
+                        <span className="group-board-meta">
+                          {plural(b.imageCount, 'image')}{' '}
+                          <span aria-hidden="true">·</span>{' '}
+                          {plural(b.sheetCount, 'sheet')}
+                        </span>
+                      </span>
+                      <span
+                        className={
+                          b.open
+                            ? 'group-access group-access--open'
+                            : 'group-access'
+                        }
+                      >
+                        <span aria-hidden="true">{b.open ? '◌' : '⌑'}</span>
+                        {b.open ? 'Open' : 'Private'}
+                      </span>
+                      <span className="group-board-activity">
+                        {b.lastActivity
+                          ? `Active ${new Date(b.lastActivity).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+                          : 'No activity yet'}
+                      </span>
+                      <span className="group-board-arrow" aria-hidden="true">
+                        ↗
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section
+            className="group-section group-recent"
+            aria-labelledby="group-recent-heading"
+          >
+            <div className="group-section-heading">
+              <div>
+                <h2 id="group-recent-heading">Recent sheets</h2>
+                <p>Shared investigations, from newest activity.</p>
+              </div>
+            </div>
+            {recentSheets.length === 0 ? (
+              <p className="group-quiet-empty">No recent sheets yet.</p>
+            ) : (
+              <ul className="group-recent-list" data-testid="recent-sheets">
+                {recentSheets.map((s) => (
+                  <li key={s.id}>
+                    <Link to={`/s/${s.id}`}>
+                      <span className="group-sheet-glyph" aria-hidden="true">
+                        ▧
+                      </span>
+                      <span className="group-recent-copy">
+                        <span className="group-recent-title">{s.name}</span>
+                        <span className="group-recent-board">
+                          in {s.boardName}
+                        </span>
+                      </span>
+                      {s.savedAt && (
+                        <time
+                          className="group-recent-time"
+                          dateTime={s.savedAt}
+                        >
+                          {new Date(s.savedAt).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </time>
+                      )}
+                      <span className="group-board-arrow" aria-hidden="true">
+                        ↗
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </main>
+
+        <aside className="group-tools" aria-label="Group tools">
+          <section className="group-panel" id="group-create-board">
+            <div className="group-panel-heading">
+              <h2>Create a board</h2>
+              <p>Give a collection its own place to grow.</p>
+            </div>
+            <form onSubmit={(e) => void createBoard(e)}>
+              <label className="group-field-label" htmlFor="group-board-name">
+                Board name
+              </label>
+              <div className="group-create-row">
+                <input
+                  id="group-board-name"
+                  data-testid="board-name"
+                  placeholder="e.g. Field notes"
+                  value={boardName}
+                  onChange={(e) => setBoardName(e.target.value)}
+                />
+                <button className="group-primary-action" type="submit">
+                  Create
+                </button>
+              </div>
+              <fieldset className="group-visibility">
+                <legend>Who can see it?</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="board-open"
+                    checked={boardOpen}
+                    onChange={() => setBoardOpen(true)}
+                  />
+                  <span>
+                    <b>Open</b>
+                    <small>Anyone in this group</small>
+                  </span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="board-open"
+                    checked={!boardOpen}
+                    onChange={() => setBoardOpen(false)}
+                  />
+                  <span>
+                    <b>Private</b>
+                    <small>Only people on its list</small>
+                  </span>
+                </label>
+              </fieldset>
+            </form>
+          </section>
+
+          <section className="group-panel group-invite-panel">
+            <div className="group-panel-heading">
+              <h2>Invite people</h2>
+              <p>Bring another member into the workspace.</p>
+            </div>
+            <label className="group-field-label" htmlFor="group-invite-email">
+              Email address
+            </label>
+            <div className="group-create-row">
+              <input
+                id="group-invite-email"
+                data-testid="invite-email"
+                type="email"
+                placeholder="name@example.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+              />
               <button
                 type="button"
-                data-testid={`revoke-${inv.id}`}
-                onClick={() => void revokeInvitation(inv.id)}
+                data-testid="invite-send"
+                onClick={() => void sendInvite()}
               >
-                revoke
+                Invite
               </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+            </div>
+            {inviteError && (
+              <div className="error group-inline-error">{inviteError}</div>
+            )}
+            {inviteUrl && (
+              <div className="group-invite-result">
+                <label className="group-field-label" htmlFor="group-invite-url">
+                  Invitation link
+                </label>
+                <div className="group-create-row">
+                  <input
+                    id="group-invite-url"
+                    data-testid="invite-url"
+                    readOnly
+                    value={inviteUrl}
+                  />
+                  <button
+                    type="button"
+                    data-testid="invite-copy"
+                    onClick={() => void copyInviteUrl()}
+                  >
+                    {inviteCopied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            )}
 
-      <div className="card">
-        <h3>members</h3>
-        <table data-testid="member-list">
-          <tbody>
-            {members.map((m) => (
-              <tr key={m.userId} data-testid={`member-row-${m.userId}`}>
-                <td>{m.name}</td>
-                <td className="muted">{m.email}</td>
-                <td>
+            <div className="group-pending">
+              <h3>Pending invitations</h3>
+              {pendingError && (
+                <div className="error group-inline-error">{pendingError}</div>
+              )}
+              {!pendingError && pending.length === 0 && (
+                <p className="group-quiet-empty">No invitations waiting.</p>
+              )}
+              <ul data-testid="pending-invitations">
+                {pending.map((inv) => (
+                  <li key={inv.id}>
+                    <span>{inv.email ?? 'Link invitation'}</span>
+                    <button
+                      type="button"
+                      data-testid={`revoke-${inv.id}`}
+                      onClick={() => void revokeInvitation(inv.id)}
+                    >
+                      Revoke
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+
+          <section className="group-panel group-members-panel">
+            <div className="group-panel-heading">
+              <h2>Members</h2>
+              <p>{plural(members.length, 'person')} in this group.</p>
+            </div>
+            <div className="group-member-list" data-testid="member-list">
+              {members.map((m) => (
+                <div
+                  className="group-member-row"
+                  key={m.userId}
+                  data-testid={`member-row-${m.userId}`}
+                >
+                  <span className="group-member-avatar" aria-hidden="true">
+                    {m.name.trim().slice(0, 1).toUpperCase() || '?'}
+                  </span>
+                  <span className="group-member-identity">
+                    <span className="group-member-name">{m.name}</span>
+                    <span className="group-member-email">{m.email}</span>
+                    <span
+                      className="error"
+                      data-testid={`member-error-${m.userId}`}
+                    >
+                      {rowError[m.userId] ?? ''}
+                    </span>
+                  </span>
                   <select
+                    aria-label={`${m.name} role`}
                     data-testid={`role-select-${m.userId}`}
                     value={m.role}
                     onChange={(e) =>
@@ -369,40 +526,42 @@ export function Group() {
                       </option>
                     ))}
                   </select>
-                </td>
-                <td>
                   <button
+                    className="group-member-remove"
                     type="button"
                     data-testid={`remove-${m.userId}`}
                     onClick={() => void removeMember(m.userId)}
                   >
-                    remove
+                    Remove
                   </button>
-                </td>
-                <td className="error" data-testid={`member-error-${m.userId}`}>
-                  {rowError[m.userId] ?? ''}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="row" style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            data-testid="leave-group"
-            onClick={() => void leaveGroup()}
-          >
-            leave group
-          </button>
-          <span className="muted">
-            {session?.user.email ? `signed in as ${session.user.email}` : ''}
-          </span>
-        </div>
-        {leaveError && (
-          <div className="error" data-testid="leave-error">
-            {leaveError}
-          </div>
-        )}
+                </div>
+              ))}
+            </div>
+            <div className="group-account-row">
+              <button
+                className="group-leave-action"
+                type="button"
+                data-testid="leave-group"
+                onClick={() => void leaveGroup()}
+              >
+                Leave group
+              </button>
+              <span className="muted">
+                {session?.user.email
+                  ? `Signed in as ${session.user.email}`
+                  : ''}
+              </span>
+            </div>
+            {leaveError && (
+              <div
+                className="error group-inline-error"
+                data-testid="leave-error"
+              >
+                {leaveError}
+              </div>
+            )}
+          </section>
+        </aside>
       </div>
     </div>
   );

@@ -19,21 +19,24 @@ function assert(cond: unknown, message: string): asserts cond {
 }
 
 async function signInAs(page: Page, key: string) {
-  // Switch identity by clearing the session cookie directly, then loading
-  // "/" fresh — not by clicking the UI's "sign out" button. That used to
-  // work (a hard navigation after the click, per the comment this
-  // replaces), but the shell (web/src/shell/Shell.tsx) fetches groups/
-  // boards/sheets on every authenticated navigation, and the extra async
-  // work stretches the window for a real race in better-auth's session
-  // nanostore: a stale "signed in" value can survive a tick past the
-  // cookie actually clearing, so a reload right after the click sometimes
-  // still reads the old session and bounces straight back to /groups —
-  // reproduced, not theoretical (this function used to do exactly that
-  // reload and still flaked under the shell's added load). Clearing the
-  // cookie through the browser context has no such race: the server has
-  // nothing to say "signed in" about before `page.goto` ever fires.
-  await page.context().clearCookies();
-  await page.goto(WEB);
+  // Slice 2 follow-up (c): back to signing out through the UI, now that
+  // Shell.tsx's sign-out button awaits the request, then hard-navigates
+  // with `window.location.href` (never `navigate()`) — the hard nav
+  // discards every in-memory store, including better-auth's session
+  // nanostore, before this function's own `page.goto` ever fires, so the
+  // race this comment used to describe (a stale "signed in" value
+  // surviving a tick past the cookie clearing) no longer exists to flake.
+  if (
+    await page
+      .getByTestId('shell-sign-out')
+      .isVisible()
+      .catch(() => false)
+  ) {
+    await page.getByTestId('shell-sign-out').click();
+    await page.waitForURL(`${WEB}/`);
+  } else {
+    await page.goto(WEB);
+  }
   await page.waitForSelector('[data-testid="email"]');
   await page.getByTestId('email').fill(`${key}@example.test`);
   await page.getByTestId('password').fill('password1');

@@ -21,6 +21,7 @@ import {
   type SheetSummaryWithStats,
   api,
 } from '../lib/api.ts';
+import { onSheetsChanged } from '../lib/sheetEvents.ts';
 
 export type RouteKind = 'other' | 'groups' | 'group' | 'board' | 'sheet';
 
@@ -178,8 +179,17 @@ export function useShellData(): ShellData {
   }, [location.pathname]);
 
   const groupId = resolved.groupId;
+  // Slice 2 follow-up (a): a sheet created/renamed/deleted/grown elsewhere
+  // on the page (the board tray, the sheet page's own rename) bumps this so
+  // the effect below refetches — an event the pages emit, never a poll.
+  const [sheetsTick, setSheetsTick] = useState(0);
+  useEffect(() => onSheetsChanged(() => setSheetsTick((n) => n + 1)), []);
 
-  // -- the current group's boards, each with its own sheets --------------
+  // -- the current group's boards, each with its own sheets ----------------
+  // Slice 2 follow-up (b): ONE `GET /groups/:id/sheets` call instead of a
+  // `listSheets` per board — the sheet list already carries every board's
+  // sheets in one response; group it client-side.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refetch is triggered BY sheetsTick bumping, not by reading it
   useEffect(() => {
     let cancelled = false;
     if (!groupId) {
@@ -199,17 +209,14 @@ export function useShellData(): ShellData {
           (b.lastActivity ?? '').localeCompare(a.lastActivity ?? ''),
         );
         setBoards(sorted);
-        const entries = await Promise.all(
-          sorted.map(async (b) => {
-            try {
-              return [b.id, await api.listSheets(b.id)] as const;
-            } catch {
-              return [b.id, []] as const;
-            }
-          }),
-        );
+        const allSheets = groupId ? await api.listGroupSheets(groupId) : [];
         if (cancelled) return;
-        setSheetsByBoard(Object.fromEntries(entries));
+        const grouped: Record<string, SheetSummaryWithStats[]> = {};
+        for (const b of sorted) grouped[b.id] = [];
+        for (const s of allSheets) {
+          grouped[s.boardId]?.push(s);
+        }
+        setSheetsByBoard(grouped);
       } catch {
         if (!cancelled) {
           setBoards([]);
@@ -221,7 +228,7 @@ export function useShellData(): ShellData {
     return () => {
       cancelled = true;
     };
-  }, [groupId]);
+  }, [groupId, sheetsTick]);
 
   const groupName = useMemo(
     () => groups.find((g) => g.id === groupId)?.name ?? null,
