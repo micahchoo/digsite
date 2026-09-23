@@ -15,7 +15,7 @@ describe('composed-tile cache generations', () => {
     const url = `/boards/${boardId}/tiles/name.asc/0/0/0.png`;
     const since = composedGeneration(boardId); // compose starts: old order
     invalidateComposedTiles(boardId); // a rebuild lands meanwhile
-    expect(setComposedTile(url, boardId, Buffer.from('old'), since)).toBe(
+    expect(setComposedTile(url, boardId, Buffer.from('old'), since, 'v1')).toBe(
       false,
     );
     expect(getComposedTile(url)).toBeUndefined();
@@ -26,7 +26,7 @@ describe('composed-tile cache generations', () => {
     const url = `/boards/${boardId}/tiles/name.asc/0/0/1.png`;
     const since = composedGeneration(boardId);
     invalidateAllComposedTiles();
-    expect(setComposedTile(url, boardId, Buffer.from('old'), since)).toBe(
+    expect(setComposedTile(url, boardId, Buffer.from('old'), since, 'v1')).toBe(
       false,
     );
   });
@@ -36,7 +36,10 @@ describe('composed-tile cache generations', () => {
     const url = `/boards/${boardId}/tiles/name.asc/0/0/2.png`;
     const since = composedGeneration(boardId);
     invalidateComposedTiles(crypto.randomUUID());
-    expect(setComposedTile(url, boardId, Buffer.from('new'), since)).toBe(true);
-    expect(getComposedTile(url)?.toString()).toBe('new');
+    expect(setComposedTile(url, boardId, Buffer.from('new'), since, 'v2')).toBe(
+      true,
+    );
+    const hit = getComposedTile(url);
+    expect([hit?.buf.toString(), hit?.version]).toEqual(['new', 'v2']);
   });
 });

@@ -5,7 +5,10 @@
 // .claude/rules/tile-cache-is-for-the-second-viewer.md.
 const BUDGET_BYTES = 64 * 1024 * 1024;
 
-type Entry = { buf: Buffer; boardId: string };
+/** `version` is the order the tile was composed from (ranks.ts
+ * RankOrder.version), so a hit can say which build it shows. */
+type Entry = { buf: Buffer; boardId: string; version: string };
+export type ComposedTile = { buf: Buffer; version: string };
 const cache = new Map<string, Entry>();
 let bytes = 0;
 
@@ -23,12 +26,12 @@ export function composedGeneration(boardId: string): string {
   return `${everyBoard}.${generations.get(boardId) ?? 0}`;
 }
 
-export function getComposedTile(url: string): Buffer | undefined {
+export function getComposedTile(url: string): ComposedTile | undefined {
   const hit = cache.get(url);
   if (!hit) return undefined;
   cache.delete(url);
   cache.set(url, hit); // touch for LRU
-  return hit.buf;
+  return { buf: hit.buf, version: hit.version };
 }
 
 /** Stores a composed tile, unless the board was invalidated since `since`
@@ -38,11 +41,12 @@ export function setComposedTile(
   boardId: string,
   buf: Buffer,
   since: string,
+  version: string,
 ): boolean {
   if (composedGeneration(boardId) !== since) return false;
   const existing = cache.get(url);
   if (existing) bytes -= existing.buf.length;
-  cache.set(url, { buf, boardId });
+  cache.set(url, { buf, boardId, version });
   bytes += buf.length;
   while (bytes > BUDGET_BYTES && cache.size > 0) {
     const oldestKey = cache.keys().next().value as string;

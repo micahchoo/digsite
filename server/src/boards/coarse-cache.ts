@@ -17,7 +17,9 @@ import { env } from '../env.ts';
 import { storageFromEnv } from '../storage/index.ts';
 import { coarseTilesPrefix } from './paths.ts';
 
-type SortEntry = { tiles: Map<string, Buffer>; bytes: number };
+/** `version` is the order build the tiles were materialised from. */
+type SortEntry = { tiles: Map<string, Buffer>; bytes: number; version: string };
+export type ResidentTile = { buf: Buffer; version: string };
 
 // key: "boardId:sortId", LRU by touch order (Map's own iteration order).
 const cache = new Map<string, SortEntry>();
@@ -54,13 +56,14 @@ export function getResidentTile(
   z: number,
   x: number,
   y: number,
-): Buffer | undefined {
+): ResidentTile | undefined {
   const key = entryKey(boardId, sortId);
   const entry = cache.get(key);
   if (!entry) return undefined;
   cache.delete(key);
   cache.set(key, entry); // touch for LRU
-  return entry.tiles.get(tileKey(z, x, y));
+  const buf = entry.tiles.get(tileKey(z, x, y));
+  return buf ? { buf, version: entry.version } : undefined;
 }
 
 function evictUntilFits(incoming: number): void {
@@ -81,6 +84,7 @@ export function setResidentSort(
   boardId: string,
   sortId: string,
   tiles: Map<string, Buffer>,
+  version: string,
 ): boolean {
   let bytes = 0;
   for (const buf of tiles.values()) bytes += buf.length;
@@ -90,7 +94,7 @@ export function setResidentSort(
   const existing = cache.get(key);
   if (existing) totalBytes -= existing.bytes;
   evictUntilFits(bytes);
-  cache.set(key, { tiles, bytes });
+  cache.set(key, { tiles, bytes, version });
   totalBytes += bytes;
   return true;
 }
@@ -112,6 +116,7 @@ export function setResidentSort(
 export async function loadResidentSortFromDisk(
   boardId: string,
   sortId: string,
+  version: string,
 ): Promise<boolean> {
   if (hasResidentSort(boardId, sortId)) return true;
   const storage = storageFromEnv();
@@ -145,7 +150,7 @@ export async function loadResidentSortFromDisk(
   }
 
   if (tiles.size === 0) return false;
-  return setResidentSort(boardId, sortId, tiles);
+  return setResidentSort(boardId, sortId, tiles, version);
 }
 
 /** Drops a board's resident sorts — every one, since staleness

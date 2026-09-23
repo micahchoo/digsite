@@ -16,7 +16,7 @@ import { Semaphore } from '../util/semaphore.ts';
 import { getResidentTile, loadResidentSortFromDisk } from './coarse-cache.ts';
 import { getPage, withPage } from './ladder.ts';
 import { coarseTilesPrefix } from './paths.ts';
-import { ensureRank, slotsForTile } from './ranks.ts';
+import { ensureRank, rankOrder, slotsForTile } from './ranks.ts';
 import {
   composedGeneration,
   getComposedTile,
@@ -168,15 +168,25 @@ export type TileResult = {
   cache: 'hit' | 'miss' | 'disk' | 'resident';
   rankMs: number;
   composeMs: number;
+  /** The order build these pixels show (RankOrder.version). */
+  version: string;
+  /** False while a cell is a pending placeholder: the pixels will change. */
+  final: boolean;
 };
 
-async function rankStateFresh(boardId: string, sid: string): Promise<boolean> {
+/** The build a (board, sort)'s materialised files show, or null when there
+ * are none to serve: stale, or not materialised since its last rebuild. */
+async function materialisedVersion(
+  boardId: string,
+  sid: string,
+): Promise<string | null> {
   const { rows } = await pool.query(
-    'SELECT stale, materialised_at FROM board_rank_state WHERE board_id = $1 AND sort_id = $2',
+    `SELECT stale, materialised_at, built_at::text AS version
+     FROM board_rank_state WHERE board_id = $1 AND sort_id = $2`,
     [boardId, sid],
   );
   const state = rows[0];
-  return !!state && !state.stale && !!state.materialised_at;
+  return state && !state.stale && state.materialised_at ? state.version : null;
 }
 
 /** Serves a z<=-3 tile once (board, sort) is materialised and not stale —
@@ -192,21 +202,32 @@ async function materialisedTile(
   z: Zoom,
   x: number,
   y: number,
-): Promise<{ png: Buffer; cache: 'disk' | 'resident' } | null> {
+): Promise<{
+  png: Buffer;
+  cache: 'disk' | 'resident';
+  version: string;
+} | null> {
   const resident = getResidentTile(boardId, sid, z, x, y);
-  if (resident) return { png: resident, cache: 'resident' };
-
-  if (!(await rankStateFresh(boardId, sid))) return null;
-
-  if (await loadResidentSortFromDisk(boardId, sid)) {
-    const loaded = getResidentTile(boardId, sid, z, x, y);
-    if (loaded) return { png: loaded, cache: 'resident' };
+  if (resident) {
+    return { png: resident.buf, cache: 'resident', version: resident.version };
   }
 
+  const version = await materialisedVersion(boardId, sid);
+  if (!version) return null;
+
+  if (await loadResidentSortFromDisk(boardId, sid, version)) {
+    const loaded = getResidentTile(boardId, sid, z, x, y);
+    if (loaded) {
+      return { png: loaded.buf, cache: 'resident', version: loaded.version };
+    }
+  }
+
+  // A rebuild and a new materialise between the read above and this one
+  // can only put a NEWER tile under this version, never an older one.
   const key = materialisedTileKey(boardId, sid, z, x, y);
   const bytes = await storageFromEnv().get(key);
   if (!bytes) return null;
-  return { png: Buffer.from(bytes), cache: 'disk' };
+  return { png: Buffer.from(bytes), cache: 'disk', version };
 }
 
 /** Composes (or returns cached, or reads materialised) the PNG for one
@@ -225,11 +246,23 @@ export async function tileFor(
 
   if (z <= -3) {
     const materialised = await materialisedTile(boardId, sid, z, x, y);
-    if (materialised) return { ...materialised, rankMs: 0, composeMs: 0 };
+    if (materialised) {
+      return { ...materialised, rankMs: 0, composeMs: 0, final: true };
+    }
   }
 
+  // Only tiles without pending cells are stored, so a hit is final.
   const cached = getComposedTile(cacheKey);
-  if (cached) return { png: cached, cache: 'hit', rankMs: 0, composeMs: 0 };
+  if (cached) {
+    return {
+      png: cached.buf,
+      cache: 'hit',
+      rankMs: 0,
+      composeMs: 0,
+      version: cached.version,
+      final: true,
+    };
+  }
 
   // A rebuild this request triggers invalidates the board itself, so bring
   // the order up to date first; THEN take the generation, before reading
@@ -238,7 +271,10 @@ export async function tileFor(
   const rankStart = performance.now();
   await ensureRank(boardId, sort);
   const since = composedGeneration(boardId);
-  const slots = await slotsForTile(boardId, sort, z, x, y);
+  // One order for the slots and the version, so the pixels are that
+  // build's and no other.
+  const order = await rankOrder(boardId, sort);
+  const slots = await slotsForTile(boardId, sort, z, x, y, order);
   const pendingSlots = await pendingSlotsFor(boardId, slots);
   const rankMs = performance.now() - rankStart;
 
@@ -246,6 +282,14 @@ export async function tileFor(
   const png = await composeTile(boardId, cellPx, slots, pendingSlots);
   const composeMs = performance.now() - composeStart;
 
-  if (pendingSlots.size === 0) setComposedTile(cacheKey, boardId, png, since);
-  return { png, cache: 'miss', rankMs, composeMs };
+  const final = pendingSlots.size === 0;
+  if (final) setComposedTile(cacheKey, boardId, png, since, order.version);
+  return {
+    png,
+    cache: 'miss',
+    rankMs,
+    composeMs,
+    version: order.version,
+    final,
+  };
 }

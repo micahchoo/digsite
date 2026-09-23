@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { COLS, type Zoom, tileRanks } from '@digsite/shared/board/grid';
 // Ranks (CONTEXT.md "Rank"): an image's position under one sort, 0..N-1,
 // rebuilt whole, never patched — see .claude/rules/ladder-slot-vs-rank.md.
@@ -54,6 +55,12 @@ export type RankOrder = {
    * (uploaded after it). Index past the end is also "not ranked". */
   rankOfSlot: Int32Array;
 };
+
+/** The version as a client carries it: short and URL-safe. A tile URL
+ * with `?v=` equal to its order's token may be cached for good. */
+export function orderToken(version: string): string {
+  return createHash('sha256').update(version).digest('base64url').slice(0, 16);
+}
 
 export function rankOf(order: RankOrder, slot: number): number {
   return slot < order.rankOfSlot.length ? (order.rankOfSlot[slot] ?? -1) : -1;
@@ -297,8 +304,10 @@ export async function slotsForTile(
   z: Zoom,
   x: number,
   y: number,
+  /** The order to read, when the caller must know which build it was. */
+  given?: RankOrder,
 ): Promise<(number | null)[]> {
-  const order = await rankOrder(boardId, sort);
+  const order = given ?? (await rankOrder(boardId, sort));
   return tileRanks(z, x, y).map((rank) =>
     rank >= 0 && rank < order.slotOfRank.length
       ? (order.slotOfRank[rank] as number)

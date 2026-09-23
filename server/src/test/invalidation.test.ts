@@ -70,6 +70,7 @@ describe('invalidation across processes', () => {
       boardId,
       Buffer.from('tile'),
       composedGeneration(boardId),
+      'v1',
     );
     await publishFromChild({ kind: 'ranks', boardId });
     expect(await until(() => getComposedTile(url) === undefined)).toBe(true);

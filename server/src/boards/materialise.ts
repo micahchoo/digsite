@@ -564,7 +564,7 @@ async function materialiseSortNow(
       );
     residentTiles.set(`${entry.z}/${entry.x}-${entry.y}`, entry.png);
   }
-  setResidentSort(boardId, sid, residentTiles);
+  setResidentSort(boardId, sid, residentTiles, order.version);
   // Installed here; any other process may hold the previous files.
   await publish({ kind: 'materialised', boardId });
 
