@@ -66,18 +66,45 @@ with image-graph's patterns mapped to them in
   z=0, and past z=0.5 `board/detail.ts` draws each visible cell's own
   preview.
 
-`smoke-sheet-surroundings.ts` hung forever on a failure (`exitCode` with
-Chromium still open). It now calls `process.exit(1)`. The five codex smoke
-runs from 2026-09-22 are that hang; the user decides about them.
+Horizon 1 is done, and all of it is committed on main (no Claude attribution;
+the user asked to commit as I go, 2026-09-23). Also done since then:
+- Horizon 1 finish: captions under pictures, a dashed band around a group,
+  cursors that say what a press will do (`gestures.ts#cursorFor`), the
+  sheet header ("Relations on this sheet" chips, "No changes yet" /
+  "Synced 5s ago").
+- digsite-1b's seven frontend items: Find by Meaning (best 24, top 12 as
+  pictures, Show more) and More like this; folder import from the Actions
+  menu (`board/FolderImport.tsx`); a 507 stops the upload queue; captured
+  camera properties shown as Taken / Camera / Place; a rank-less image
+  opens instead of ignoring the click; shared API types.
+- Horizon 2: Compare (`components/Compare.tsx`, `compare-view.ts`): side
+  by side, swipe, overlay with a difference blend, one zoom for both.
+  From a connection's details or two pictures in the tray. Stamps: who made
+  and last changed a claim (`customData.made/edited`; digsite-1b signs them
+  in the room). Replies on a claim (`claim_replies`, 0023,
+  `sheets/replies.ts`, `sheet/Discussion.tsx`).
+- Horizon 3 started: "How are they connected?" (`board/path.ts`,
+  `board/PathPanel.tsx`) finds the chain of claims up to six steps across
+  sheets and draws it.
+
+Found and fixed on the way: `smoke-sheet-surroundings.ts` hung forever on
+a failure (the five codex smoke trees; digsite-1b killed them). Found and
+reported to digsite-1b, who fixed it (fed0b5d): `statfs` overflowed on the
+24 TB volume and every upload got 507.
 
 Verify with `bun run smoke` (15 scripts),
-`bun run e2e:fresh src/sense-claims.ts` (the real-server walk: claims 1-7),
-`cd web && bun test`, and `cd shared && bun test`. Next in horizon 1:
-captions under pictures, a group band, cursors by what is under the pointer,
-the sheet header ("not saved yet", the relation select). Then horizons 2-6.
-Also open: `shell.css` stacks overrides; ~20 inline SVGs sit outside `Icon`,
-the sheet toolbar's among them. Biome does not catch a hook after an early
-return; one shipped briefly in `Sheet.tsx` and blanked the page.
+`bun run e2e:fresh src/sense-claims.ts` (claims 1-10 on the real server;
+8 needs `IMPORT_ROOTS=<dir>`), `cd web && bun test`, `cd shared && bun
+test`, and `cd server && bun test replies-routes making-sense access.test
+routes-audit`.
+
+Next: horizon 2's last item (extract a region as its own picture: needs a
+server crop route), then horizon 3 (explore from a connection or a
+relation, a graph view with hop rings), 4 (suggestions from embeddings:
+digsite-1b is building near-duplicates as a route like /similar), 5 (stable
+links, read-only view, export) and 6 (dark mode, phone width, arrow keys,
+announcer, CI). Also open: `shell.css` stacks overrides; ~20 inline SVGs
+sit outside `Icon`. Biome does not catch a hook after an early return.
 
 ## Server roadmap (2026-09-23)
 
