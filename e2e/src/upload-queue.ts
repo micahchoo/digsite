@@ -3,6 +3,8 @@
 import { createCanvas } from '@napi-rs/canvas';
 import { chromium } from 'playwright';
 import { SERVER, WEB, signIn } from './session.ts';
+const SMALL_IMAGES = 133;
+const TOTAL_IMAGES = SMALL_IMAGES + 1;
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -35,6 +37,11 @@ async function main() {
       },
     ]);
     const page = await context.newPage();
+    let rateLimited = 0;
+    page.on('response', (response) => {
+      if (response.status() === 429 && response.url().includes('/images'))
+        rateLimited++;
+    });
     await page.goto(`${WEB}/b/${boardId}`);
     await page.getByTestId('upload-input').waitFor({ state: 'attached' });
     const canvas = createCanvas(8, 8);
@@ -42,7 +49,7 @@ async function main() {
     const png = canvas.toBuffer('image/png');
     // Trailing bytes keep a valid PNG while exercising the >8MB tus branch.
     const large = Buffer.concat([png, Buffer.alloc(8 * 1024 * 1024 + 1)]);
-    const files = Array.from({ length: 13 }, (_, index) => ({
+    const files = Array.from({ length: SMALL_IMAGES }, (_, index) => ({
       name: `queue-small-${index}.png`,
       mimeType: 'image/png',
       buffer: png,
@@ -67,18 +74,22 @@ async function main() {
       'tus completion did not identify its accepted image',
     );
     await page.waitForFunction(
-      () =>
+      (total) =>
         document
           .querySelector('[data-testid="upload-counts"]')
-          ?.textContent?.includes('14 ready'),
-      undefined,
+          ?.textContent?.includes(`${total} ready`),
+      TOTAL_IMAGES,
       { timeout: 60_000 },
     );
     const result = await owner.get<{
       images: { id: string; name: string; status: string }[];
-    }>(`/boards/${boardId}/images?sort=uploaded_at.desc&count=50`);
+    }>(`/boards/${boardId}/images?sort=uploaded_at.desc&count=500`);
     assert(
-      result.status === 200 && result.json.images.length === 14,
+      rateLimited === 0,
+      'ordinary bulk upload hit an artificial rate pause',
+    );
+    assert(
+      result.status === 200 && result.json.images.length === TOTAL_IMAGES,
       'queue lost or duplicated uploaded images',
     );
     assert(
@@ -86,11 +97,12 @@ async function main() {
       'some accepted images never became ready',
     );
     assert(
-      new Set(result.json.images.map((image) => image.name)).size === 14,
+      new Set(result.json.images.map((image) => image.name)).size ===
+        TOTAL_IMAGES,
       'upload filenames were duplicated',
     );
     console.log(
-      'PASS: 13 multipart images and one resumable image reach ready with visible queue feedback',
+      `PASS: ${SMALL_IMAGES} multipart images and one resumable image reach ready without rate pauses`,
     );
   } finally {
     await browser.close();

@@ -43,7 +43,7 @@ sheet rooms/peers.
   Socket.IO into one unstarted server. `src/logging.ts` — one JSON line
   per request (`X-Request-Id`, route, status, ms, user id); a 500 never
   leaks a stack. `src/limits.ts` — a token bucket per (user, action):
-  uploads 120/min, tus creates 20/min, socket connects 30/min, scene
+  uploads 6000/min, tus creates 600/min, socket connects 30/min, scene
   emits 30/s, env-tunable — `429 {reason, retryAfter}` + `Retry-After`,
   or on the socket `limited {reason}` then drop.
 - `src/storage/` — the `Storage` port (`put`/`get`/`exists`/`delete`,
@@ -55,7 +55,9 @@ sheet rooms/peers.
   `ladder` job; both the multipart route and tus's `onUploadFinish` call
   it, both after `boards/validate.ts` passes: real type by magic bytes
   (415), size (`UPLOAD_MAX_MB`, 413), pixel budget from the header before
-  decode (`UPLOAD_MAX_PIXELS`, 413).
+  decode (`UPLOAD_MAX_PIXELS`, 413). Multipart bodies are capped while
+  streaming (`UPLOAD_BATCH_MAX_MB`, default 100 MiB) and batches are capped
+  at 100 files before any are stored or enqueued.
 - `boards/tus.ts` — `@tus/server` + `@tus/file-store` at
   `/boards/:id/uploads`(`/*`); `onIncomingRequest` gates on
   `boardForUploading` and the tus-create limit. Never waits for the
@@ -80,7 +82,8 @@ sheet rooms/peers.
   `sheets/routes.ts`, `sheets/neighbourhood.ts`. `src/seed.ts` — dev
   fixture via the API.
 
-## Known deviation
-The tile curl check expects "four painted cells" at
-`tiles/uploaded_at.desc/0/0/0.png`; `COLS=1024` needs ≥ 1026 images for a
-second row and the 60-image seed reaches two — see `tiles.test.ts`'s header.
+## Board tile layout
+The compact board has 16 columns. `tiles/uploaded_at.desc/0/0/0.png`
+contains ranks 0, 1, 16 and 17, so the 60-image seed paints all four cells.
+Stored coarse tiles use a layout-version prefix; old wide-grid tiles are
+ignored and can be removed separately without changing images or ranks.

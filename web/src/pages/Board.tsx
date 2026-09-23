@@ -38,6 +38,7 @@ import {
   COLS,
   DEFAULT_SORT,
   type FindFilterClause,
+  GRID_LAYOUT_VERSION,
   type GetImageResponse,
   type Properties,
   type PropertyValue,
@@ -48,6 +49,7 @@ import {
   cellOf,
   parseSortId,
   rankAtWorld,
+  rankOf,
   sortId,
   worldExtent,
 } from '@digsite/shared';
@@ -112,6 +114,11 @@ declare global {
       selectRange: (a: number, b: number) => void;
       clear: () => void;
       getLayerIds: () => string[];
+      getCamera: () => {
+        target: [number, number, number];
+        zoom: number;
+      } | null;
+      goToRank: (rank: number) => void;
       // Phase 2 section 4 (docs/phases/2-sheet.md): Explore.tsx's
       // "the result becomes the map selection" — resolves ranks through
       // ONE `GET /boards/:id/images?ids=` call (lib/api.ts's
@@ -155,13 +162,10 @@ function storageKey(boardId: string): string {
 }
 
 /**
- * `worldExtent(count)` is the shared tiling boundary the TileLayer needs —
- * COLS wide however few images there are, so a sparse board's grid still
- * has 1024 columns of (mostly empty) space. Fitting THAT full width would
- * center the initial view on empty tiles for any board short of ~1024
- * images. Fit the box the images actually occupy instead: width capped to
- * what a single row holds, height from the row count `worldExtent` already
- * computed.
+ * `worldExtent(count)` is the shared tiling boundary the TileLayer needs.
+ * Fit the used ranks rather than the full fixed row width so a smaller
+ * collection opens centered on its images; the shared column count keeps
+ * ranks in a stable compact grid as new images arrive.
  *
  * docs/ux/audit.md #15: the mathematically tightest fit (width-driven, for
  * any board whose one row is wider than the viewport) can render a single
@@ -180,15 +184,18 @@ const MIN_INITIAL_CELL_PX = 64; // half native size — comfortably legible, nev
 function fitInitialViewState(
   count: number,
   worldH: number,
+  viewportW: number,
+  viewportH: number,
+  fitEverything = false,
 ): OrthographicViewState {
   const contentW = Math.min(Math.max(count, 1), COLS) * CELL;
-  const w = window.innerWidth;
-  const h = window.innerHeight - 200;
-  const zoomX = Math.log2(w / contentW);
-  const zoomY = Math.log2(h / worldH);
+  const zoomX = Math.log2(viewportW / contentW);
+  const zoomY = Math.log2(viewportH / worldH);
   let zoom = Math.min(zoomX, zoomY);
-  const zoomFloor = Math.log2(MIN_INITIAL_CELL_PX / CELL);
-  zoom = Math.max(zoom, zoomFloor);
+  // Keep cells legible where possible, but never let the preferred cell
+  // floor force a compact 16-column board wider than its actual canvas.
+  const zoomFloor = Math.min(Math.log2(MIN_INITIAL_CELL_PX / CELL), zoomX);
+  if (!fitEverything) zoom = Math.max(zoom, zoomFloor);
   zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
   return {
     target: [contentW / 2, worldH / 2, 0],
@@ -246,6 +253,7 @@ export function Board() {
   const [boardError, setBoardError] = useState<ErrorStateInfo | null>(null);
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
+  const [fileDragActive, setFileDragActive] = useState(false);
   const [clickInfo, setClickInfo] = useState<string>('');
   const [, forceRender] = useState(0);
 
@@ -320,33 +328,76 @@ export function Board() {
     () => getUploadSnapshot(boardId),
     () => getUploadSnapshot(boardId),
   );
+  const uploadSnapshotRef = useRef(uploadSnapshot);
+  uploadSnapshotRef.current = uploadSnapshot;
   const uploading =
     uploadSnapshot.counts.queued > 0 || uploadSnapshot.counts.uploading > 0;
-  const lastUploadRefreshRef = useRef(0);
+  const lastUploadRefreshRef = useRef(Date.now());
+  const uploadRefreshTimerRef = useRef<number | null>(null);
+  const uploadRefreshTimerBoardRef = useRef('');
+  const currentBoardIdRef = useRef(boardId);
+  const handledUploadVersionsRef = useRef(
+    new Map<string, { board: number; tiles: number }>(),
+  );
+  currentBoardIdRef.current = boardId;
 
   useEffect(() => {
-    if (!uploadSnapshot.refreshVersion) return;
-    let cancelled = false;
-    const delay = Math.max(
-      0,
-      1200 - (Date.now() - lastUploadRefreshRef.current),
-    );
-    const timer = window.setTimeout(() => {
+    if (!uploadSnapshot.refreshVersion && !uploadSnapshot.tileRefreshVersion)
+      return;
+    if (
+      uploadRefreshTimerRef.current !== null &&
+      uploadRefreshTimerBoardRef.current === boardId
+    ) {
+      return;
+    }
+    if (uploadRefreshTimerRef.current !== null) {
+      window.clearTimeout(uploadRefreshTimerRef.current);
+    }
+    const elapsed = Date.now() - lastUploadRefreshRef.current;
+    const delay = Math.max(250, 1200 - elapsed);
+    uploadRefreshTimerBoardRef.current = boardId;
+    uploadRefreshTimerRef.current = window.setTimeout(() => {
+      uploadRefreshTimerRef.current = null;
+      const targetBoardId = uploadRefreshTimerBoardRef.current;
+      if (currentBoardIdRef.current !== targetBoardId) return;
+      const latest = uploadSnapshotRef.current;
+      if (latest.boardId !== targetBoardId) return;
+      const handled = handledUploadVersionsRef.current.get(targetBoardId) ?? {
+        board: 0,
+        tiles: 0,
+      };
+      const refreshBoard = latest.refreshVersion > handled.board;
+      const refreshTiles = latest.tileRefreshVersion > handled.tiles;
+      handledUploadVersionsRef.current.set(targetBoardId, {
+        board: latest.refreshVersion,
+        tiles: latest.tileRefreshVersion,
+      });
       lastUploadRefreshRef.current = Date.now();
-      void api
-        .getBoard(boardId)
-        .then((fresh) => {
-          if (cancelled) return;
-          setBoard(fresh);
-          setTileVersion((value) => value + 1);
-        })
-        .catch(() => {});
+      if (refreshTiles) setTileVersion((value) => value + 1);
+      if (refreshBoard) {
+        void api
+          .getBoard(targetBoardId)
+          .then((fresh) => {
+            if (currentBoardIdRef.current === targetBoardId) setBoard(fresh);
+          })
+          .catch(() => {});
+      }
     }, delay);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [boardId, uploadSnapshot.refreshVersion]);
+  }, [
+    boardId,
+    uploadSnapshot.refreshVersion,
+    uploadSnapshot.tileRefreshVersion,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (uploadRefreshTimerRef.current !== null) {
+        window.clearTimeout(uploadRefreshTimerRef.current);
+        uploadRefreshTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   // -- sheets (docs/phases/2-sheet.md section 6) ------------------------------
   const [sheets, setSheets] = useState<
@@ -556,15 +607,20 @@ export function Board() {
   // §5.1: "Range and band selects resolve server-side... a million-cell
   // board never pages ranks to the client"). -------------------------------
   const rangeSelect = useCallback(
-    async (a: number, b: number) => {
+    async (a: number, b: number, mode?: 'band') => {
       try {
         const { imageIds } = await api.postSelectionRange(boardIdRef.current, {
           sort: currentSortIdRef.current,
           fromRank: a,
           toRank: b,
+          ...(mode ? { mode } : {}),
         });
         selection.add(imageIds);
-        const span = Math.abs(b - a) + 1;
+        const span =
+          mode === 'band'
+            ? (Math.abs((a % COLS) - (b % COLS)) + 1) *
+              (Math.abs(Math.floor(a / COLS) - Math.floor(b / COLS)) + 1)
+            : Math.abs(b - a) + 1;
         setSelectionNote(
           imageIds.length > 0 && imageIds.length < span
             ? `selection capped at ${plural(imageIds.length, 'image')}`
@@ -588,7 +644,13 @@ export function Board() {
     if (!canvasRef.current || !board) return;
     if (deckRef.current) return;
     const [, , , h] = worldExtent(board.imageCount);
-    viewStateRef.current = fitInitialViewState(board.imageCount, h);
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    viewStateRef.current = fitInitialViewState(
+      board.imageCount,
+      h,
+      canvasRect.width || window.innerWidth,
+      canvasRect.height || window.innerHeight - 200,
+    );
     // deck.gl's onViewStateChange (below) only fires on a user-driven
     // change, never for the `initialViewState` passed at construction —
     // without this, `statusRef.current.zoom` stays at its literal `0`
@@ -616,7 +678,9 @@ export function Board() {
         if (!shiftHeldRef.current || !boardRef.current || !info.coordinate)
           return;
         const [wx, wy] = info.coordinate as [number, number];
-        shiftDragRef.current = { startRank: rankAtWorld(wx, wy) };
+        const startRank = rankAtWorld(wx, wy);
+        if (startRank < 0) return;
+        shiftDragRef.current = { startRank };
         event.srcEvent?.preventDefault?.();
       },
       onDragEnd: (info) => {
@@ -624,15 +688,19 @@ export function Board() {
         shiftDragRef.current = null;
         if (!drag || !info.coordinate) return;
         const [wx, wy] = info.coordinate as [number, number];
-        const endRank = rankAtWorld(wx, wy);
-        void rangeSelect(drag.startRank, endRank);
+        const col = Math.floor(
+          Math.max(0, Math.min(wx, COLS * CELL - 0.001)) / CELL,
+        );
+        const row = Math.floor(Math.max(0, wy) / CELL);
+        const endRank = rankOf(col, row);
+        void rangeSelect(drag.startRank, endRank, 'band');
       },
     });
     return () => {
       deckRef.current?.finalize();
       deckRef.current = null;
     };
-  }, [board]);
+  }, [board?.id]);
 
   // -- "Show on board" (design.md §5.1: a sheet's own top bar returns here
   // with the sheet's images selected, the map scrolled to the first) — a
@@ -756,6 +824,31 @@ export function Board() {
         ((deckRef.current?.props.layers ?? []) as { id?: string }[])
           .map((l) => l?.id)
           .filter((x): x is string => !!x),
+      getCamera: () => {
+        const view = viewStateRef.current;
+        const [x, y, z = 0] = view?.target ?? [0, 0, 0];
+        return view
+          ? {
+              target: [x, y, z],
+              zoom: view.zoom as number,
+            }
+          : null;
+      },
+      goToRank: (rank: number) => {
+        const { col, row } = cellOf(rank);
+        const next = {
+          ...(viewStateRef.current ?? fitInitialViewState(1, CELL, 640, 480)),
+          target: [col * CELL + CELL / 2, row * CELL + CELL / 2, 0] as [
+            number,
+            number,
+            number,
+          ],
+        };
+        viewStateRef.current = next;
+        deckRef.current?.setProps({ viewState: next });
+        statusRef.current.zoom = next.zoom as number;
+        forceRender((n) => n + 1);
+      },
       selectImages: (ids: string[], mode: 'replace' | 'add' = 'replace') => {
         if (mode === 'add') selection.add(ids);
         else selection.replace(ids);
@@ -837,7 +930,11 @@ export function Board() {
       );
       statusRef.current.tilesRequested++;
       forceRender((n) => n + 1);
-      const res = await fetch(url, { credentials: 'include', signal });
+      const res = await fetch(url, {
+        credentials: 'include',
+        signal,
+        cache: 'reload',
+      });
       if (!res.ok) throw new Error(`tile fetch failed: ${res.status}`);
       const xCache = res.headers.get('X-Cache');
       statusRef.current.cacheTotal++;
@@ -894,13 +991,19 @@ export function Board() {
     if (!deckRef.current || !board) return;
     const [, , w, h] = worldExtent(board.imageCount);
     const tileLayer = new TileLayer({
-      id: `board-tiles-${currentSortId}-${tileVersion}`,
+      id: `board-tiles-${currentSortId}-grid-${GRID_LAYOUT_VERSION}`,
       data: null,
       tileSize: TILE_SIZE,
       extent: [0, 0, w, h],
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
       refinementStrategy: 'never',
+      // Updating already visible cells must not replace the whole layer.
+      // TileLayer reloads selected tiles for a changed getTileData trigger
+      // while retaining their previous bitmap until the replacement arrives.
+      updateTriggers: {
+        getTileData: tileVersion,
+      },
       getTileData: ({ index, signal }) => fetchTile(index, signal),
       renderSubLayers: (props) => {
         if (!props.data) return null;
@@ -1155,7 +1258,14 @@ export function Board() {
   function fitView() {
     if (!board) return;
     const [, , , h] = worldExtent(board.imageCount);
-    const next = fitInitialViewState(board.imageCount, h);
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    const next = fitInitialViewState(
+      board.imageCount,
+      h,
+      canvasRect?.width || window.innerWidth,
+      canvasRect?.height || window.innerHeight - 200,
+      true,
+    );
     viewStateRef.current = next;
     deckRef.current?.setProps({ viewState: next });
     statusRef.current.zoom = next.zoom as number;
@@ -1178,8 +1288,9 @@ export function Board() {
     const y1 = (maxRow + 1) * CELL;
     const w = Math.max(x1 - x0, CELL);
     const h = Math.max(y1 - y0, CELL);
-    const vw = window.innerWidth;
-    const vh = window.innerHeight - 200;
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    const vw = canvasRect?.width || window.innerWidth;
+    const vh = canvasRect?.height || window.innerHeight - 200;
     const nz = Math.max(
       MIN_ZOOM,
       Math.min(
@@ -1685,7 +1796,37 @@ export function Board() {
     // Fills the shell's page outlet (shell/shell.css's `.shell-page`) —
     // the board's own side panel now lives in the shell's right column
     // (useRightColumn above), so this is canvas + floating chrome only.
-    <div className="board-canvas-wrap">
+    <div
+      className="board-canvas-wrap"
+      onDragEnter={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes('Files')) return;
+        event.preventDefault();
+        setFileDragActive(true);
+      }}
+      onDragOver={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes('Files')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setFileDragActive(true);
+      }}
+      onDragLeave={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!nextTarget || !event.currentTarget.contains(nextTarget as Node)) {
+          setFileDragActive(false);
+        }
+      }}
+      onDrop={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes('Files')) return;
+        event.preventDefault();
+        setFileDragActive(false);
+        handleFiles(event.dataTransfer.files);
+      }}
+    >
+      {fileDragActive && (
+        <output className="board-file-drop-hint" aria-live="polite">
+          Drop images to add them to this board
+        </output>
+      )}
       <canvas
         ref={canvasRef}
         style={{ width: '100%', height: '100%', display: 'block' }}

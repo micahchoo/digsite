@@ -96,8 +96,8 @@ export const env = {
   AUTH_RATE_LIMIT_MAX: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 100),
   // limits.ts's token buckets, one action each — docs/phases/5-hardening.md
   // section 2.
-  RATE_UPLOAD_PER_MIN: Number(process.env.RATE_UPLOAD_PER_MIN ?? 120),
-  RATE_TUS_CREATE_PER_MIN: Number(process.env.RATE_TUS_CREATE_PER_MIN ?? 20),
+  RATE_UPLOAD_PER_MIN: Number(process.env.RATE_UPLOAD_PER_MIN ?? 6000),
+  RATE_TUS_CREATE_PER_MIN: Number(process.env.RATE_TUS_CREATE_PER_MIN ?? 600),
   RATE_SOCKET_CONNECT_PER_MIN: Number(
     process.env.RATE_SOCKET_CONNECT_PER_MIN ?? 30,
   ),
@@ -106,6 +106,9 @@ export const env = {
   // before decode, its pixel budget (width*height) — docs/phases/
   // 5-hardening.md section 2.
   UPLOAD_MAX_MB: Number(process.env.UPLOAD_MAX_MB ?? 50),
+  // Aggregate multipart body cap, applied while reading the request stream
+  // before form parsing or per-file buffering.
+  UPLOAD_BATCH_MAX_MB: Number(process.env.UPLOAD_BATCH_MAX_MB ?? 100),
   UPLOAD_MAX_PIXELS: Number(process.env.UPLOAD_MAX_PIXELS ?? 100_000_000),
   // worker/jobs.ts#runLadderJob: `loadImage` is wrapped in this timeout, so
   // a pathological file can fail fast instead of tying up a worker slot.

@@ -18,7 +18,7 @@ type LimitConfig = { capacity: number; windowMs: number };
 
 // One row per action named in docs/phases/5-hardening.md section 2 — the
 // limit value there IS the bucket capacity, refilled continuously over the
-// stated window (120 files/min == capacity 120, windowMs 60_000; 30
+// stated window (6000 files/min == capacity 6000, windowMs 60_000; 30
 // emits/s == capacity 30, windowMs 1_000).
 const LIMITS: Record<LimitAction, LimitConfig> = {
   upload: { capacity: env.RATE_UPLOAD_PER_MIN, windowMs: 60_000 },

@@ -37,7 +37,12 @@ import type {
   UploadImageStatusesResponse,
   UploadImagesResponse,
 } from '@digsite/shared/api';
-import { ZOOMS, type Zoom, cellPx } from '@digsite/shared/board/grid';
+import {
+  GRID_LAYOUT_VERSION,
+  ZOOMS,
+  type Zoom,
+  cellPx,
+} from '@digsite/shared/board/grid';
 import { ladderAddress } from '@digsite/shared/board/ladder';
 import {
   type PropertyType,
@@ -45,6 +50,7 @@ import {
   parseSortId,
   sortId as toSortId,
 } from '@digsite/shared/board/sort';
+import { SHEET_LIMIT } from '@digsite/shared/sheet/elements';
 import { type Canvas, createCanvas, loadImage } from '@napi-rs/canvas';
 import { fromNodeHeaders } from 'better-auth/node';
 import {
@@ -62,8 +68,10 @@ import {
 import { allowlistMembersOf, allowlistOf } from '../access/reads.ts';
 import { auth } from '../auth.ts';
 import { pool } from '../db/pool.ts';
+import { env } from '../env.ts';
 import { recordActivity } from '../groups/activity.ts';
 import {
+  RequestBodyTooLargeError,
   type Router,
   json,
   param,
@@ -88,6 +96,7 @@ import { isProperties } from './properties.ts';
 import {
   ensureRank,
   forceRebuildRank,
+  imageIdsInRankBand,
   imageIdsInRankRange,
   imagesInRankOrder,
   markBoardRanksStale,
@@ -632,14 +641,29 @@ export function registerBoardRoutes(router: Router) {
     const boardId = param(ctx, 'id');
     const board = await boardForUploading(userId, boardId);
 
-    const webReq = await toWebRequest(ctx.req);
-    const form = await webReq.formData();
+    let form: Awaited<ReturnType<Request['formData']>>;
+    try {
+      const webReq = await toWebRequest(ctx.req);
+      form = await webReq.formData();
+    } catch (error) {
+      if (error instanceof RequestBodyTooLargeError) {
+        return json(ctx.res, 413, {
+          error: `multipart request exceeds ${env.UPLOAD_BATCH_MAX_MB}MB limit`,
+        });
+      }
+      throw error;
+    }
     const files: File[] = [];
     for (const entry of form.getAll('files')) {
       if (typeof entry !== 'string') files.push(entry);
     }
     if (files.length === 0) {
       return json(ctx.res, 400, { error: 'no files' });
+    }
+    if (files.length > 100) {
+      return json(ctx.res, 413, {
+        error: 'a batch may contain at most 100 files',
+      });
     }
 
     // Phase 5 section 2 (docs/phases/5-hardening.md "Abuse limits"): the
@@ -1032,7 +1056,7 @@ export function registerBoardRoutes(router: Router) {
       x,
       y,
       cellPx(z),
-      ctx.url.pathname,
+      `${ctx.url.pathname}?grid=${GRID_LAYOUT_VERSION}`,
     );
     recordTileCache(result.cache);
 
@@ -1227,13 +1251,25 @@ export function registerBoardRoutes(router: Router) {
         error: 'fromRank/toRank must be integers >= 0',
       });
     }
-    const imageIds = await imageIdsInRankRange(
-      boardId,
-      sort,
-      body.fromRank,
-      body.toRank,
-      SELECTION_CAP,
-    );
+    if (body.mode !== undefined && body.mode !== 'band') {
+      return json(ctx.res, 400, { error: 'bad selection mode' });
+    }
+    const imageIds =
+      body.mode === 'band'
+        ? await imageIdsInRankBand(
+            boardId,
+            sort,
+            body.fromRank,
+            body.toRank,
+            SHEET_LIMIT,
+          )
+        : await imageIdsInRankRange(
+            boardId,
+            sort,
+            body.fromRank,
+            body.toRank,
+            SELECTION_CAP,
+          );
     const response: SelectionRangeResponse = { imageIds };
     json(ctx.res, 200, response);
   });

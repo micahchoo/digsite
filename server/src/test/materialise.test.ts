@@ -68,6 +68,38 @@ async function decodePixels(png: Buffer): Promise<Uint8ClampedArray> {
 }
 
 describe('materialise', () => {
+  test('legacy wide-grid tiles are ignored after compact layout upgrade', async () => {
+    const boardId = await makeBoard(`grid-upgrade-${Date.now()}`);
+    await makeImage(boardId, 0);
+    await pool.query('UPDATE boards SET image_count = 1 WHERE id = $1', [
+      boardId,
+    ]);
+    const image = await loadImage(paintSquare(90));
+    await paintLadder(boardId, 0, image, image.width, image.height);
+    await ensureRank(boardId, DEFAULT_SORT);
+    const sid = sortId(DEFAULT_SORT);
+    await pool.query(
+      'UPDATE board_rank_state SET materialised_at = now() WHERE board_id = $1',
+      [boardId],
+    );
+    const legacy = `boards/${boardId}/tiles/${sid}/-3/0-0.png`;
+    await storageFromEnv().put(legacy, paintSquare(270), 'image/png');
+    const result = await tileFor(
+      boardId,
+      DEFAULT_SORT,
+      -3,
+      0,
+      0,
+      cellPx(-3),
+      `/boards/${boardId}/tiles/${sid}/-3/0/0.png?grid=2`,
+    );
+    expect(result.cache).toBe('miss');
+    expect((await loadImage(result.png)).width).toBe(256);
+    expect(materialisedTileKey(boardId, sid, -3, 0, 0)).not.toBe(legacy);
+    await materialiseSort(boardId, DEFAULT_SORT);
+    expect(await storageFromEnv().get(legacy)).toBeNull();
+  });
+
   test('z=-3 tiles exist on disk after rebuild + materialise, and the route serves them resident', async () => {
     const boardId = await makeBoard(`materialise-test-${Date.now()}`);
 

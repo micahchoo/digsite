@@ -1,3 +1,4 @@
+import { CELL, COLS } from '@digsite/shared';
 // A definition-of-done smoke script for docs/ux/design.md §7 "Slice 2 —
 // Board + selection" / docs/phases/6-product.md "Selection" — the phase
 // doc's own done-walk: select by click, range, band, section,
@@ -89,39 +90,70 @@ async function main() {
   });
   console.log('screenshot: board-tray.png');
 
-  // -- 4. band drag (Shift+drag) selects a contiguous rank range --------------
+  // -- 4. band drag (Shift+drag) selects a grid rectangle --------------------
   await page.evaluate(() => window.__digsiteBoard?.clear());
   await page.waitForFunction(
     () => (window.__digsiteBoard?.getSelection() ?? []).length === 0,
   );
+  const bandDrag = await page.evaluate(
+    ({ cols, cell }) => {
+      const camera = window.__digsiteBoard?.getCamera();
+      const canvas = document.querySelector('canvas')?.getBoundingClientRect();
+      if (!camera || !canvas) return null;
+      const screenPoint = (rank: number) => {
+        const col = rank % cols;
+        const row = Math.floor(rank / cols);
+        const scale = 2 ** camera.zoom;
+        return {
+          x:
+            canvas.left +
+            canvas.width / 2 +
+            (col * cell + cell / 2 - camera.target[0]) * scale,
+          y:
+            canvas.top +
+            canvas.height / 2 +
+            (row * cell + cell / 2 - camera.target[1]) * scale,
+        };
+      };
+      return {
+        start: screenPoint(0),
+        end: screenPoint(18),
+        camera,
+      };
+    },
+    { cols: COLS, cell: CELL },
+  );
+  assert(bandDrag, 'could not project grid rectangle into the board canvas');
   await page.keyboard.down('Shift');
-  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2);
+  await page.mouse.move(bandDrag.start.x, bandDrag.start.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.2 + 10, box.y + box.height / 2, {
-    steps: 2,
-  });
-  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2, {
-    steps: 10,
-  });
+  await page.mouse.move(bandDrag.end.x, bandDrag.end.y, { steps: 10 });
   await page.mouse.up();
   await page.keyboard.up('Shift');
   await page.waitForFunction(
-    () => (window.__digsiteBoard?.getSelection() ?? []).length > 1,
+    () => (window.__digsiteBoard?.getSelection() ?? []).length === 6,
     undefined,
     { timeout: 3000 },
   );
   const bandSel = await page.evaluate(
     () => window.__digsiteBoard?.getSelection() ?? [],
   );
-  const sortedBand = [...bandSel].sort((a, b) => a - b);
-  for (let i = 1; i < sortedBand.length; i++) {
-    assert(
-      sortedBand[i] === (sortedBand[i - 1] as number) + 1,
-      `band selection ${JSON.stringify(sortedBand)} is not contiguous`,
-    );
-  }
+  assert(
+    JSON.stringify(bandSel) === JSON.stringify([0, 1, 2, 16, 17, 18]),
+    `diagonal rectangle selected ${JSON.stringify(bandSel)} instead of its six cells`,
+  );
+  const cameraAfterBand = await page.evaluate(
+    () => window.__digsiteBoard?.getCamera() ?? null,
+  );
+  assert(cameraAfterBand, 'camera unavailable after band drag');
+  assert(
+    Math.abs(cameraAfterBand.target[0] - bandDrag.camera.target[0]) < 0.01 &&
+      Math.abs(cameraAfterBand.target[1] - bandDrag.camera.target[1]) < 0.01 &&
+      cameraAfterBand.zoom === bandDrag.camera.zoom,
+    `Shift-drag panned the board: before=${JSON.stringify(bandDrag.camera)} after=${JSON.stringify(cameraAfterBand)}`,
+  );
   console.log(
-    `PASS: band drag (server-resolved range) selected ${bandSel.length} contiguous ranks`,
+    'PASS: Shift-drag selects the rectangular cells without moving the camera',
   );
 
   // -- 5. section select, from the right-click context menu -------------------

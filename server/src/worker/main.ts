@@ -4,5 +4,5 @@
 import '../env.ts';
 import { startWorker } from './index.ts';
 
-console.log('digsite worker starting (polling every 500ms)');
+console.log('digsite worker starting (bounded batches; idle poll 500ms)');
 startWorker();

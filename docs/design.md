@@ -71,14 +71,14 @@ function here; no DB, no DOM.
 ### `src/board/grid.ts`
 
 ```ts
-export const COLS = 1024, CELL = 128, TILE = 256;
+export const COLS = 16, CELL = 128, TILE = 256;
 export const ZOOMS = [0, -1, -2, -3, -4, -5] as const;
 export type Zoom = (typeof ZOOMS)[number];
 export function cellOf(rank: number): { col: number; row: number };
 export function rankOf(col: number, row: number): number;
 export function cellPx(z: Zoom): number;                 // 128 * 2^z
 export function perTileSide(z: Zoom): number;            // 256 / cellPx
-export function tileRanks(z: Zoom, x: number, y: number): number[]; // n*n, row-major; cols ≥ 1024 → -1
+export function tileRanks(z: Zoom, x: number, y: number): number[]; // n*n, row-major; cols ≥ 16 → -1
 export function tileWorld(z: Zoom, x: number, y: number): { x: number; y: number; size: number };
 export function worldExtent(count: number): [number, number, number, number]; // [0,0,w,h] for count images
 export function rankAtWorld(wx: number, wy: number): number;
@@ -420,7 +420,7 @@ Field holding images 0..11; sheet "Faces" holding 6..17. Idempotent.
   permutation of the slots; a property sort puts missing values last;
   an upload marks the state stale and the next `ensureRank` rebuilds.
 - `tiles.test.ts` — tile `(0,0,0)` of the seeded board has its two
-  first-row cells painted (ranks 0 and 1; ranks 1024 and 1025 need a
+  first-row cells painted (ranks 0 and 1; ranks 16 and 17 need a
   board of 1,026 images); `X-Cache` is `miss` then `hit`.
 - `snapshot.test.ts` — merge by version; project a scene with one image,
   one region, one edge; the rows match; a stale scene cannot roll back.

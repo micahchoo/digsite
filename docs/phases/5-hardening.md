@@ -25,7 +25,7 @@ does not prove every route calls an intent. Add both halves:
 ## 2. Abuse limits (server)
 
 - `server/src/limits.ts`: a token bucket per (user, action), in memory,
-  with limits from env: uploads 120 files/min, tus 20 creates/min,
+  with limits from env: uploads 6000 files/min, tus 600 creates/min,
   socket connects 30/min, scene emits 30/s, sign-in via Better Auth's
   `rateLimit` option. A refusal is `429 {reason, retryAfter}` with a
   `Retry-After` header; on the socket, `limited {reason}` and drop.
@@ -33,7 +33,9 @@ does not prove every route calls an intent. Add both halves:
   `UPLOAD_MAX_MB` (default 50), content type by magic bytes (PNG, JPEG,
   WebP, GIF, AVIF where `@napi-rs/canvas` decodes it), a pixel budget
   checked from the header before decode (`UPLOAD_MAX_PIXELS`, default
-  100 M), decode inside the worker with a timeout. A refused file is
+  100 M), decode inside the worker with a timeout. Multipart requests are
+  streamed under `UPLOAD_BATCH_MAX_MB` (default 100 MiB) and limited to 100
+  files per batch before form parsing or storage. A refused file is
   `415`/`413` in the request or `failed` with a reason in the worker.
 
 ## 3. Sessions and exposure (server + web config)

@@ -38,8 +38,8 @@ line here before it gets a file.
   has a **default sort**. Images without the sort's value come last.
 - **Rank** — an image's position under one sort: `0..N-1`. Materialised per
   `(board, sort)` as a table, rebuilt whole, never patched.
-- **Cell** — where a rank sits on the map: fixed 128-unit squares, 1024 per
-  row, row-major. `col = rank % 1024`, `row = rank / 1024`.
+- **Cell** — where a rank sits on the map: fixed 128-unit squares, 16 per
+  row, row-major. `col = rank % 16`, `row = rank / 16`.
 - **Tile** — a 256 px PNG of the cells in one square of the map at one
   **zoom** `z ∈ {0..−5}`. Composed on request from the ladder, cached.
 - **Missing** — an image whose original is gone. Kept as a row, shown as

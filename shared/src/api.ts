@@ -216,12 +216,15 @@ export type PutBoardSelectionResponse = { imageIds: string[] };
 // POST /boards/:id/selection/range {sort, fromRank, toRank} — resolves a
 // rank range to ids SERVER-SIDE (design.md §5.1: "Range and band selects
 // resolve server-side... so a million-cell board never pages ranks to the
-// client"). Capped at 5,000; `fromRank`/`toRank` may arrive in either
-// order (a drag can run either direction).
+// client"). `mode` omitted is a linear rank range (capped at 5,000) for
+// Shift-click; `mode: 'band'` treats the endpoints as rectangle corners
+// and is capped at SHEET_LIMIT. Endpoints may arrive in either order.
 export type SelectionRangeRequest = {
   sort: string;
   fromRank: number;
   toRank: number;
+  /** Interpret the endpoints as opposite corners of a grid rectangle. */
+  mode?: 'band';
 };
 export type SelectionRangeResponse = { imageIds: string[] };
 

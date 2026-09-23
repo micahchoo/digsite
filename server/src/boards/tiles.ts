@@ -15,6 +15,7 @@ import { storageFromEnv } from '../storage/index.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { getResidentTile, loadResidentSortFromDisk } from './coarse-cache.ts';
 import { withPage } from './ladder.ts';
+import { coarseTilesPrefix } from './paths.ts';
 import { slotsForTile } from './ranks.ts';
 import { getComposedTile, setComposedTile } from './tiles-cache.ts';
 
@@ -29,7 +30,7 @@ export function materialisedTileKey(
   x: number,
   y: number,
 ): string {
-  return `boards/${boardId}/tiles/${sid}/${z}/${x}-${y}.png`;
+  return `${coarseTilesPrefix(boardId, sid)}${z}/${x}-${y}.png`;
 }
 
 /** Which of these slots belong to a still-pending image — docs/phases/

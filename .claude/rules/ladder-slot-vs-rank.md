@@ -4,7 +4,7 @@ tags: [board, ladder, rank, tiles, sort]
 priority: high
 source: hand-written
 checks:
-  - forbid: '\b(const|let|var)\s+(COLS\s*=\s*1024|CELL\s*=\s*128|TILE\s*=\s*256)\b'
+  - forbid: '\b(const|let|var)\s+(COLS\s*=\s*16|CELL\s*=\s*128|TILE\s*=\s*256)\b'
     in: [server/src/**, web/src/**, shared/src/**]
     except: shared/src/board/grid.ts
     message: redefines a grid constant; import it from @digsite/shared/board/grid
@@ -55,7 +55,7 @@ ms, measured 2026-09-21 (`../prototype/board/RESULTS.md`).
 - **Ranks are looked up with `unnest($1::int[]) JOIN board_ranks`**, not
   `WHERE rank = ANY($1)`: 5–7× faster at 4,096 ranks, the coarsest tile.
 - **The grid arithmetic lives in `shared/src/board/grid.ts` and nowhere
-  else.** `COLS = 1024`, `CELL = 128`, `TILE = 256`, zoom `z ∈ {0..−5}`
+  else.** `COLS = 16`, `CELL = 128`, `TILE = 256`, zoom `z ∈ {0..−5}`
   with `cellPx = 128·2^z`. The server composes and the client clicks
   with the same functions; deck.gl's `OrthographicView` + `TileLayer`
   index matches this convention with no translation (verified against

@@ -38,6 +38,6 @@ httpServer.listen(env.PORT, env.HOST, () => {
   warmRecentBoards().catch((err) => console.error('warm failed', err));
   if (process.env.WORKER !== 'off') {
     startWorker();
-    console.log('worker started in-process (poll every 500ms)');
+    console.log('worker started in-process (bounded batches; idle poll 500ms)');
   }
 });

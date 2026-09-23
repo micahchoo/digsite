@@ -1,4 +1,4 @@
-import { type Zoom, tileRanks } from '@digsite/shared/board/grid';
+import { COLS, type Zoom, tileRanks } from '@digsite/shared/board/grid';
 // Rank tables (CONTEXT.md "Rank"): an image's position under one sort,
 // 0..N-1, materialised per (board, sort_id) and rebuilt whole, never
 // patched — see .claude/rules/ladder-slot-vs-rank.md. `slotsForTile` looks
@@ -298,6 +298,38 @@ export async function imageIdsInRankRange(
      WHERE br.board_id = $1 AND br.sort_id = $2 AND br.rank BETWEEN $3 AND $4
      ORDER BY br.rank ASC LIMIT $5`,
     [boardId, sid, lo, hi, cap],
+  );
+  return rows.map((r) => r.id);
+}
+
+/** Image ids in the grid rectangle whose opposite corners are `fromRank`
+ * and `toRank`. Unlike a linear rank range, cells outside the rectangle on
+ * intervening rows are excluded. The caller supplies the result cap. */
+export async function imageIdsInRankBand(
+  boardId: string,
+  sort: Sort,
+  fromRank: number,
+  toRank: number,
+  cap: number,
+): Promise<string[]> {
+  await ensureRank(boardId, sort);
+  const fromCol = fromRank % COLS;
+  const toCol = toRank % COLS;
+  const fromRow = Math.floor(fromRank / COLS);
+  const toRow = Math.floor(toRank / COLS);
+  const loCol = Math.min(fromCol, toCol);
+  const hiCol = Math.max(fromCol, toCol);
+  const lo = Math.min(fromRow, toRow) * COLS + loCol;
+  const hi = Math.max(fromRow, toRow) * COLS + hiCol;
+  const sid = sortId(sort);
+  const { rows } = await pool.query(
+    `SELECT i.id FROM board_ranks br
+     JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
+     WHERE br.board_id = $1 AND br.sort_id = $2
+       AND br.rank BETWEEN $3 AND $4
+       AND br.rank % $5 BETWEEN $6 AND $7
+     ORDER BY br.rank ASC LIMIT $8`,
+    [boardId, sid, lo, hi, COLS, loCol, hiCol, cap],
   );
   return rows.map((r) => r.id);
 }

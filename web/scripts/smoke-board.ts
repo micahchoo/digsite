@@ -1,3 +1,4 @@
+import { CELL, COLS } from '@digsite/shared';
 // A definition-of-done smoke script for phase 1 section 3 + the web side of
 // section 1 (docs/phases/1-map.md): sections, hover, selection, detail,
 // upload. Drives the running dev server (`bun run dev`) against the stub
@@ -91,7 +92,28 @@ async function main() {
   // -- click selects a rank ---------------------------------------------------
   const box = await page.locator('canvas').boundingBox();
   assert(box, 'no canvas bounding box');
-  const clickPoint = { x: box.x + box.width * 0.3, y: box.y + box.height / 2 };
+  const clickPoint = await page.evaluate(
+    ({ cols, cell, rank }) => {
+      const camera = window.__digsiteBoard?.getCamera();
+      const canvas = document.querySelector('canvas')?.getBoundingClientRect();
+      if (!camera || !canvas) return null;
+      const col = rank % cols;
+      const row = Math.floor(rank / cols);
+      const scale = 2 ** camera.zoom;
+      return {
+        x:
+          canvas.left +
+          canvas.width / 2 +
+          (col * cell + cell / 2 - camera.target[0]) * scale,
+        y:
+          canvas.top +
+          canvas.height / 2 +
+          (row * cell + cell / 2 - camera.target[1]) * scale,
+      };
+    },
+    { cols: COLS, cell: CELL, rank: 36 },
+  );
+  assert(clickPoint, 'could not project a cell center into the board canvas');
   await page.mouse.click(clickPoint.x, clickPoint.y);
   await page.waitForFunction(
     () => (window.__digsiteBoard?.getSelection() ?? []).length > 0,

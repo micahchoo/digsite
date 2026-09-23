@@ -52,6 +52,7 @@ import type {
   UploadImageStatusesResponse,
   UploadImagesResponse,
 } from '@digsite/shared/api';
+import { GRID_LAYOUT_VERSION } from '@digsite/shared/board/grid';
 
 export const SERVER_ORIGIN: string =
   (import.meta.env.VITE_SERVER_ORIGIN as string | undefined) ??
@@ -398,7 +399,7 @@ export const api = {
   deleteImage: (imageId: string) =>
     request<void>(`/images/${imageId}`, { method: 'DELETE' }),
   tileUrl: (boardId: string, sortId: string, z: number, x: number, y: number) =>
-    `${SERVER_ORIGIN}/boards/${boardId}/tiles/${sortId}/${z}/${x}/${y}.png`,
+    `${SERVER_ORIGIN}/boards/${boardId}/tiles/${sortId}/${z}/${x}/${y}.png?grid=${GRID_LAYOUT_VERSION}`,
   // Slice 2 (docs/ux/design.md §7 "Slice 2 — Board + selection"): the
   // selection is a durable object, ids not ranks, per (board, viewer).
   getBoardSelection: (boardId: string) =>

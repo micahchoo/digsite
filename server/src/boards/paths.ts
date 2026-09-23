@@ -6,6 +6,12 @@
 // Storage keys — under STORAGE=fs those keys are, byte-for-byte, the paths
 // this module used to return (storage/fs.ts resolves a key as
 // `${DATA_DIR}/<key>`), so existing data keeps working unmigrated.
+import { GRID_LAYOUT_VERSION } from '@digsite/shared/board/grid';
+
+export function coarseTilesPrefix(boardId: string, sortId: string): string {
+  return `boards/${boardId}/tiles/grid-${GRID_LAYOUT_VERSION}/${sortId}/`;
+}
+
 export function originalKey(boardId: string, sha256: string): string {
   return `boards/${boardId}/originals/${sha256}`;
 }

@@ -43,6 +43,7 @@ import { env } from '../env.ts';
 import { deletePrefix, storageFromEnv } from '../storage/index.ts';
 import { setResidentSort } from './coarse-cache.ts';
 import { ladderPageKey } from './ladder.ts';
+import { coarseTilesPrefix } from './paths.ts';
 import { PENDING_COLOR, materialisedTileKey } from './tiles.ts';
 
 const MATERIALISE_ZOOMS = ZOOMS.filter((z) => z <= -3);
@@ -447,6 +448,9 @@ export async function materialiseSort(
   // below regardless (the scatter draws every cell of every allocated
   // tile), so correctness never depended on this running; it is disk (or
   // bucket) hygiene, not a precondition of the compose below.
+  await deletePrefix(storageFromEnv(), coarseTilesPrefix(boardId, sid));
+  // Reclaim pre-versioned coarse tiles after the compact-grid upgrade.
+  // Originals and slot-addressed ladder pages live under separate prefixes.
   await deletePrefix(storageFromEnv(), `boards/${boardId}/tiles/${sid}/`);
 
   const budget = new MaterialiseBudget(env.MATERIALISE_BUDGET_MB * 1024 * 1024);

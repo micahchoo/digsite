@@ -306,6 +306,20 @@
   background: var(--surface-canvas);
   isolation: isolate;
 }
+.board-file-drop-hint {
+  position: absolute;
+  z-index: 30;
+  inset: 16px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-l);
+  background: color-mix(in srgb, var(--surface-canvas) 88%, transparent);
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: 650;
+  pointer-events: none;
+}
 .board-canvas-wrap > canvas {
   background-color: transparent;
 }
@@ -663,6 +677,9 @@
   font-size: var(--text-xs);
   box-shadow: var(--shadow-s);
 }
+.board-tray--empty:empty {
+  display: none;
+}
 .board-tray-header {
   padding: 10px 13px;
 }
@@ -897,6 +914,15 @@
   min-height: 30px;
   padding: 4px 8px;
   font-size: var(--text-2xs);
+}
+.board-upload-collapse {
+  margin-inline-start: auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  background: transparent;
+  box-shadow: none;
 }
 .board-upload-close {
   margin-inline-start: auto;

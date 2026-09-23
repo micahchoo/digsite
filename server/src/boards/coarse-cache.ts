@@ -15,6 +15,7 @@
 // per-tile path again.
 import { env } from '../env.ts';
 import { storageFromEnv } from '../storage/index.ts';
+import { coarseTilesPrefix } from './paths.ts';
 
 type SortEntry = { tiles: Map<string, Buffer>; bytes: number };
 
@@ -32,10 +33,6 @@ function entryKey(boardId: string, sortId: string): string {
 
 function tileKey(z: number, x: number, y: number): string {
   return `${z}/${x}-${y}`;
-}
-
-function coarseTilesPrefix(boardId: string, sortId: string): string {
-  return `boards/${boardId}/tiles/${sortId}/`;
 }
 
 export function hasResidentSort(boardId: string, sortId: string): boolean {

@@ -5,6 +5,7 @@
 // fixture stays honest about the contract.
 import { createServer } from 'node:http';
 import {
+  COLS,
   type EdgeRow,
   type FindFilterClause,
   SHEET_LIMIT,
@@ -626,15 +627,16 @@ function renderTile(
   ctx.fillRect(0, 0, size, size);
 
   const sort = parseSortId(sid);
-  const count = sort ? rankedImages(boardId, sort).length : 0;
+  const ranked = sort ? rankedImages(boardId, sort) : [];
   const zz = z as -5 | -4 | -3 | -2 | -1 | 0;
   const px = cellPx(zz);
   const n = Math.round(size / px);
   for (const [i, rank] of tileRanks(zz, x, y).entries()) {
     const cx = (i % n) * px;
     const cy = Math.floor(i / n) * px;
+    const image = rank >= 0 ? ranked[rank] : undefined;
     ctx.fillStyle =
-      rank >= 0 && rank < count
+      image?.status === 'ready'
         ? `hsl(${(rank * 137.508) % 360}, 55%, 42%)`
         : '#333a44';
     ctx.fillRect(cx, cy, px, px);
@@ -1306,7 +1308,19 @@ const httpServer = createServer(async (req, res) => {
       sort: string;
       fromRank: number;
       toRank: number;
+      mode?: 'band';
     }>();
+    if (
+      !Number.isSafeInteger(body.fromRank) ||
+      !Number.isSafeInteger(body.toRank) ||
+      body.fromRank < 0 ||
+      body.toRank < 0 ||
+      body.fromRank > 2_147_483_647 ||
+      body.toRank > 2_147_483_647 ||
+      (body.mode !== undefined && body.mode !== 'band')
+    ) {
+      return json(400, { reason: 'invalid selection range' });
+    }
     const sort = parseSortId(body.sort) ?? {
       key: 'uploaded_at' as const,
       dir: 'desc' as const,
@@ -1317,8 +1331,14 @@ const httpServer = createServer(async (req, res) => {
       ranked.length - 1,
       Math.max(body.fromRank, body.toRank),
     );
+    const loCol = Math.min(body.fromRank % COLS, body.toRank % COLS);
+    const hiCol = Math.max(body.fromRank % COLS, body.toRank % COLS);
     const imageIds: string[] = [];
-    for (let r = lo; r <= hi && imageIds.length < SELECTION_RANGE_CAP; r++) {
+    const cap = body.mode === 'band' ? SHEET_LIMIT : SELECTION_RANGE_CAP;
+    for (let r = lo; r <= hi && imageIds.length < cap; r++) {
+      if (body.mode === 'band' && (r % COLS < loCol || r % COLS > hiCol)) {
+        continue;
+      }
       const img = ranked[r];
       if (img) imageIds.push(img.id);
     }

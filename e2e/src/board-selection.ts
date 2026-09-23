@@ -38,6 +38,7 @@ async function main() {
   );
   assert(created.status === 200, 'board creation failed');
   const boardId = created.json.id;
+  let bandBoardId: string | null = null;
   const browser = await chromium.launch();
   try {
     const canvas = createCanvas(32, 32);
@@ -58,6 +59,66 @@ async function main() {
     );
     assert(upload.status === 202 && upload.json.length === 3, 'upload failed');
     const ids = upload.json.map((image) => image.id);
+
+    const bandBoard = await owner.post<{ id: string }>(
+      `/groups/${group.id}/boards`,
+      { name: `Band selection ${Date.now()}`, open: true },
+    );
+    assert(bandBoard.status === 200, 'band fixture board creation failed');
+    bandBoardId = bandBoard.json.id;
+    const bandForm = new FormData();
+    for (let index = 0; index < 20; index++) {
+      bandForm.append(
+        'files',
+        new Blob([new Uint8Array(canvas.toBuffer('image/png'))], {
+          type: 'image/png',
+        }),
+        `image-${String(index).padStart(2, '0')}.png`,
+      );
+    }
+    const bandUpload = await owner.postForm<{ id: string }[]>(
+      `/boards/${bandBoardId}/images`,
+      bandForm,
+    );
+    assert(
+      bandUpload.status === 202 && bandUpload.json.length === 20,
+      'band fixture upload failed',
+    );
+    const linear = await owner.post<{ imageIds: string[] }>(
+      `/boards/${bandBoardId}/selection/range`,
+      { sort: 'name.asc', fromRank: 0, toRank: 18 },
+    );
+    const band = await owner.post<{ imageIds: string[] }>(
+      `/boards/${bandBoardId}/selection/range`,
+      { sort: 'name.asc', fromRank: 0, toRank: 18, mode: 'band' },
+    );
+    const reverseBand = await owner.post<{ imageIds: string[] }>(
+      `/boards/${bandBoardId}/selection/range`,
+      { sort: 'name.asc', fromRank: 18, toRank: 0, mode: 'band' },
+    );
+    const invalidMode = await owner.post(
+      `/boards/${bandBoardId}/selection/range`,
+      { sort: 'name.asc', fromRank: 0, toRank: 18, mode: 'columns' },
+    );
+    assert(
+      linear.status === 200 && linear.json.imageIds.length === 19,
+      `linear range selected ${linear.json.imageIds.length} instead of 19`,
+    );
+    assert(
+      band.status === 200 && band.json.imageIds.length === 6,
+      `rectangle band selected ${band.json.imageIds.length} instead of 6`,
+    );
+    assert(
+      reverseBand.status === 200 &&
+        JSON.stringify(reverseBand.json.imageIds) ===
+          JSON.stringify(band.json.imageIds),
+      'reverse rectangle band changed its selected cells',
+    );
+    assert(invalidMode.status === 400, 'unknown selection mode was accepted');
+    console.log(
+      'PASS: real range route keeps linear ranges and selects only band rectangles',
+    );
+
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
     });
@@ -256,6 +317,13 @@ async function main() {
     );
   } finally {
     await browser.close();
+    if (bandBoardId) {
+      const bandRemoved = await owner.del(`/boards/${bandBoardId}`);
+      assert(
+        bandRemoved.status === 200 || bandRemoved.status === 204,
+        'band fixture board cleanup failed',
+      );
+    }
     const removed = await owner.del(`/boards/${boardId}`);
     assert(
       removed.status === 200 || removed.status === 204,

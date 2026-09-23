@@ -71,7 +71,7 @@ describe('cellPolygon', () => {
   });
 
   test('a rank in row 2 is offset by row * CELL', () => {
-    const points = cellPolygon(1024 * 2 + 3);
+    const points = cellPolygon(16 * 2 + 3);
     expect(points[0]).toEqual([3 * 128, 2 * 128]);
   });
 });

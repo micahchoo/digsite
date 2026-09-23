@@ -18,6 +18,7 @@ export function UploadActivity({
   snapshot: UploadSnapshot;
 }) {
   const [firstRow, setFirstRow] = useState(0);
+  const [expanded, setExpanded] = useState(true);
   const { rows, counts } = snapshot;
   if (!snapshot.visible || !rows.length) return null;
 
@@ -30,7 +31,6 @@ export function UploadActivity({
       className="board-upload-queue"
       data-testid="upload-rows"
       aria-label="Image upload activity"
-      aria-live="polite"
     >
       <div className="board-upload-heading">
         <div>
@@ -43,7 +43,16 @@ export function UploadActivity({
                 : 'Recent uploads'}
           </b>
         </div>
-        <div className="board-upload-counts" data-testid="upload-counts">
+        <button
+          type="button"
+          className="board-upload-collapse"
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Collapse upload files' : 'Show upload files'}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? 'Hide files' : 'Show files'}
+        </button>
+        <output className="board-upload-counts" data-testid="upload-counts">
           <span>{counts.queued} queued</span>
           <span>{counts.uploading} uploading</span>
           <span>{counts.processing} processing</span>
@@ -51,7 +60,7 @@ export function UploadActivity({
           <span>{counts.failed} failed</span>
           <span>{counts.unknown} unconfirmed</span>
           <span>{counts.canceled} canceled</span>
-        </div>
+        </output>
         {counts.queued > 0 && (
           <button
             type="button"
@@ -82,7 +91,10 @@ export function UploadActivity({
       <div
         className="board-upload-list"
         data-testid="upload-list"
-        style={{ height: VIEWPORT_HEIGHT }}
+        style={{
+          height: VIEWPORT_HEIGHT,
+          display: expanded ? undefined : 'none',
+        }}
         onScroll={(event) => {
           const element = event.currentTarget;
           setFirstRow(
@@ -107,7 +119,7 @@ export function UploadActivity({
           />
         ))}
       </div>
-      {rows.length > VISIBLE_UPLOAD_ROWS && (
+      {expanded && rows.length > VISIBLE_UPLOAD_ROWS && (
         <div className="board-upload-window-note">
           Showing {firstRow + 1}–{endRow} of {rows.length} files
         </div>

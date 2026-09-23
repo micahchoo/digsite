@@ -28,6 +28,7 @@ const SCRIPTS = [
   'scripts/smoke.ts',
   'scripts/smoke-board.ts',
   'scripts/smoke-upload-scale.ts',
+  'scripts/smoke-board-upload-responsiveness.ts',
   'scripts/smoke-draw.ts',
   'scripts/smoke-explore.ts',
   'scripts/smoke-groups.ts',

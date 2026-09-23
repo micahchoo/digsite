@@ -1,13 +1,15 @@
 import { pool } from '../db/pool.ts';
 // The job queue's mechanics — claim, retry, fail — knowing nothing about
 // what a job means (that's jobs.ts#runJob). Polls `jobs` with `SELECT ...
-// FOR UPDATE SKIP LOCKED` every 500ms, concurrency from WORKER_CONCURRENCY
+// FOR UPDATE SKIP LOCKED`, concurrency from WORKER_CONCURRENCY. Busy batches
+// run back-to-back; only an empty queue sleeps for 500ms.
 // (docs/phases/1-map.md "Upload as a worker"). `index.ts` calls
 // `startWorker()` unless `WORKER=off`; `bun run worker` (worker/main.ts)
 // runs it alone. Tests use `drain()` instead of the interval loop, so a
 // test never leaks a timer.
 import { env } from '../env.ts';
 import { DecodeError, onJobFailedFinal, runJob } from './jobs.ts';
+import { workerLoop } from './loop.ts';
 
 const POLL_INTERVAL_MS = 500;
 
@@ -90,7 +92,7 @@ export async function pollOnce(
   concurrency: number = env.WORKER_CONCURRENCY,
 ): Promise<number> {
   const jobs = await claim(concurrency);
-  await Promise.all(
+  const results = await Promise.allSettled(
     jobs.map(async (job) => {
       try {
         await runJob(job.kind, job.payload);
@@ -102,6 +104,11 @@ export async function pollOnce(
       }
     }),
   );
+  // A failed retry-state write must not release the batch while another
+  // image is still decoding. Keep concurrency bounded on error paths too.
+  for (const result of results) {
+    if (result.status === 'rejected') throw result.reason;
+  }
   return jobs.length;
 }
 
@@ -119,20 +126,20 @@ export async function drain(
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
+let stopLoop: (() => void) | null = null;
 
 export function startWorker(
   concurrency: number = env.WORKER_CONCURRENCY,
 ): void {
-  if (timer) return;
-  timer = setInterval(() => {
-    pollOnce(concurrency).catch((err) =>
-      console.error('[worker] poll failed', err),
-    );
-  }, POLL_INTERVAL_MS);
+  if (stopLoop) return;
+  stopLoop = workerLoop(
+    () => pollOnce(concurrency),
+    (error) => console.error('[worker] poll failed', error),
+    POLL_INTERVAL_MS,
+  );
 }
 
 export function stopWorker(): void {
-  if (timer) clearInterval(timer);
-  timer = null;
+  stopLoop?.();
+  stopLoop = null;
 }

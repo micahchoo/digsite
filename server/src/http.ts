@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { fromNodeHeaders } from 'better-auth/node';
 import { AccessDenied } from './access/index.ts';
 import { auth } from './auth.ts';
+import { env } from './env.ts';
 import { logError, logRequest, requestIdFor } from './logging.ts';
 import { startRequestDiagnostic } from './request-diagnostics.ts';
 
@@ -205,17 +206,84 @@ export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+export class RequestBodyTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`request body exceeds ${maxBytes} bytes`);
+    this.name = 'RequestBodyTooLargeError';
+  }
+}
+
+function drainAfterEarlyReject(req: IncomingMessage): void {
+  const cleanup = () => {
+    req.off('end', cleanup);
+    req.off('error', cleanup);
+  };
+  req.once('end', cleanup);
+  req.once('error', cleanup);
+  req.resume();
+}
+
+function readBoundedBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const declaredLength = Number(req.headers['content-length']);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      drainAfterEarlyReject(req);
+      reject(new RequestBodyTooLargeError(maxBytes));
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let rejected = false;
+    const cleanup = () => {
+      req.off('data', onData);
+      req.off('end', onEnd);
+      req.off('error', onError);
+    };
+    const onData = (chunk: Buffer | string) => {
+      if (rejected) return;
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += bytes.length;
+      if (total > maxBytes) {
+        rejected = true;
+        chunks.length = 0;
+        // Keep consuming without retaining bytes so the route can send its
+        // 413 response without destroying the connection mid-request.
+        reject(new RequestBodyTooLargeError(maxBytes));
+        return;
+      }
+      chunks.push(bytes);
+    };
+    const onEnd = () => {
+      cleanup();
+      if (!rejected) resolve(Buffer.concat(chunks, total));
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      if (!rejected) reject(error);
+    };
+
+    req.on('data', onData);
+    req.once('end', onEnd);
+    req.once('error', onError);
+  });
+}
+
 /** Builds a web-standard Request from a node IncomingMessage, body included,
  * so a route can call `.formData()` for multipart uploads. */
-export async function toWebRequest(req: IncomingMessage): Promise<Request> {
+export async function toWebRequest(
+  req: IncomingMessage,
+  maxBytes = env.UPLOAD_BATCH_MAX_MB * 1024 * 1024,
+): Promise<Request> {
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
     if (v === undefined) continue;
     headers.set(k, Array.isArray(v) ? v.join(', ') : v);
   }
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const body = Buffer.concat(chunks);
+  const body = await readBoundedBody(req, maxBytes);
   const url = new URL(req.url ?? '/', 'http://internal');
   return new Request(url.toString(), {
     method: req.method,

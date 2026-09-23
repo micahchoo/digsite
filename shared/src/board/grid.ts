@@ -1,11 +1,12 @@
 // The map: a rank (position under one sort) lands in a fixed row-major
-// grid, then a tile pyramid samples that grid at coarser zooms. Proven in
-// ../../../prototype/board/CONTRACT.md — cellOf/tileRanks/worldExtent are
-// carried over unchanged; only the identifiers moved to the product's words
-// (rank replaces slot as the grid's input; slot is the ladder's address,
-// see board/ladder.ts).
+// grid, then a tile pyramid samples that grid at coarser zooms. Compact
+// rows keep ordinary collections readable. Column count stays fixed while
+// images arrive: imports never reflow the existing layout. Ranks are still
+// distinct from ladder slots. Version both browser and stored tile caches
+// when changing this geometry.
 
-export const COLS = 1024;
+export const COLS = 16;
+export const GRID_LAYOUT_VERSION = 2;
 export const CELL = 128;
 export const TILE = 256;
 
@@ -43,7 +44,7 @@ export function tileRanks(z: Zoom, x: number, y: number): number[] {
     const row = y * n + rho;
     for (let kappa = 0; kappa < n; kappa++) {
       const col = x * n + kappa;
-      out.push(col >= COLS ? -1 : rankOf(col, row));
+      out.push(col < 0 || col >= COLS || row < 0 ? -1 : rankOf(col, row));
     }
   }
   return out;
@@ -69,5 +70,13 @@ export function worldExtent(count: number): [number, number, number, number] {
 export function rankAtWorld(wx: number, wy: number): number {
   const col = Math.floor(wx / CELL);
   const row = Math.floor(wy / CELL);
+  if (
+    !Number.isFinite(col) ||
+    !Number.isFinite(row) ||
+    col < 0 ||
+    col >= COLS ||
+    row < 0
+  )
+    return -1;
   return rankOf(col, row);
 }

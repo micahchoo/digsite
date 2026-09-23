@@ -53,6 +53,7 @@ export interface UploadSnapshot {
   message: string;
   version: number;
   refreshVersion: number;
+  tileRefreshVersion: number;
 }
 
 const EMPTY_COUNTS: UploadCounts = {
@@ -73,6 +74,7 @@ const EMPTY_SNAPSHOT: UploadSnapshot = {
   message: '',
   version: 0,
   refreshVersion: 0,
+  tileRefreshVersion: 0,
 };
 
 interface QueueSession {
@@ -92,6 +94,7 @@ interface QueueSession {
   activeTus: Set<tus.Upload>;
   nextIndex: number;
   refreshVersion: number;
+  tileRefreshVersion: number;
   dirty: boolean;
   publishTimer: number | null;
 }
@@ -133,6 +136,7 @@ function sessionFor(boardId: string): QueueSession {
       activeTus: new Set(),
       nextIndex: 0,
       refreshVersion: 0,
+      tileRefreshVersion: 0,
       dirty: false,
       publishTimer: null,
     };
@@ -172,6 +176,7 @@ function publish(session: QueueSession, immediate = false) {
     message: session.message,
     version: session.snapshot.version + 1,
     refreshVersion: session.refreshVersion,
+    tileRefreshVersion: session.tileRefreshVersion,
   };
   for (const listener of session.listeners) listener();
   const nextOverview = [...sessions.values()]
@@ -219,6 +224,9 @@ function setStatus(
   if (row.status !== next) {
     session.counts[bucket(row.status)] -= 1;
     session.counts[bucket(next)] += 1;
+    if (row.status === 'pending' && (next === 'ready' || next === 'failed')) {
+      session.tileRefreshVersion += 1;
+    }
     row.status = next;
   }
   if (error !== undefined) row.error = error;
@@ -477,6 +485,9 @@ async function uploadBatch(session: QueueSession, batch: UploadRow[]) {
           row.imageId = entry.id;
           setStatus(session, row, entry.status);
           session.refreshVersion += 1;
+          if (entry.status === 'ready' || entry.status === 'failed') {
+            session.tileRefreshVersion += 1;
+          }
         } else {
           setStatus(
             session,

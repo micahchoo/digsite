@@ -3,7 +3,7 @@ import { DEFAULT_SORT } from '@digsite/shared/board/sort';
 // docs/design.md "Tests": tile (0,0,0) of the seeded board has four painted
 // cells; X-Cache is miss then hit.
 //
-// z=0's tile (0,0,0) covers ranks 0, 1, 1024 and 1025 — COLS=1024
+// z=0's tile (0,0,0) covers ranks 0, 1, 16 and 17 — COLS=16
 // (shared/src/board/grid.ts) means a board needs >=1026 images before a
 // rank lands in the tile's second row. This test builds a small board, so
 // only ranks 0 and 1 are in range; those are the two cells asserted
@@ -61,7 +61,7 @@ describe('tiles', () => {
     // rank 0 -> cell (col0,row0) center (64,64); rank 1 -> (col1,row0) center (192,64)
     expect(isBackground(ctx.getImageData(64, 64, 1, 1).data)).toBe(false);
     expect(isBackground(ctx.getImageData(192, 64, 1, 1).data)).toBe(false);
-    // rank 1024/1025 don't exist on a 2-image board -> blank cells
+    // rank 16/17 don't exist on a 2-image board -> blank cells
     expect(
       isBackground(ctx.getImageData(64, 192, 1, 1).data) ||
         ctx.getImageData(64, 192, 1, 1).data[3] === 0,

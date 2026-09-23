@@ -186,6 +186,24 @@ describe('validate: HTTP route wiring', () => {
     });
     expect(res.status).toBe(415);
 
+    const oversizedBatch = new FormData();
+    for (let i = 0; i < 101; i++) {
+      oversizedBatch.append(
+        'files',
+        new Blob([new Uint8Array([1])], { type: 'image/png' }),
+        `file-${i}.png`,
+      );
+    }
+    const batchRes = await fetch(`${base}/boards/${boardId}/images?wait=0`, {
+      method: 'POST',
+      headers: { Origin: base, cookie },
+      body: oversizedBatch,
+    });
+    expect(batchRes.status).toBe(413);
+    expect(await batchRes.json()).toEqual({
+      error: 'a batch may contain at most 100 files',
+    });
+
     const after = await fetch(`${base}/boards/${boardId}/images`, {
       headers: { Origin: base, cookie },
     });

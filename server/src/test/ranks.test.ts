@@ -6,6 +6,7 @@ import { type Sort, sortId } from '@digsite/shared/board/sort';
 import {
   ensureRank,
   forceRebuildRank,
+  imageIdsInRankBand,
   sweepStaleRanks,
 } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
@@ -38,6 +39,47 @@ async function makeImage(
 }
 
 describe('ranks', () => {
+  test('rank band selects a rectangle in either drag direction and respects its cap', async () => {
+    const boardId = await makeBoard(`rank-band-${Date.now()}`);
+    const count = 256;
+    for (let i = 0; i < count; i++) {
+      await makeImage(boardId, i, `img-${String(i).padStart(3, '0')}`, {});
+    }
+    await pool.query('UPDATE boards SET image_count = $1 WHERE id = $2', [
+      count,
+      boardId,
+    ]);
+    const sort: Sort = { key: 'name', dir: 'asc' };
+    await ensureRank(boardId, sort);
+
+    const forward = await imageIdsInRankBand(boardId, sort, 0, 18, 150);
+    const reverse = await imageIdsInRankBand(boardId, sort, 18, 0, 150);
+    const expected = await pool.query(
+      `SELECT i.id FROM board_ranks br
+       JOIN images i ON i.board_id = br.board_id AND i.slot = br.slot
+       WHERE br.board_id = $1 AND br.sort_id = $2
+         AND br.rank IN (0, 1, 2, 16, 17, 18)
+       ORDER BY br.rank`,
+      [boardId, sortId(sort)],
+    );
+    expect(forward).toEqual(expected.rows.map((row) => row.id));
+    expect(reverse).toEqual(forward);
+
+    const capped = await imageIdsInRankBand(boardId, sort, 0, 255, 150);
+    expect(capped).toHaveLength(150);
+    const cappedRanks = await pool.query(
+      `SELECT rank FROM board_ranks
+       WHERE board_id = $1 AND sort_id = $2 AND slot = ANY(
+         SELECT slot FROM images WHERE id = ANY($3::uuid[])
+       ) ORDER BY rank`,
+      [boardId, sortId(sort), capped],
+    );
+    expect(cappedRanks.rows.map((row) => row.rank)).toEqual(
+      Array.from({ length: 150 }, (_, rank) => rank),
+    );
+    expect(await imageIdsInRankBand(boardId, sort, 300, 302, 150)).toEqual([]);
+  });
+
   test('ranks are a permutation of slots; property sort NULLS LAST; stale marks a rebuild', async () => {
     const boardId = await makeBoard(`ranks-test-${Date.now()}`);
     const N = 20;
