@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import { api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
+import { Participants } from './Participants.tsx';
 import './threads.css';
 import { Icon } from '../components/Icon.tsx';
 
@@ -157,6 +158,7 @@ export function ThreadBrowser({
                   {thread.archived && (
                     <span className="thread-archived">Archived</span>
                   )}
+                  <Participants people={thread.participants ?? []} />
                   <span className="thread-browser-meta">
                     {plural(thread.imageCount, 'image')}
                     {thread.lastActivityAt && (

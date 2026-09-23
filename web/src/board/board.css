@@ -2140,3 +2140,26 @@
   min-height: 26px;
   font-size: var(--text-2xs);
 }
+
+/* Who has been in a sheet (Participants.tsx): overlapping initials. */
+.participants {
+  display: inline-flex;
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+.participant {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: -4px;
+  border: 1.5px solid var(--surface-raised);
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 650;
+}
+.participant:first-child {
+  margin-left: 0;
+}

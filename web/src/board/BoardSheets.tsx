@@ -12,6 +12,7 @@ import { RenameInline } from '../components/RenameInline.tsx';
 import { ApiError, api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
 import { notifySheetsChanged, onSheetsChanged } from '../lib/sheetEvents.ts';
+import { Participants } from './Participants.tsx';
 import { ThreadBrowser } from './ThreadBrowser.tsx';
 import { sheetDeleteMessage } from './messages.ts';
 
@@ -119,6 +120,7 @@ export function BoardSheets({
                 <span className="board-sheet-meta">
                   {plural(sheet.imageCount, 'image')} ·{' '}
                   {sheet.savedAt ? savedLabel(sheet.savedAt) : 'Not saved'}
+                  <Participants people={sheet.participants ?? []} />
                 </span>
               </div>
               <div className="board-sheet-actions">

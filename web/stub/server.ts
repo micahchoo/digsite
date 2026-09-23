@@ -507,6 +507,17 @@ const peersBySheet: Record<
   s1: new Map(),
   s2: new Map(),
 };
+// Who has been in a sheet (SheetSummary.participants): the stub names the
+// seeded sheet's two authors, most recent first; any other sheet, nobody.
+function participantsOf(sheetId: string): { id: string; name: string }[] {
+  return sheetId === 's1'
+    ? [
+        { id: USERS.member.id, name: USERS.member.name },
+        { id: USERS.owner.id, name: USERS.owner.name },
+      ]
+    : [];
+}
+
 // GET /boards/:id/sheets "savedAt" (docs/phases/2-sheet.md section 6) — the
 // stub's stand-in for sheet_snapshots.saved_at, bumped on every 'scene'
 // broadcast, same as the real server's debounced snapshot would be.
@@ -1038,6 +1049,7 @@ const httpServer = createServer(async (req, res) => {
         boardId: SHEET_BOARD[id] ?? 'b1',
         boardName: boardOf(SHEET_BOARD[id] ?? 'b1')?.name ?? '',
         savedAt: sheetSavedAt[id] ?? null,
+        participants: participantsOf(id),
       }))
       .sort((a, b) => (b.savedAt ?? '').localeCompare(a.savedAt ?? ''))
       .slice(0, 10);
@@ -1556,6 +1568,7 @@ const httpServer = createServer(async (req, res) => {
         createdAt: new Date().toISOString(),
         imageCount: (SHEET_IMAGES[id] ?? []).length,
         savedAt: sheetSavedAt[id] ?? null,
+        participants: participantsOf(id),
         boardId: SHEET_BOARD[id] ?? 'b1',
         boardName: boardOf(SHEET_BOARD[id] ?? 'b1')?.name ?? '',
         archived: SHEET_ARCHIVED.has(id),
@@ -2047,6 +2060,7 @@ const httpServer = createServer(async (req, res) => {
           createdAt: new Date().toISOString(),
           imageCount: (SHEET_IMAGES[id] ?? []).length,
           savedAt: sheetSavedAt[id] ?? null,
+          participants: participantsOf(id),
           archived: SHEET_ARCHIVED.has(id),
         })),
     );
