@@ -100,7 +100,12 @@ import { rankWindow, useFind } from '../board/find.ts';
 import { outlinesOf, pointedAt, useBoardPresence } from '../board/presence.ts';
 import { RankedView, identity, useRanked } from '../board/ranked-view.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
-import { cellCorner, cellPolygon } from '../board/selection.ts';
+import {
+  type Press,
+  cellCorner,
+  cellPolygon,
+  pressMove,
+} from '../board/selection.ts';
 import {
   enqueueUploads,
   getUploadSnapshot,
@@ -1348,30 +1353,26 @@ export function Board() {
     const rank = rankAtWorld(wx, wy);
     if (rank < 0 || rank >= b.imageCount) return;
     const native = event?.srcEvent;
-    const ctrl = !!(native?.ctrlKey || native?.metaKey);
-    const shift = !!native?.shiftKey;
-    void resolveClick(rank, ctrl, shift);
+    void press({
+      rank,
+      toggle: !!(native?.ctrlKey || native?.metaKey),
+      extend: !!native?.shiftKey,
+    });
   }
 
-  async function resolveClick(rank: number, ctrl: boolean, shift: boolean) {
-    if (shift && lastClickRankRef.current !== null) {
-      await rangeSelect(lastClickRankRef.current, rank);
-      lastClickRankRef.current = rank;
-      return;
-    }
-    const img = await resolveImageAtRank(rank);
-    if (!img) return;
-    lastClickRankRef.current = rank;
-    if (ctrl) {
-      selection.toggle(img.id);
-      return;
-    }
-    const cur = selection.imageIds;
-    if (cur.length === 1 && cur[0] === img.id) {
-      selection.clear();
-    } else {
-      selection.replace([img.id]);
-    }
+  /** board/selection.ts#pressMove decides; this does it. */
+  async function press(p: Press) {
+    const move = await pressMove(
+      p,
+      lastClickRankRef.current,
+      selection.imageIds,
+      async (rank) => (await resolveImageAtRank(rank))?.id ?? null,
+    );
+    lastClickRankRef.current = move.anchor;
+    if (move.kind === 'range') await rangeSelect(move.from, move.to);
+    else if (move.kind === 'toggle') selection.toggle(move.id);
+    else if (move.kind === 'only') selection.replace([move.id]);
+    else if (move.kind === 'clear') selection.clear();
   }
 
   function clearSelection() {

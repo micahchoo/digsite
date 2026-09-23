@@ -1,63 +1,80 @@
-// Pure: shift-drag's rank range (order, cap) and the selection set ops.
-// No DOM, no deck.gl — see ../src/board/selection.ts.
+// Pure: what a press on the map does to the selection, and the shapes
+// the selection is drawn with. No DOM, no deck.gl — see
+// ../src/board/selection.ts.
 import { describe, expect, test } from 'bun:test';
-import { SHEET_LIMIT } from '@digsite/shared';
 import {
-  addRanks,
+  type Press,
   cellCorner,
   cellPolygon,
-  rankRange,
-  toggleRank,
+  pressMove,
 } from '../src/board/selection.ts';
 
-describe('rankRange', () => {
-  test('ascending order regardless of which end the drag started on', () => {
-    expect(rankRange(10, 3).ranks).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
-    expect(rankRange(3, 10).ranks).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
+/** Cell images by rank; counts the lookups a press made. */
+function cells(ids: Record<number, string>) {
+  const asked: number[] = [];
+  return {
+    asked,
+    imageAt: async (rank: number) => {
+      asked.push(rank);
+      return ids[rank] ?? null;
+    },
+  };
+}
+
+const plain = (rank: number): Press => ({ rank, toggle: false, extend: false });
+
+describe('pressMove', () => {
+  test('a plain press selects only that image and anchors there', async () => {
+    const c = cells({ 4: 'a' });
+    expect(await pressMove(plain(4), null, ['x', 'y'], c.imageAt)).toEqual({
+      kind: 'only',
+      id: 'a',
+      anchor: 4,
+    });
   });
 
-  test('a single rank (no real drag) is a range of one', () => {
-    expect(rankRange(5, 5)).toEqual({ ranks: [5], truncated: false });
+  test('a plain press on the only selected image clears it', async () => {
+    const c = cells({ 4: 'a' });
+    expect(await pressMove(plain(4), 9, ['a'], c.imageAt)).toEqual({
+      kind: 'clear',
+      anchor: 4,
+    });
   });
 
-  test('caps at SHEET_LIMIT by default, keeping the low end and flagging it', () => {
-    const { ranks, truncated } = rankRange(0, 1000);
-    expect(truncated).toBe(true);
-    expect(ranks).toHaveLength(SHEET_LIMIT);
-    expect(ranks[0]).toBe(0);
-    expect(ranks.at(-1)).toBe(SHEET_LIMIT - 1);
+  test('Ctrl/Cmd toggles, even the only selected image', async () => {
+    const c = cells({ 4: 'a' });
+    const press = { rank: 4, toggle: true, extend: false };
+    expect(await pressMove(press, null, ['a'], c.imageAt)).toEqual({
+      kind: 'toggle',
+      id: 'a',
+      anchor: 4,
+    });
   });
 
-  test('a span at exactly the limit is not truncated', () => {
-    const { ranks, truncated } = rankRange(0, SHEET_LIMIT - 1);
-    expect(truncated).toBe(false);
-    expect(ranks).toHaveLength(SHEET_LIMIT);
+  test('Shift extends from the anchor without looking the image up', async () => {
+    const c = cells({ 12: 'a' });
+    const press = { rank: 12, toggle: false, extend: true };
+    expect(await pressMove(press, 3, [], c.imageAt)).toEqual({
+      kind: 'range',
+      from: 3,
+      to: 12,
+      anchor: 12,
+    });
+    expect(c.asked).toEqual([]);
   });
 
-  test('a caller-supplied limit overrides SHEET_LIMIT', () => {
-    const { ranks, truncated } = rankRange(0, 10, 3);
-    expect(truncated).toBe(true);
-    expect(ranks).toEqual([0, 1, 2]);
+  test('Shift with no anchor yet is a plain press', async () => {
+    const c = cells({ 12: 'a' });
+    const press = { rank: 12, toggle: false, extend: true };
+    expect((await pressMove(press, null, [], c.imageAt)).kind).toBe('only');
   });
-});
 
-describe('toggleRank', () => {
-  test('adds an absent rank, removes a present one, and does not mutate the input', () => {
-    const empty = new Set<number>();
-    const added = toggleRank(empty, 4);
-    expect(added.has(4)).toBe(true);
-    expect(empty.has(4)).toBe(false);
-    const removed = toggleRank(added, 4);
-    expect(removed.has(4)).toBe(false);
-  });
-});
-
-describe('addRanks', () => {
-  test('unions without duplicating and without mutating the input', () => {
-    const start = new Set([1, 2]);
-    const next = addRanks(start, [2, 3, 4]);
-    expect([...next].sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
-    expect([...start].sort((a, b) => a - b)).toEqual([1, 2]);
+  test('a cell whose image cannot be read moves nothing, not the anchor', async () => {
+    const c = cells({});
+    expect(await pressMove(plain(4), 7, ['a'], c.imageAt)).toEqual({
+      kind: 'none',
+      anchor: 7,
+    });
   });
 });
 

@@ -1,40 +1,43 @@
-// Pure: shift-drag selects a rank range. A rank is already row-major
-// (CONTEXT.md "Rank"), so "start to end by row-major order" is just the
-// ascending integer span between the two ends, however the drag ran.
-// Capped at SHEET_LIMIT — the same cap a sheet enforces on its images
-// (shared/src/sheet/elements.ts) — since a selection's purpose is "New sheet".
-import { CELL, SHEET_LIMIT, cellOf } from '@digsite/shared';
+// What a press on the map does to the selection, and the shapes the
+// selection is drawn with. Pure: no DOM, no deck.gl.
+import { CELL, cellOf } from '@digsite/shared';
 
-export interface RankRangeResult {
-  ranks: number[];
-  truncated: boolean;
-}
+/** A press on one cell, with the modifiers that change its meaning. */
+export type Press = { rank: number; toggle: boolean; extend: boolean };
 
-export function rankRange(
-  a: number,
-  b: number,
-  limit: number = SHEET_LIMIT,
-): RankRangeResult {
-  const lo = Math.min(a, b);
-  const hi = Math.max(a, b);
-  const truncated = hi - lo + 1 > limit;
-  const end = truncated ? lo + limit - 1 : hi;
-  const ranks: number[] = [];
-  for (let r = lo; r <= end; r++) ranks.push(r);
-  return { ranks, truncated };
-}
+/** What the press does. `anchor` is the rank a later Shift+press extends
+ * from. A range is resolved by the server (design.md §5.1), so it carries
+ * ranks, never ids. */
+export type PressMove = { anchor: number | null } & (
+  | { kind: 'range'; from: number; to: number }
+  | { kind: 'toggle' | 'only'; id: string }
+  | { kind: 'clear' }
+  | { kind: 'none' }
+);
 
-export function toggleRank(selected: Set<number>, rank: number): Set<number> {
-  const next = new Set(selected);
-  if (next.has(rank)) next.delete(rank);
-  else next.add(rank);
-  return next;
-}
-
-export function addRanks(selected: Set<number>, ranks: number[]): Set<number> {
-  const next = new Set(selected);
-  for (const r of ranks) next.add(r);
-  return next;
+/**
+ * Shift extends a range from the last press, and never looks the cell's
+ * image up. Ctrl/Cmd toggles one image. A plain press selects only that
+ * image, and a plain press on the only selected image clears it. A cell
+ * whose image cannot be read does nothing and moves no anchor.
+ */
+export async function pressMove(
+  press: Press,
+  anchor: number | null,
+  selected: readonly string[],
+  imageAt: (rank: number) => Promise<string | null>,
+): Promise<PressMove> {
+  if (press.extend && anchor !== null) {
+    return { kind: 'range', from: anchor, to: press.rank, anchor: press.rank };
+  }
+  const id = await imageAt(press.rank);
+  if (!id) return { kind: 'none', anchor };
+  const moved = { anchor: press.rank };
+  if (press.toggle) return { kind: 'toggle', id, ...moved };
+  if (selected.length === 1 && selected[0] === id) {
+    return { kind: 'clear', ...moved };
+  }
+  return { kind: 'only', id, ...moved };
 }
 
 /** The world-space square a rank's cell occupies, for the selection outline
