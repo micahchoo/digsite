@@ -245,6 +245,9 @@ const WEB_STARTS = 40;
 const DOWNLOAD_MAX = 500;
 const DOWNLOAD_BY_IDS = 150;
 const NO_SECTIONS: Section[] = [];
+const NO_BITMAPS: ReadonlyMap<string, ImageBitmap> = new Map();
+/** The first rank each visible-cells reply answers for. */
+const cellsStart = new WeakMap<object, number>();
 const NO_IMAGES: BoardImageWithRank[] = [];
 const NO_RANKS: number[] = [];
 const NO_IDS: ReadonlySet<string> = new Set();
@@ -993,19 +996,18 @@ export function Board() {
   }, [currentSortId, tileVersion]);
 
   // -- detail: past the tiles, each visible cell draws its own preview ------
-  const [detailVersion, setDetailVersion] = useState(0);
+  /** The previews loaded so far, as the cache last published them. */
+  const [detailBitmaps, setDetailBitmaps] =
+    useState<ReadonlyMap<string, ImageBitmap>>(NO_BITMAPS);
   const detailCacheRef = useRef<DetailCache | null>(null);
   if (!detailCacheRef.current)
-    detailCacheRef.current = new DetailCache(
-      async (imageId) => {
-        const res = await fetch(api.previewUrl(imageId), {
-          credentials: 'include',
-        });
-        if (!res.ok) throw new Error(`preview failed: ${res.status}`);
-        return createImageBitmap(await res.blob());
-      },
-      () => setDetailVersion((n) => n + 1),
-    );
+    detailCacheRef.current = new DetailCache(async (imageId) => {
+      const res = await fetch(api.previewUrl(imageId), {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error(`preview failed: ${res.status}`);
+      return createImageBitmap(await res.blob());
+    }, setDetailBitmaps);
   useEffect(() => () => detailCacheRef.current?.clear(), []);
   const detailView = viewStateRef.current;
   const detailBox = canvasRef.current?.getBoundingClientRect();
@@ -1021,33 +1023,39 @@ export function Board() {
           board.imageCount,
         ).join(',')
       : '';
-  // Which image each visible cell holds: one request for the whole view.
-  useEffect(() => {
-    if (!detailKey) return;
-    const cache = sortCache(imageCacheRef.current, currentSortId);
-    const missing = detailKey
-      .split(',')
-      .map(Number)
-      .filter((rank) => !cache.has(rank));
-    if (!missing.length) return;
-    const from = Math.min(...missing);
-    const count = Math.max(...missing) - from + 1;
-    let cancelled = false;
-    api
-      .listBoardImages(boardId, currentSortId, from, count)
-      .then(({ images }) => {
-        images.forEach((img, i) => cache.set(from + i, img));
-        if (!cancelled) setDetailVersion((n) => n + 1);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [detailKey, boardId, currentSortId]);
+  // Which image each visible cell holds: one request for the whole view,
+  // an answer in ranks like any other (ranked-view.ts).
+  const detailRanks = detailKey ? detailKey.split(',').map(Number) : [];
+  const detailFrom = detailRanks.length ? Math.min(...detailRanks) : 0;
+  const detailTo = detailRanks.length ? Math.max(...detailRanks) : -1;
+  const cellsAnswer = useRanked(
+    view,
+    detailRanks.length ? `cells ${detailFrom}-${detailTo}` : null,
+    () => {
+      // The answer held while a newer one is asked belongs to an older
+      // view, so each reply keeps the rank it starts at. The reply itself
+      // is returned: the ranked view reads its build off that object.
+      const from = detailFrom;
+      return api
+        .listBoardImages(boardId, currentSortId, from, detailTo - from + 1)
+        .then((reply) => {
+          cellsStart.set(reply, from);
+          return reply;
+        });
+    },
+    120,
+  );
+  const detailCells = useMemo(() => {
+    const cells = new Map<number, BoardImage>();
+    const reply = cellsAnswer?.value;
+    const start = reply ? cellsStart.get(reply) : undefined;
+    if (reply && start !== undefined)
+      reply.images.forEach((img, i) => cells.set(start + i, img));
+    return cells;
+  }, [cellsAnswer]);
 
   // -- one layers array: tiles + sections + the selection outline -----------
   const zoom = statusRef.current.zoom;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: detailVersion is the signal that a preview bitmap or a cell's image arrived in a ref-held cache
   useEffect(() => {
     if (!deckRef.current || !board) return;
     const accent = rgba(palette.accent);
@@ -1085,12 +1093,14 @@ export function Board() {
 
     // Over the stretched tiles, the pictures themselves (board/detail.ts).
     if (detailKey) {
-      const cache = sortCache(imageCacheRef.current, currentSortId);
       for (const rank of detailKey.split(',').map(Number)) {
-        const img = cache.get(rank);
+        const img = detailCells.get(rank);
         if (!img || img.status !== 'ready' || img.missing) continue;
-        const bitmap = detailCacheRef.current?.get(img.id);
-        if (!bitmap) continue;
+        const bitmap = detailBitmaps.get(img.id);
+        if (!bitmap) {
+          detailCacheRef.current?.want(img.id);
+          continue;
+        }
         const r = containedRect(rank, img.width, img.height);
         list.push(
           new BitmapLayer({
@@ -1354,7 +1364,8 @@ export function Board() {
     exploreGraph,
     exploreRanks,
     detailKey,
-    detailVersion,
+    detailCells,
+    detailBitmaps,
     focusedImageId,
     pathImages,
   ]);

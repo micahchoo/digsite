@@ -76,6 +76,12 @@ export function containedRect(
  * holds its decoded pixels outside the JS heap, so an evicted one is
  * closed, never left to the collector.
  */
+/**
+ * Each visible picture's preview bitmap, loaded once and kept for the
+ * last `limit` asked for. Asking (`want`) and reading are apart: the page
+ * holds `onChanged`'s snapshot as state and draws from it, so a bitmap that
+ * arrives is a change the page can see, never a signal hidden in a ref.
+ */
 export class DetailCache {
   private readonly bitmaps = new Map<string, ImageBitmap>();
   private readonly pending = new Set<string>();
@@ -83,39 +89,47 @@ export class DetailCache {
 
   constructor(
     private readonly load: (id: string) => Promise<ImageBitmap>,
-    private readonly onLoaded: () => void,
+    /** Every bitmap held, after one arrived or was let go. */
+    private readonly onChanged: (
+      held: ReadonlyMap<string, ImageBitmap>,
+    ) => void,
     private readonly limit = DETAIL_LIMIT * 2,
   ) {}
 
-  /** The bitmap, or undefined while it loads (and it is asked for once). */
-  get(id: string): ImageBitmap | undefined {
+  /** Asks for a picture's bitmap: kept as the most recent when it is held,
+   * loaded once when it is not. */
+  want(id: string): void {
     const held = this.bitmaps.get(id);
     if (held) {
       this.bitmaps.delete(id);
       this.bitmaps.set(id, held);
-      return held;
+      return;
     }
-    if (this.pending.has(id) || this.failed.has(id)) return undefined;
+    if (this.pending.has(id) || this.failed.has(id)) return;
     this.pending.add(id);
     this.load(id)
       .then((bitmap) => {
         this.bitmaps.set(id, bitmap);
+        const gone: ImageBitmap[] = [];
         while (this.bitmaps.size > this.limit) {
           const [oldest, old] = this.bitmaps.entries().next().value ?? [];
           if (!oldest || !old) break;
           this.bitmaps.delete(oldest);
-          old.close();
+          gone.push(old);
         }
-        this.onLoaded();
+        // The page stops drawing a bitmap before it is closed.
+        this.onChanged(new Map(this.bitmaps));
+        for (const old of gone) old.close();
       })
       .catch(() => this.failed.add(id))
       .finally(() => this.pending.delete(id));
-    return undefined;
   }
 
   clear(): void {
-    for (const bitmap of this.bitmaps.values()) bitmap.close();
+    const all = [...this.bitmaps.values()];
     this.bitmaps.clear();
     this.failed.clear();
+    this.onChanged(new Map());
+    for (const bitmap of all) bitmap.close();
   }
 }
