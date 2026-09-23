@@ -1,5 +1,6 @@
 // After a rank rebuild for (board, sort), compose every tile for z <= -3 and
-// write it to disk, then record board_rank_state.materialised_at.
+// write it to disk, then record board_rank_state.materialised_at — for the
+// build it drew, and only if that build is still current.
 // tiles.ts#tileFor serves these directly once they exist and the state is
 // not stale — docs/phases/1-map.md "Materialised coarse levels",
 // .claude/rules/tile-cache-is-for-the-second-viewer.md (this is the "next
@@ -432,6 +433,25 @@ class EncodePool {
 // worker under a 4 GB cap within two seconds (the soak, 2026-09-23).
 const oneAtATime = new Semaphore(1);
 
+/** Marks (board, sort) materialised — only if its current build is still
+ * `version`, the one whose order the tiles were drawn from, and it is not
+ * stale. Returns whether it did. Roadmap C1: stamping unconditionally
+ * marked a rebuild that landed mid-run as materialised, and old coarse
+ * tiles were served until the next materialise. */
+export async function stampMaterialised(
+  boardId: string,
+  sid: string,
+  version: string,
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE board_rank_state SET materialised_at = now()
+     WHERE board_id = $1 AND sort_id = $2 AND built_at::text = $3
+       AND NOT stale`,
+    [boardId, sid, version],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 export function materialiseSort(
   boardId: string,
   sort: Sort,
@@ -466,12 +486,15 @@ async function materialiseSortNow(
 
   const budget = new MaterialiseBudget(env.MATERIALISE_BUDGET_MB * 1024 * 1024);
   const tiles = allocateTiles(boardId, sid, count, budget);
+  // The order drawn, and its build: only that build may be stamped
+  // materialised at the end (stampMaterialised).
+  const order = await rankOrder(boardId, sort);
 
   if (count > 0) {
-    // The sort's whole order, already a flat slot -> rank Int32Array
-    // (ranks.ts#rankOrder), so the scatter loop below never touches the
-    // database again. A slot past its end was uploaded after the build.
-    const { rankOfSlot } = await rankOrder(boardId, sort);
+    // The sort's whole order, already a flat slot -> rank Int32Array, so
+    // the scatter loop below never touches the database again. A slot past
+    // its end was uploaded after the build.
+    const { rankOfSlot } = order;
 
     const pendingSlots = new Uint8Array(count);
     const { rows: pendingRows } = await pool.query(
@@ -513,12 +536,12 @@ async function materialiseSortNow(
     for (const entry of entries) releaseMaterialiseTileCanvas(entry.canvas);
   }
 
-  await pool.query(
-    `INSERT INTO board_rank_state (board_id, sort_id, built_at, stale, materialised_at)
-     VALUES ($1, $2, now(), false, now())
-     ON CONFLICT (board_id, sort_id) DO UPDATE SET materialised_at = now()`,
-    [boardId, sid],
-  );
+  if (!(await stampMaterialised(boardId, sid, order.version))) {
+    // The order moved on while these tiles were drawn. The files stay on
+    // disk unstamped, so nothing serves them; the rebuild that moved the
+    // order already queued the materialise that replaces them.
+    return { tiles: entries.length, ms: performance.now() - start };
+  }
 
   // The tile route's first request after this never has to re-read disk:
   // hand the buffers we just wrote straight to the resident cache. A sort
