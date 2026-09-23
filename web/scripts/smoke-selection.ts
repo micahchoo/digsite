@@ -461,7 +461,17 @@ async function main() {
     () => typeof window.__digsiteBoard !== 'undefined',
   );
   await page.click('[data-testid="board-find-toggle"]');
+  // A find also asks for every match in the ranks on screen, uncapped, so
+  // the map dims them all and not only the first page (find.ts#rankWindow).
+  const windowed = page.waitForResponse(
+    (res) => res.url().includes('/find?') && res.url().includes('window='),
+    { timeout: 5000 },
+  );
   await page.getByTestId('board-find-query').fill('image-1');
+  assert(
+    (await windowed).status() === 200,
+    'the find for the ranks on screen was refused',
+  );
   await page.waitForFunction(
     () =>
       document

@@ -385,9 +385,17 @@ export const api = {
     sort: string,
     q: string,
     filters: FindFilterClause[],
-    claims: { label?: string; relation?: string; annotated?: boolean } = {},
+    claims: {
+      label?: string;
+      relation?: string;
+      annotated?: boolean;
+      /** Every match in these ranks, uncapped (at most 20,000 wide). */
+      window?: { from: number; to: number };
+    } = {},
   ) => {
     const params = new URLSearchParams({ sort, q });
+    if (claims.window)
+      params.set('window', `${claims.window.from}-${claims.window.to}`);
     if (filters.length) params.set('filter', JSON.stringify(filters));
     if (claims.label) params.set('label', claims.label);
     if (claims.relation) params.set('relation', claims.relation);

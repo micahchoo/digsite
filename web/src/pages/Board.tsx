@@ -90,7 +90,7 @@ import {
   containedRect,
   visibleRanks,
 } from '../board/detail.ts';
-import { useFind } from '../board/find.ts';
+import { rankWindow, useFind } from '../board/find.ts';
 import { RankedView, identity, useRanked } from '../board/ranked-view.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
 import { cellCorner, cellPolygon } from '../board/selection.ts';
@@ -859,7 +859,21 @@ export function Board() {
 
   // Find: a question in, an answer in ranks out (board/find.ts). An alias
   // merge changes what a term matches, so it asks again.
-  const finder = useFind(view, findOpen, vocab.vocabulary.aliases);
+  // The ranks on screen, so a find dims every match the map shows.
+  const findBox = canvasRef.current?.getBoundingClientRect();
+  const findView = viewStateRef.current;
+  const onScreen =
+    findView && findBox && board
+      ? rankWindow(
+          {
+            target: findView.target as number[],
+            zoom: findView.zoom as number,
+          },
+          findBox.height,
+          board.imageCount,
+        )
+      : null;
+  const finder = useFind(view, findOpen, vocab.vocabulary.aliases, onScreen);
   const findResult = finder.result;
 
   // Where the neighbourhood's images sit on the map under this sort.
@@ -1054,11 +1068,11 @@ export function Board() {
       }
     }
 
-    if (findResult?.ranks.length) {
+    if (findResult && finder.dimmed.length) {
       list.push(
         new PolygonLayer({
           id: 'find-matches',
-          data: findResult.ranks.map((rank, order) => ({
+          data: finder.dimmed.map((rank, order) => ({
             polygon: cellPolygon(rank),
             order,
           })),

@@ -8,12 +8,14 @@
 // like this", Clear clears everything — are one pure function with tests.
 // The answer is an answer in ranks, so it goes through the ranked view
 // (ranked-view.ts), and it is shaped only after the view has checked it.
-import type {
-  FindBoardResponse,
-  FindFilterClause,
-  MeaningResponse,
-  SortableKey,
-  TermKind,
+import {
+  CELL,
+  COLS,
+  type FindBoardResponse,
+  type FindFilterClause,
+  type MeaningResponse,
+  type SortableKey,
+  type TermKind,
 } from '@digsite/shared';
 import { useMemo, useReducer } from 'react';
 import { ApiError, api } from '../lib/api.ts';
@@ -203,19 +205,58 @@ export function parseFilter(
   return Number.isFinite(value) ? { key, op, value } : null;
 }
 
+/** The widest rank window the server answers in one request. */
+export const WINDOW_MAX = 20_000;
+/** A window's ends snap to this many ranks, so a small pan asks nothing. */
+const WINDOW_BLOCK = 1024;
+
+/**
+ * The ranks a find must answer for the map to dim everything on screen:
+ * the visible rows and one screen more each way, snapped to blocks, at most
+ * WINDOW_MAX wide around the middle. Null for an empty board.
+ */
+export function rankWindow(
+  view: { target: number[]; zoom: number },
+  height: number,
+  count: number,
+): { from: number; to: number } | null {
+  if (count <= 0) return null;
+  const scale = 2 ** view.zoom;
+  const cy = view.target[1] ?? 0;
+  const span = height / scale;
+  const row0 = Math.max(0, Math.floor((cy - span * 1.5) / CELL));
+  const row1 = Math.floor((cy + span * 1.5) / CELL);
+  let from = Math.floor((row0 * COLS) / WINDOW_BLOCK) * WINDOW_BLOCK;
+  let to = Math.min(
+    count - 1,
+    Math.ceil(((row1 + 1) * COLS) / WINDOW_BLOCK) * WINDOW_BLOCK - 1,
+  );
+  if (to - from + 1 > WINDOW_MAX) {
+    const middle =
+      Math.floor(((cy / CELL) * COLS) / WINDOW_BLOCK) * WINDOW_BLOCK;
+    from = Math.max(0, middle - WINDOW_MAX / 2);
+    to = Math.min(count - 1, from + WINDOW_MAX - 1);
+  }
+  return from <= to ? { from, to } : null;
+}
+
 /**
  * The board's find: the question, how to change it, and its answer under
  * the view's build. `aliases` asks again when a merge changes what a term
- * matches.
+ * matches; `onScreen` is the ranks on screen (rankWindow).
  */
 export function useFind(
   view: RankedView | null,
   open: boolean,
   aliases: object,
+  onScreen: { from: number; to: number } | null = null,
 ): {
   question: FindQuestion;
   dispatch: (a: FindAction) => void;
   result: FindResult | null;
+  /** Every matching rank the map should mark: the first page, and all of
+   * them in `onScreen`. */
+  dimmed: number[];
   error: string;
 } {
   const [question, dispatch] = useReducer(findReducer, NO_QUESTION);
@@ -230,10 +271,43 @@ export function useFind(
     () => (answer?.value ? shapeFind(answer.value) : null),
     [answer],
   );
+  // Words dim every match on screen, not only the first page of them: the
+  // same question again, for the ranks in view. Meaning is a best-few list,
+  // which a window does not change.
+  const windowed = asked && !byMeaning(question) && onScreen !== null;
+  const inView = useRanked(
+    view,
+    windowed
+      ? `${questionKey(question)} ${identity(aliases)} ${onScreen?.from}-${onScreen?.to}`
+      : null,
+    () =>
+      api.findBoard(
+        view?.boardId ?? '',
+        view?.sortId ?? '',
+        question.text.trim(),
+        question.filters,
+        {
+          ...(question.claim?.kind === 'label'
+            ? { label: question.claim.term }
+            : {}),
+          ...(question.claim?.kind === 'relation'
+            ? { relation: question.claim.term }
+            : {}),
+          ...(onScreen ? { window: onScreen } : {}),
+        },
+      ),
+    TYPING_MS,
+  );
+  const dimmed = useMemo(() => {
+    const ranks = new Set(result?.ranks ?? []);
+    for (const r of inView?.value?.ranks ?? []) ranks.add(r);
+    return [...ranks];
+  }, [result, inView]);
   return {
     question,
     dispatch,
     result,
+    dimmed,
     error: answer?.error ? findFailure(answer.error, byMeaning(question)) : '',
   };
 }

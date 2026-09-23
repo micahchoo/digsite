@@ -1764,7 +1764,20 @@ const httpServer = createServer(async (req, res) => {
             ]),
           ])
         : null;
-    const matched = rankedImages(boardId, sort).filter((img) => {
+    // `window=<from>-<to>`: every match in those ranks, uncapped, at most
+    // 20,000 wide (the server's find window).
+    const windowParam = url.searchParams.get('window');
+    const windowRange = windowParam?.match(/^(\d+)-(\d+)$/);
+    if (windowParam && !windowRange)
+      return json(400, { reason: 'window is <from>-<to>' });
+    const [from, to] = windowRange
+      ? [Number(windowRange[1]), Number(windowRange[2])]
+      : [0, Number.POSITIVE_INFINITY];
+    if (windowRange && to - from + 1 > 20_000)
+      return json(400, { reason: 'a window is at most 20000 ranks wide' });
+    const ranking = rankedImages(boardId, sort);
+    const matched = ranking.filter((img, rank) => {
+      if (rank < from || rank > to) return false;
       const haystack = [img.name, ...Object.values(img.properties).map(String)]
         .join(' ')
         .toLocaleLowerCase();
@@ -1778,12 +1791,8 @@ const httpServer = createServer(async (req, res) => {
     });
     return json(200, {
       ranks: matched
-        .slice(0, 10_000)
-        .map((img) =>
-          rankedImages(boardId, sort).findIndex(
-            (ranked) => ranked.id === img.id,
-          ),
-        ),
+        .slice(0, windowRange ? matched.length : 10_000)
+        .map((img) => ranking.findIndex((ranked) => ranked.id === img.id)),
       imageIds: matched.slice(0, SHEET_LIMIT).map((img) => img.id),
       count: matched.length,
     });
