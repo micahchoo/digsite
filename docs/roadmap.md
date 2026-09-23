@@ -96,9 +96,9 @@ promise), then 2, 5, 4, then the rest.
 
 | # | item | done when | status |
 | --- | --- | --- | --- |
-| 1 | Sheets across processes | sheet rooms live in one API process; share them over Postgres. Two API processes behind one proxy, two editors on one sheet, the edit-conflict tests pass | open |
-| 2 | Narrow find at a million | a narrow query scans every property with `jsonb_each_text` (~1.2 s); index name and property text together. Narrow find under 100 ms at 1M | open |
-| 3 | Compact grid at a million | the scale run from roadmap item 1, repeated on the 16-column layout: materialise time, pan p95, memory | open |
+| 1 | Sheets across processes | sheet rooms live in one API process; share them over Postgres. Two API processes behind one proxy, two editors on one sheet, the edit-conflict tests pass | DONE 2026-09-23 (`99455d3`): Postgres adapter; presence via fetchSockets; test with two servers |
+| 2 | Narrow find at a million | a narrow query scans every property with `jsonb_each_text` (~1.2 s); index name and property text together. Narrow find under 100 ms at 1M | DONE 2026-09-23 (`14e73a8`): `images.search_text` + trigram index; 2 ms for 450 matches at 1M |
+| 3 | Compact grid at a million | the scale run from roadmap item 1, repeated on the 16-column layout: materialise time, pan p95, memory | DONE 2026-09-23 (`21b5305`): every target passes; `measurements/compact-grid-1m.md` |
 | 4 | Near-duplicates | from embeddings; 20 repeated captures in the owner's screenshots found, no false positives on the test set. Shared with Making sense horizon 4 | open |
 | 5 | Meaning for a million photos | 75 ms per image is 21 h per worker; batch inference and more workers by default. 20,000 photos searchable in under 10 min | open |
 | 6 | A map arranged by meaning | a sort that places similar images together; needs a new sort kind in the web. Maps cluster with maps on the owner's screenshots | open |
@@ -114,11 +114,13 @@ a fix; the rest are unproven.
 
 | # | suspicion | cheapest test | fix if it holds |
 | --- | --- | --- | --- |
-| C1 | **Materialise stamps a rebuild it did not draw.** `materialiseSort` sets `materialised_at = now()` at the end whatever order it read; a rebuild during the run is marked materialised, and old coarse tiles are served until the next materialise. Confirmed in code. | hold a materialise open, rebuild the sort, release it; the stamped version differs from the drawn one | stamp only `WHERE built_at` is still the version it read |
-| C2 | **A composed tile outlives its invalidation.** `tileFor` composes from order v1, a rebuild publishes v2 and clears the cache, then the v1 tile is stored under the same URL. Confirmed in code. | delay a compose, invalidate during it, request again; old pixels return | key composed tiles by order version (with item 7) |
+| C1 | **Materialise stamps a rebuild it did not draw.** `materialiseSort` sets `materialised_at = now()` at the end whatever order it read; a rebuild during the run is marked materialised, and old coarse tiles are served until the next materialise. Confirmed in code. | hold a materialise open, rebuild the sort, release it; the stamped version differs from the drawn one | FIXED `08d1bec` |
+| C2 | **A composed tile outlives its invalidation.** `tileFor` composes from order v1, a rebuild publishes v2 and clears the cache, then the v1 tile is stored under the same URL. Confirmed in code. | delay a compose, invalidate during it, request again; old pixels return | FIXED `3339fe1`: per-board generation, no per-hit query |
 | C3 | **One view mixes answers from two builds.** find, sections, search and tiles each read the order at their own moment; during a rebuild the map can dim ranks that moved. | rebuild during a find plus a tile burst; compare the ranks each used | every rank answer returns its order version; the client refetches on change |
 | C4 | **A lease expires under a stalled event loop.** Renewal is a timer every 20 s; a synchronous stretch past 60 s (the materialise scatter at a million?) lets a second worker take the same job. | `monitorEventLoopDelay` in the worker through a 1M materialise; max stall against 20 s | yield inside the scatter, or renew from the work loop |
 | C5 | **HNSW misses true neighbours.** The index is approximate. | on real embeddings, top-20 from the index against an exact scan | raise `ef_search` until recall is 0.95 or better |
 | C6 | **Importing a folder twice duplicates every image.** Storage dedupes the bytes; `uploadOne` still makes a new row. | import the same folder twice; count rows | a product decision: skip files already on the board, or say so |
 | C7 | **Two canvas defects are fenced, not understood.** Resizing an encoded page canvas leaked 1.1 MB per image; the decoder rejects some valid PNGs. | minimal repros against the latest `@napi-rs/canvas`; the second has a fixture | report upstream; remove the fences if fixed |
 | C8 | **One supervisor test failure, seen once.** 748 ms, not reproduced in three reruns. | run `supervisor.test.ts` 200 times; keep the failing assertion | whatever the assertion shows |
+| C9 | **Anyone could sign a claim with another name.** Stamps were the client's word. | — | FIXED `759b740`: the server signs stamps; unsigned ones become the sender's |
+| C10 | **Every upload refused on a large volume.** Bun's `statfs` returns block counts as signed 32-bit; 24 TB read as -2,661 GB free. Found by the other session. | — | FIXED `fed0b5d`: read as bigints |
