@@ -88,6 +88,7 @@ import {
 } from '../http.ts';
 import { checkLimit, tooManyRequests } from '../limits.ts';
 import { duplicatesOf } from '../meaning/duplicates.ts';
+import { suggestLabels } from '../meaning/labels.ts';
 import { searchText, similarTo } from '../meaning/search.ts';
 import { recordTileCache } from '../metrics.ts';
 import {
@@ -1454,6 +1455,34 @@ export function registerBoardRoutes(router: Router) {
       return json(ctx.res, 200, response);
     });
   }
+
+  // GET /boards/:id/label-suggestions?image=&limit= (meaning/labels.ts):
+  // the board's own label terms that best describe the image, best first,
+  // as {suggestions: [{term, score}]}. Statuses as /similar.
+  router.get('/boards/:id/label-suggestions', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const boardId = param(ctx, 'id');
+    await boardForViewing(userId, boardId);
+    if (!env.EMBEDDINGS) {
+      return json(ctx.res, 503, { error: 'embeddings are off' });
+    }
+    const image = ctx.url.searchParams.get('image') ?? '';
+    const { rows } = await pool.query(
+      'SELECT 1 FROM images WHERE board_id = $1 AND id::text = $2',
+      [boardId, image],
+    );
+    if (rows.length === 0) {
+      return json(ctx.res, 400, { error: 'image is not on this board' });
+    }
+    const asked = Number(ctx.url.searchParams.get('limit') ?? 5);
+    const limit =
+      Number.isInteger(asked) && asked > 0 ? Math.min(asked, 50) : 5;
+    const suggestions = await suggestLabels(boardId, image, limit);
+    if (suggestions === null) {
+      return json(ctx.res, 409, { error: 'image is not embedded yet' });
+    }
+    return json(ctx.res, 200, { suggestions });
+  });
 
   router.get('/boards/:id/search', async (ctx) => {
     const userId = requireAuth(ctx);

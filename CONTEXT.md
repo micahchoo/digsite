@@ -146,6 +146,9 @@ sheet that made it. The board never writes a claim.
   (similarity 0.975 or more) AND in pixels (0.5% or less of the picture
   changed at 128 px). A suggestion that a person accepts or declines.
   It never removes or merges an image.
+- **Label suggestion** — a label term the board already uses (canonical
+  after aliases), scored against an image's embedding. Offered as a chip;
+  a person clicks it or ignores it. Never a new word, never filled in.
 - **Folder import** — a board filled from a folder on the server's disk,
   under a root the operator allowed (`IMPORT_ROOTS`). Each file takes the
   upload path; the import keeps its file list and a cursor, so it resumes.
