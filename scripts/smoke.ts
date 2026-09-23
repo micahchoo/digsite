@@ -53,6 +53,8 @@ const SCRIPTS = [
   // Horizon 6: the rest of the app at phone width.
   'scripts/smoke-phone.ts',
 ];
+// Run only when named: tools, not checks of the product.
+const TOOLS = ['scripts/css-snapshot.ts'];
 
 function log(msg: string): void {
   console.log(`[smoke] ${msg}`);
@@ -122,7 +124,7 @@ async function main() {
   const requested = process.argv.slice(2);
   const scripts = requested.length ? [...new Set(requested)] : SCRIPTS;
   for (const script of scripts) {
-    if (!SCRIPTS.includes(script)) {
+    if (!SCRIPTS.includes(script) && !TOOLS.includes(script)) {
       throw new Error(`Unknown smoke script: ${script}`);
     }
   }
