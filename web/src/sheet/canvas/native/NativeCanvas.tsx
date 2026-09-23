@@ -48,6 +48,7 @@ import { History, applyStep } from './history.ts';
 import { ImageCache } from './images.ts';
 import { applyPatch, diffForHistory, finalizeDrag } from './ops.ts';
 import { renderFrame } from './render.ts';
+import { restoreElements } from './restore.ts';
 import {
   type HandleId,
   type Hit,
@@ -615,7 +616,9 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           // state through this handle after applying the update.
           elementsRef.current = mergeByVersion(
             elementsRef.current,
-            raw as SceneElement[],
+            // The wire is untyped: every element is restored to full shape
+            // here, once (restore.ts).
+            restoreElements(raw),
           );
           const live = new Set(
             elementsRef.current.filter((e) => !e.isDeleted).map((e) => e.id),
