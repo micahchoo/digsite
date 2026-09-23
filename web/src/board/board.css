@@ -2163,3 +2163,24 @@
 .participant:first-child {
   margin-left: 0;
 }
+
+/* Who else is on the board (presence.ts), beside the image count. */
+.board-presence {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.board-presence-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.board-presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+}

@@ -1645,6 +1645,45 @@ async function main(): Promise<void> {
       `18. three pictures copy to another board once, a second copy skips them, and they download as a zip (${size} bytes)`,
     );
 
+    // -- 19. Two people on one board see what the other points at ----------
+    await l.goto(`${WEB}/b/${field.id}`);
+    await l.getByTestId('sort-key').waitFor();
+    await m.goto(`${WEB}/b/${field.id}`);
+    await m.getByTestId('sort-key').waitFor();
+    await m.evaluate(
+      (ids) =>
+        (
+          window as unknown as {
+            __digsiteBoard: { selectIds: (ids: string[]) => void };
+          }
+        ).__digsiteBoard.selectIds(ids),
+      [bySlot.get(4) ?? '', bySlot.get(5) ?? ''],
+    );
+    await l.waitForFunction(
+      () =>
+        (
+          window as unknown as {
+            __digsiteBoard?: { getLayerIds: () => string[] };
+          }
+        ).__digsiteBoard
+          ?.getLayerIds()
+          .includes('presence-outlines') ?? false,
+      undefined,
+      { timeout: 10_000 },
+    );
+    const here = await l.getByTestId('board-presence').innerText();
+    assert(/member/i.test(here), `the other viewer is shown as "${here}"`);
+    await l.screenshot({ path: `${SHOTS}19-presence.png` });
+    // Leaving takes them off the other's board.
+    await m.goto(`${WEB}/groups`);
+    await l.getByTestId('board-presence').waitFor({
+      state: 'detached',
+      timeout: 10_000,
+    });
+    pass(
+      '19. a picture one person selects is outlined, named, on the other person’s map; leaving takes it away',
+    );
+
     await meaningClaim(member, lab.id, m);
 
     assert(errors.length === 0, `page errors: ${errors.join(' | ')}`);

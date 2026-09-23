@@ -92,6 +92,7 @@ import {
   visibleRanks,
 } from '../board/detail.ts';
 import { rankWindow, useFind } from '../board/find.ts';
+import { outlinesOf, pointedAt, useBoardPresence } from '../board/presence.ts';
 import { RankedView, identity, useRanked } from '../board/ranked-view.ts';
 import { sectionMarkers, sectionsVisible } from '../board/sections-layer.ts';
 import { cellCorner, cellPolygon } from '../board/selection.ts';
@@ -883,6 +884,32 @@ export function Board() {
   const finder = useFind(view, findOpen, vocab.vocabulary.aliases, onScreen);
   const findResult = finder.result;
 
+  // -- presence: who else is here, and what they point at (presence.ts) ----
+  const presence = useBoardPresence(
+    boardId,
+    hoverTooltip?.image.id ?? null,
+    selection.imageIds,
+  );
+  const pointed = pointedAt(presence.viewers);
+  const pointedAnswer = useRanked(
+    view,
+    pointed.length ? `presence ${pointed.join(',')}` : null,
+    () => api.getBoardImagesByIds(boardId, currentSortId, pointed),
+  );
+  const outlines = useMemo(() => {
+    const rankOf = new Map<string, number>();
+    for (const img of pointedAnswer?.value?.images ?? [])
+      if (typeof img.rank === 'number') rankOf.set(img.id, img.rank);
+    return outlinesOf(presence.viewers, rankOf);
+  }, [presence.viewers, pointedAnswer]);
+  const othersHere = useMemo(() => {
+    const byPerson = new Map<string, { name: string; colour: string }>();
+    for (const v of presence.viewers)
+      if (!byPerson.has(v.id))
+        byPerson.set(v.id, { name: v.name, colour: v.colour });
+    return [...byPerson.values()];
+  }, [presence.viewers]);
+
   // Where the neighbourhood's images sit on the map under this sort.
   const exploreAnswer = useRanked(
     view,
@@ -1270,6 +1297,44 @@ export function Board() {
       }
     }
 
+    // Other viewers: their selections outlined in their colour, their hover
+    // outlined thicker and named.
+    if (outlines.length) {
+      list.push(
+        new PolygonLayer({
+          id: 'presence-outlines',
+          data: outlines,
+          getPolygon: (d) => cellPolygon(d.rank),
+          stroked: true,
+          filled: false,
+          getLineColor: (d) => d.colour,
+          getLineWidth: (d) => (d.name ? 3 : 2),
+          lineWidthUnits: 'pixels',
+        }),
+      );
+      const named = outlines.filter((o) => o.name);
+      if (named.length)
+        list.push(
+          new TextLayer({
+            id: 'presence-names',
+            data: named,
+            // Just above the cell's top-left corner.
+            getPosition: (d) => {
+              const { col, row } = cellOf(d.rank);
+              return [col * CELL, row * CELL];
+            },
+            getText: (d) => d.name ?? '',
+            getColor: [255, 255, 255],
+            getSize: 11,
+            background: true,
+            getBackgroundColor: (d) => d.colour,
+            getTextAnchor: 'start',
+            getAlignmentBaseline: 'bottom',
+            fontFamily: 'system-ui, sans-serif',
+          }),
+        );
+    }
+
     deckRef.current.setProps({ layers: list });
     forceRender((n) => n + 1);
   }, [
@@ -1281,6 +1346,8 @@ export function Board() {
     selectedImages,
     flashId,
     findResult,
+    finder.dimmed,
+    outlines,
     zoom,
     palette,
     annotatedRanks,
@@ -1989,6 +2056,24 @@ export function Board() {
             <span className="board-count-badge">
               {plural(board.imageCount, 'image')}
             </span>
+            {othersHere.length > 0 && (
+              <span
+                className="board-presence"
+                data-testid="board-presence"
+                title={`Also here: ${othersHere.map((p) => p.name).join(', ')}`}
+              >
+                {othersHere.map((p) => (
+                  <span key={p.name} className="board-presence-person">
+                    <span
+                      className="board-presence-dot"
+                      style={{ background: p.colour }}
+                      aria-hidden="true"
+                    />
+                    {p.name}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
         </div>
         <div className="board-toolbar-controls">
