@@ -43,6 +43,10 @@ line here before it gets a file.
   row, row-major. `col = rank % 16`, `row = rank / 16`.
 - **Tile** — a 256 px PNG of the cells in one square of the map at one
   **zoom** `z ∈ {0..−5}`. Composed on request from the ladder, cached.
+- **Build token** — which build of an order an answer used: a tile, or
+  any answer in ranks, names it in `X-Order-Version`. A tile URL that
+  carries its build's token (`?v=`) is cached by the browser for good;
+  the next build is a new token, so a new URL.
 - **Missing** — an image whose original is gone. Kept as a row, shown as
   such, never deleted by the system.
 - **Captured properties** — properties the worker reads from an
