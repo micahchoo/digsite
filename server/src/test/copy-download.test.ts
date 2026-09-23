@@ -110,7 +110,7 @@ describe('copy and download', () => {
     };
     expect([copied.images.length, copied.skipped]).toEqual([3, []]);
     const { rows } = await pool.query(
-      `SELECT name, properties, source_format FROM images WHERE board_id = $1 ORDER BY slot`,
+      'SELECT name, properties, source_format FROM images WHERE board_id = $1 ORDER BY slot',
       [to],
     );
     expect(
