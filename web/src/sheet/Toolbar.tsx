@@ -4,6 +4,7 @@
 // what a tool that takes the pointer is waiting for, and how to leave it.
 import { useEffect } from 'react';
 import { Icon } from '../components/Icon.tsx';
+import { modalOpen } from '../lib/modal.ts';
 import { ShortcutsPanel } from './ShortcutsPanel.tsx';
 import type { CanvasHandle } from './canvas/types.ts';
 import type { Tool } from './gestures.ts';
@@ -141,8 +142,8 @@ export function Toolbar({
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (typing() || e.metaKey || e.ctrlKey || e.altKey) return;
-      // The keyboard panel is modal and answers its own keys.
-      if (help) return;
+      // The keyboard panel, like every modal dialog, answers its own keys.
+      if (help || modalOpen()) return;
       // The first Esc cancels a connection half made (DrawLayer.tsx); the
       // next leaves the tool, as the mode bar says.
       if (e.key === 'Escape' && !pendingEdge && tool !== 'select') {

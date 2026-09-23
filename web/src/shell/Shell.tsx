@@ -8,6 +8,7 @@ import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { Outlet } from 'react-router';
 import { stopAllUploadQueues } from '../board/upload.ts';
 import { authClient, useSession } from '../lib/auth.ts';
+import { modalOpen } from '../lib/modal.ts';
 import { ChannelColumn } from './ChannelColumn.tsx';
 import { GroupRail } from './GroupRail.tsx';
 import { QuickSwitcher } from './QuickSwitcher.tsx';
@@ -80,7 +81,7 @@ export function Shell() {
         setSwitcherOpen(true);
         return;
       }
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !modalOpen()) {
         setSwitcherOpen(false);
         setDrawerOpen(false);
         setRightOpen(false);
