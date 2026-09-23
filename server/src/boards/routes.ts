@@ -1351,8 +1351,7 @@ export function registerBoardRoutes(router: Router) {
     // build the client should refetch.
     const order = await rankOrder(boardId, sort);
     sayOrder(ctx.res, order);
-    const v = (body as { v?: unknown }).v;
-    if (v !== undefined && v !== orderToken(order.version)) {
+    if (body.v !== undefined && body.v !== orderToken(order.version)) {
       return json(ctx.res, 409, { error: 'the order has changed' });
     }
     const imageIds =
