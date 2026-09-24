@@ -9,25 +9,35 @@
 // Two steps, because the multipart route refuses a whole batch if one file
 // is bad, so it must examine every file before it stores any:
 //
-//   examine — the file's own faults: a phone or camera file becomes a JPEG
-//             (camera.ts); the bytes must be a known image type inside the
-//             size and pixel budgets (validate.ts); optionally, bytes
-//             already on the board are refused. A refusal carries an HTTP
-//             status and a reason a person can read.
-//   store   — the board's side: room on the volume, the original stored,
-//             the row, the ladder job (upload.ts#uploadOne). Its failures
-//             are the server's (a full disk, the database) and are thrown,
-//             never turned into a refusal.
+//   examine  — the file's own faults: its properties must be a property
+//              map; a phone or camera file becomes a JPEG (camera.ts); the
+//              bytes must be a known image type inside the size and pixel
+//              budgets (validate.ts); optionally, bytes already on the
+//              board are refused. A refusal carries an HTTP status and a
+//              reason a person can read.
+//   store    — the board's side: room on the volume, the original stored,
+//              the row, the ladder job (upload.ts#uploadOne). Its failures
+//              are the server's (a full disk, the database) and are thrown,
+//              never turned into a refusal.
+//   storeAll — store for a batch that stops at the group's quota and says
+//              which files landed before it (the multipart route, a copy).
+//
+// An extracted region comes in here too, as a picture already stored
+// (`asStored`): it is our own PNG, never a camera file, whatever its name.
 import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.ts';
+import { QuotaExceeded, quotaRefusal } from '../storage/quota.ts';
 import { fromCamera, isCameraFile } from './camera.ts';
+import { isProperties } from './properties.ts';
 import { type Source, type UploadedImage, uploadOne } from './upload.ts';
 import { validateUpload } from './validate.ts';
 
 export type Offered = {
   name: string;
   bytes: Uint8Array;
-  properties?: Record<string, unknown>;
+  /** Anything the caller received; examine refuses what is not a
+   * property map. */
+  properties?: unknown;
   /** An image's original already (a copy from another board): the bytes
    * are never converted again, and its kept camera source, if any, comes
    * with it. */
@@ -53,7 +63,16 @@ export async function examine(
   offered: Offered,
   options: { skipDuplicates?: boolean } = {},
 ): Promise<Examined | Refused> {
-  const properties = { ...(offered.properties ?? {}) };
+  if (offered.properties !== undefined && !isProperties(offered.properties)) {
+    return {
+      ok: false,
+      status: 400,
+      reason: 'properties must be a valid property map',
+    };
+  }
+  const properties: Record<string, unknown> = {
+    ...((offered.properties as Record<string, unknown> | undefined) ?? {}),
+  };
   let bytes = offered.bytes;
   let source: Source | undefined = offered.asStored?.source;
   if (!offered.asStored && isCameraFile(offered.name)) {
@@ -107,4 +126,35 @@ export function store(
     examined.contentType,
     examined.source,
   );
+}
+
+export type StoredAll = {
+  images: UploadedImage[];
+  /** The group's storage filled before every file was stored: the 413
+   * body, naming in order the files that landed before it. */
+  full: (ReturnType<typeof quotaRefusal> & { accepted: Accepted[] }) | null;
+};
+type Accepted = { name: string; id: string };
+
+/** Stores each file in order, stopping at the first the group's quota
+ * refuses. Anything else thrown is the server's, and is thrown. */
+export async function storeAll(
+  boardId: string,
+  userId: string,
+  files: readonly Examined[],
+): Promise<StoredAll> {
+  const images: UploadedImage[] = [];
+  for (const file of files) {
+    try {
+      images.push(await store(boardId, userId, file));
+    } catch (error) {
+      if (!(error instanceof QuotaExceeded)) throw error;
+      const accepted = images.map((image, i) => ({
+        name: files[i]?.name ?? '',
+        id: image.id,
+      }));
+      return { images, full: { ...quotaRefusal(error), accepted } };
+    }
+  }
+  return { images, full: null };
 }

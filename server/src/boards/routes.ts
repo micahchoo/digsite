@@ -98,7 +98,6 @@ import { searchText, similarTo } from '../meaning/search.ts';
 import { duplicateGroups } from '../meaning/sweep.ts';
 import { recordTileCache } from '../metrics.ts';
 import { presignedGetUrl, storageFromEnv } from '../storage/index.ts';
-import { QuotaExceeded, quotaRefusal } from '../storage/quota.ts';
 import { Semaphore } from '../util/semaphore.ts';
 import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
@@ -112,7 +111,7 @@ import {
   resumeFolderImport,
   startFolderImport,
 } from './folder-import.ts';
-import { type Examined, examine, store } from './intake.ts';
+import { type Examined, examine, storeAll } from './intake.ts';
 import { withPage } from './ladder.ts';
 import { originalKey, previewKey, sourceKey } from './paths.ts';
 import { isProperties } from './properties.ts';
@@ -653,21 +652,8 @@ export function registerBoardRoutes(router: Router) {
       boardId,
       ids as string[],
     );
-    const images: UploadImagesResponse = [];
-    for (const file of ready) {
-      try {
-        images.push(await store(boardId, userId, file));
-      } catch (error) {
-        if (!(error instanceof QuotaExceeded)) throw error;
-        return json(ctx.res, 413, {
-          ...quotaRefusal(error),
-          accepted: images.map((image, i) => ({
-            name: ready[i]?.name,
-            id: image.id,
-          })),
-        });
-      }
-    }
+    const { images, full } = await storeAll(boardId, userId, ready);
+    if (full) return json(ctx.res, 413, full);
     const response: CopyImagesResponse = { images, skipped };
     return json(ctx.res, 202, response);
   });
@@ -784,11 +770,7 @@ export function registerBoardRoutes(router: Router) {
     if (typeof propsField === 'string') {
       try {
         const parsed = JSON.parse(propsField);
-        if (
-          !Array.isArray(parsed) ||
-          parsed.length !== files.length ||
-          !parsed.every(isProperties)
-        ) {
+        if (!Array.isArray(parsed) || parsed.length !== files.length) {
           return json(ctx.res, 400, {
             error: 'properties must be one valid object per file',
           });
@@ -818,27 +800,13 @@ export function registerBoardRoutes(router: Router) {
       examined.push(result);
     }
 
-    const out: UploadImagesResponse = [];
-    const ids: string[] = [];
-    for (const file of examined) {
-      let uploaded: Awaited<ReturnType<typeof store>>;
-      try {
-        uploaded = await store(boardId, userId, file);
-      } catch (error) {
-        // The group's storage filled up partway: the files stored before
-        // this one stay, and the answer names them, in order, so the
-        // upload queue can mark exactly those rows as landed.
-        if (!(error instanceof QuotaExceeded)) throw error;
-        return json(ctx.res, 413, {
-          ...quotaRefusal(error),
-          accepted: examined
-            .slice(0, out.length)
-            .map((f, i) => ({ name: f.name, id: out[i]?.id })),
-        });
-      }
-      ids.push(uploaded.id);
-      out.push(uploaded);
-    }
+    // The group's storage can fill partway: the files stored before it
+    // stay, and the 413 names them, in order, so the upload queue can mark
+    // exactly those rows as landed.
+    const stored = await storeAll(boardId, userId, examined);
+    if (stored.full) return json(ctx.res, 413, stored.full);
+    const out: UploadImagesResponse = stored.images;
+    const ids = out.map((image) => image.id);
 
     // docs/phases/6-product.md "Group activity feed": "images uploaded" —
     // ONE row per request (batched: "Micah uploaded 40 images", never one
@@ -1124,6 +1092,8 @@ export function registerBoardRoutes(router: Router) {
       typeof body.label === 'string' ? body.label.slice(0, 120) : '';
     const extracted = await extractRegion(image, fraction, label, userId);
     if (!extracted) return json(ctx.res, 404, { error: 'no original to crop' });
+    if ('reason' in extracted)
+      return json(ctx.res, extracted.status, { error: extracted.reason });
     json(ctx.res, 202, extracted);
   });
 

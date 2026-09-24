@@ -7,7 +7,9 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { createHttpServer } from '../app.ts';
-import { examine, store } from '../boards/intake.ts';
+import { examine, store, storeAll } from '../boards/intake.ts';
+import { extractRegion } from '../boards/extract.ts';
+import { storageOf } from '../storage/quota.ts';
 import { pool } from '../db/pool.ts';
 
 const HEIC = join(import.meta.dir, 'fixtures', 'split-64x48.heic');
@@ -69,6 +71,96 @@ describe('examine', () => {
       status: 409,
       reason: 'already on this board as a.png',
     });
+  });
+});
+
+describe('properties', () => {
+  test('a value that is not a property map is refused, on every path', async () => {
+    const bytes = new Uint8Array(await png());
+    for (const properties of ['{"year":', [1, 2], { nested: { a: 1 } }]) {
+      const got = await examine(await board(), {
+        name: 'p.png',
+        bytes,
+        properties,
+      });
+      expect(got.ok ? 'taken' : got.status).toBe(400);
+    }
+  });
+});
+
+describe('storeAll', () => {
+  const coloured = (r: number) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: { r, g: 1, b: 2 } } })
+      .png({ compressionLevel: 0 })
+      .toBuffer();
+
+  test('stops at the quota and names, in order, the files that landed', async () => {
+    const orgId = `org-storeall-${Date.now()}-${Math.random()}`;
+    const { rows } = await pool.query(
+      `INSERT INTO boards (org_id, name, open, created_by)
+       VALUES ($1, 'q', true, 'tester') RETURNING id`,
+      [orgId],
+    );
+    const boardId = rows[0].id as string;
+    const files = [];
+    for (const r of [10, 20, 30, 40, 50]) {
+      const got = await examine(boardId, {
+        name: `f${r}.png`,
+        bytes: new Uint8Array(await coloured(r)),
+      });
+      if (got.ok) files.push(got);
+    }
+    const size = files[0]?.bytes.length ?? 0;
+    await pool.query(
+      'INSERT INTO group_storage (org_id, quota_bytes) VALUES ($1, $2)',
+      [orgId, size * 2 + Math.floor(size / 2)],
+    );
+
+    const { images, full } = await storeAll(boardId, 'tester', files);
+
+    expect(images).toHaveLength(2);
+    expect(full?.accepted).toEqual([
+      { name: 'f10.png', id: images[0]?.id },
+      { name: 'f20.png', id: images[1]?.id },
+    ]);
+    expect(full?.reason).toBe('quota');
+    expect((await storageOf(orgId)).usedBytes).toBe(size * 2);
+  });
+
+  test('a batch that fits is stored whole', async () => {
+    const boardId = await board();
+    const got = await examine(boardId, {
+      name: 'one.png',
+      bytes: new Uint8Array(await coloured(77)),
+    });
+    const { images, full } = await storeAll(boardId, 'tester', got.ok ? [got] : []);
+    expect(images).toHaveLength(1);
+    expect(full).toBeNull();
+  });
+});
+
+describe('an extracted region goes through intake', () => {
+  test('a crop of a picture named like a camera file is taken as the PNG it is', async () => {
+    const boardId = await board();
+    const got = await examine(boardId, {
+      name: 'IMG_0002.HEIC',
+      bytes: new Uint8Array(await Bun.file(HEIC).arrayBuffer()),
+    });
+    if (!got.ok) throw new Error(got.reason);
+    const parent = await store(boardId, 'tester', got);
+    const { rows } = await pool.query(
+      'SELECT id, board_id, sha256, name FROM images WHERE id = $1',
+      [parent.id],
+    );
+    const extracted = await extractRegion(
+      rows[0],
+      { fx: 0, fy: 0, fw: 0.5, fh: 0.5 },
+      'corner',
+      'tester',
+    );
+    expect(extracted && 'reason' in extracted ? extracted.reason : 'taken').toBe(
+      'taken',
+    );
   });
 });
 

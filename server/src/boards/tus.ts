@@ -117,14 +117,15 @@ export const tusServer = new Server({
     if (!meta) throw { status_code: 500, body: 'upload not gated\n' };
 
     const filename = upload.metadata?.filename || `upload-${Date.now()}`;
-    let properties: Record<string, unknown> = {};
+    // Judged by intake (examine), as on the multipart path: a value that
+    // is not a property map, unreadable JSON included, refuses the file.
     const raw = upload.metadata?.properties;
+    let properties: unknown;
     if (raw) {
       try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') properties = parsed;
+        properties = JSON.parse(raw);
       } catch {
-        // properties stays empty — same tolerance as the multipart path
+        properties = raw;
       }
     }
 

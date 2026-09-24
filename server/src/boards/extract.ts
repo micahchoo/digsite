@@ -1,6 +1,6 @@
 // A region made into a picture of its own (CONTEXT.md "Extract"): the
-// crop of an original becomes a new image on the same board, through the
-// one ingest path (upload.ts#uploadOne), so the room check, content
+// crop of an original becomes a new image on the same board, through
+// Image intake (intake.ts), so the budgets, the room check, content
 // addressing, the ladder, ranks, captured properties and embeddings all
 // apply to it exactly as to an upload. image-graph's "extract region".
 //
@@ -12,8 +12,9 @@
 import sharp from 'sharp';
 import { env } from '../env.ts';
 import { storageFromEnv } from '../storage/index.ts';
+import { type Refused, examine, store } from './intake.ts';
 import { originalKey } from './paths.ts';
-import { type UploadedImage, uploadOne } from './upload.ts';
+import type { UploadedImage } from './upload.ts';
 
 export type ExtractFraction = {
   fx: number;
@@ -83,30 +84,31 @@ export async function cropOf(
   return { png, width: box.width, height: box.height };
 }
 
-/** The new image, or null when the original is gone. */
+/** The new image; a refusal when intake will not take the crop; null when
+ * the original is gone. */
 export async function extractRegion(
   image: { id: string; board_id: string; sha256: string; name: string },
   f: ExtractFraction,
   label: string,
   userId: string,
-): Promise<Extracted | null> {
+): Promise<Extracted | Refused | null> {
   const crop = await cropOf(image, f);
   if (!crop) return null;
   const { png } = crop;
   const box = { width: crop.width, height: crop.height };
   const name = `${label.trim() || 'Region'} · ${image.name}`;
-  const uploaded = await uploadOne(
-    image.board_id,
-    userId,
+  const examined = await examine(image.board_id, {
     name,
-    new Uint8Array(png),
-    {
+    bytes: new Uint8Array(png),
+    properties: {
       derived_from: image.name,
       derived_region: [f.fx, f.fy, f.fw, f.fh]
         .map((n) => n.toFixed(4))
         .join(','),
     },
-    'image/png',
-  );
+    asStored: {},
+  });
+  if (!examined.ok) return examined;
+  const uploaded = await store(image.board_id, userId, examined);
   return { ...uploaded, name, width: box.width, height: box.height };
 }
