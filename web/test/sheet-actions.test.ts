@@ -3,7 +3,7 @@
 // added on the server reaches the scene only after some waits, as it does
 // through the socket.
 import { describe, expect, test } from 'bun:test';
-import { type ClaimReply, dataOf } from '@digsite/shared';
+import { dataOf } from '@digsite/shared';
 import {
   type ActionServer,
   createSheetActions,
@@ -60,7 +60,6 @@ function sheet(initial: SceneElement[], opts: { arriveAfter?: number } = {}) {
   const arriving: { imageId: string; in: number }[] = [];
   const calls: string[] = [];
   let statuses: string[] = ['ready'];
-  let replies: ClaimReply[] = [];
 
   const scene = {
     elements: () => elements,
@@ -108,7 +107,6 @@ function sheet(initial: SceneElement[], opts: { arriveAfter?: number } = {}) {
       calls.push(`status ${status}`);
       return { images: ids.map((id) => ({ id, status })) } as never;
     },
-    getReplies: async () => ({ replies }),
   };
   // One wait is one tick of the room: arrivals count down and land.
   const wait = async () => {
@@ -131,10 +129,6 @@ function sheet(initial: SceneElement[], opts: { arriveAfter?: number } = {}) {
     scene: () => scene,
     tools,
     server,
-    crop: async (imageId, f) =>
-      `crop:${imageId}:${f ? f.fw.toFixed(2) : 'whole'}`,
-    nameOf: (imageId) => `${imageId}.png`,
-    origin: 'https://dig.example',
     changed: () => {},
     wait,
   });
@@ -145,9 +139,6 @@ function sheet(initial: SceneElement[], opts: { arriveAfter?: number } = {}) {
     selected: () => selected,
     setStatuses: (s: string[]) => {
       statuses = s;
-    },
-    setReplies: (r: ClaimReply[]) => {
-      replies = r;
     },
   };
 }
@@ -214,55 +205,6 @@ describe('extract', () => {
       'the new picture could not be read',
     );
     expect(s.calls).not.toContain('add cut-1');
-  });
-});
-
-describe('the report', () => {
-  test('a connection carries both ends, its replies and a link to itself', async () => {
-    const other = picture('el-b', 'b', {
-      x: 300,
-      y: 0,
-      width: 100,
-      height: 100,
-    });
-    const s = sheet([parent, other]);
-    const edgeId = s.actions.connectFrom('a', 'el-b', 'same place');
-    expect(edgeId).not.toBeNull();
-    s.setReplies([
-      {
-        id: 'r1',
-        elementId: edgeId ?? '',
-        by: { id: 'u', name: 'Ada' },
-        text: 'Sure?',
-        at: '2026-09-23T10:00:00Z',
-      },
-      {
-        id: 'r2',
-        elementId: 'elsewhere',
-        by: { id: 'u', name: 'Ada' },
-        text: 'no',
-        at: '2026-09-23T10:00:00Z',
-      },
-    ]);
-    const [claim] = await s.actions.reportClaims();
-    expect(claim).toMatchObject({
-      kind: 'connection',
-      term: 'same place',
-      link: `https://dig.example/s/sheet-1?claim=${edgeId}`,
-      replies: [{ name: 'Ada', text: 'Sure?' }],
-    });
-    expect(claim?.ends.map((e) => e.name)).toEqual(['a.png', 'b.png']);
-    expect(claim?.ends.every((e) => e.crop?.startsWith('crop:'))).toBe(true);
-  });
-
-  test('a region is cropped to itself', async () => {
-    const s = sheet([
-      parent,
-      region('reg-1', 'a', 'door', { x: 0, y: 0, width: 50, height: 200 }),
-    ]);
-    const [claim] = await s.actions.reportClaims();
-    expect(claim).toMatchObject({ kind: 'region', term: 'door' });
-    expect(claim?.ends[0]?.crop).toBe('crop:a:0.25');
   });
 });
 

@@ -3,7 +3,7 @@
 // twice. `credentials: 'include'` on every call — the session lives in a
 // cookie (docs/design.md "web/").
 
-import type { Fraction, TermKind } from '@digsite/shared';
+import type { Fraction, ReportData, TermKind } from '@digsite/shared';
 import type {
   AcceptInvitationResponse,
   AddImagesToSheetRequest,
@@ -529,6 +529,26 @@ export const api = {
     request<GetSheetReachResponse>(`/sheets/${sheetId}/reach`),
   getSheetRows: (sheetId: string) =>
     request<GetSheetRowsResponse>(`/sheets/${sheetId}/rows`),
+  // CONTEXT.md "Report": what a scope's claims say (server reports/).
+  getSheetReport: (sheetId: string, opts: { ids?: string[] } = {}) =>
+    request<ReportData>(
+      `/sheets/${sheetId}/report${opts.ids ? `?${new URLSearchParams({ ids: opts.ids.join(',') })}` : ''}`,
+    ),
+  getBoardReport: (
+    boardId: string,
+    opts: { relation?: string; from?: string; to?: string } = {},
+  ) => {
+    const q = new URLSearchParams();
+    if (opts.relation) q.set('relation', opts.relation);
+    if (opts.from && opts.to) {
+      q.set('from', opts.from);
+      q.set('to', opts.to);
+    }
+    const qs = q.toString();
+    return request<ReportData>(
+      `/boards/${boardId}/report${qs ? `?${qs}` : ''}`,
+    );
+  },
   getStats: () => request<GetStatsResponse>('/stats'),
 
   // -- the site's operator (Settings › Accounts) -------------------------

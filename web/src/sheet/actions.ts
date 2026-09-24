@@ -1,28 +1,21 @@
 // What the sheet does that takes more than one step: bring a board picture
 // beside another, make a region into a picture of its own (CONTEXT.md
-// "Extract"), and gather the sheet's claims into a report. Each is a
-// sequence of server calls and scene writes, and each step waits for the
-// one before.
+// "Extract"), and copy the connections Explore hands a new sheet. Each is
+// a sequence of server calls and scene writes, and each step waits for the
+// one before. A report is gathered by the server (server reports/), not
+// here: the sheet cannot see the board's other sheets.
 //
-// The pure pieces (beside.ts, evidence.ts, report.ts) were tested; the
+// The pure pieces (beside.ts, evidence.ts) were tested; the
 // sequences lived in the view and were not, and both defects found in them
 // this week were in how the pieces were called: `besideSpot` measured the
 // element's own position instead of the spot, and a picture without
 // `groupIds` crashed the move. So the sequences live here, behind a port
 // that takes only what they use, and a test hands them an in-memory scene
 // and a fake server (image-graph's Exploration seam, moved to the sheet).
-import {
-  type Direction,
-  type Fraction,
-  dataOf,
-  toFraction,
-} from '@digsite/shared';
-import type { ClaimReply } from '@digsite/shared/api';
+import { type Direction, dataOf, toFraction } from '@digsite/shared';
 import type { api } from '../lib/api.ts';
 import { besideSpot } from './beside.ts';
 import type { SceneElement } from './canvas/types.ts';
-import { ownEvidence } from './evidence.ts';
-import type { ReportClaim } from './report.ts';
 import type { Tools } from './tools.ts';
 
 /** The scene as the actions see it: what is on it, and what is selected. */
@@ -33,7 +26,7 @@ export interface ActionScene {
 
 export type ActionServer = Pick<
   typeof api,
-  'addSheetImages' | 'extractRegion' | 'uploadImageStatuses' | 'getReplies'
+  'addSheetImages' | 'extractRegion' | 'uploadImageStatuses'
 >;
 
 export interface ActionDeps {
@@ -43,12 +36,6 @@ export interface ActionDeps {
   scene: () => ActionScene | null;
   tools: Pick<Tools, 'moveImage' | 'connect'>;
   server: ActionServer;
-  /** A picture, or a region of it, as a data URL; null when unreadable. */
-  crop: (imageId: string, fraction: Fraction | null) => Promise<string | null>;
-  /** A picture's name on the board. */
-  nameOf: (imageId: string) => string;
-  /** Where the app lives, for the links a report carries. */
-  origin: string;
   /** Tells the view the scene changed. */
   changed: () => void;
   wait?: (ms: number) => Promise<void>;
@@ -183,68 +170,6 @@ export function createSheetActions(deps: ActionDeps) {
     deps.changed();
   }
 
-  /** Every claim on the sheet, with its ends as crops, its reasons, who
-   * made it and what was said about it (report.ts draws the document). */
-  async function reportClaims(): Promise<ReportClaim[]> {
-    const scene = deps.scene();
-    if (!scene) return [];
-    const elements = scene.elements().filter((el) => !el.isDeleted);
-    const { replies } = await deps.server
-      .getReplies(deps.sheetId)
-      .catch(() => ({ replies: [] as ClaimReply[] }));
-    const claims: ReportClaim[] = [];
-    for (const el of elements) {
-      const data = dataOf(el);
-      if (data?.kind !== 'edge' && data?.kind !== 'region') continue;
-      const common = {
-        made: data.made ?? null,
-        edited: data.edited ?? null,
-        properties: data.properties,
-        replies: replies
-          .filter((r) => r.elementId === el.id)
-          .map((r) => ({ name: r.by.name, at: r.at, text: r.text })),
-        link: `${deps.origin}/s/${deps.sheetId}?claim=${el.id}`,
-      };
-      if (data.kind === 'edge') {
-        const ends = ownEvidence(el, elements);
-        claims.push({
-          ...common,
-          kind: 'connection',
-          term: data.relation,
-          direction: data.direction,
-          confidence: data.confidence ?? null,
-          note: data.note ?? '',
-          ends: ends
-            ? await Promise.all(
-                ends.map(async (end) => ({
-                  name: deps.nameOf(end.imageId),
-                  label: end.label,
-                  crop: await deps.crop(end.imageId, end.fraction),
-                })),
-              )
-            : [],
-        });
-      } else {
-        const image = imageElementOf(elements, data.imageId);
-        claims.push({
-          ...common,
-          kind: 'region',
-          term: data.label,
-          ends: [
-            {
-              name: deps.nameOf(data.imageId),
-              label: data.label,
-              crop: image
-                ? await deps.crop(data.imageId, toFraction(el, image))
-                : null,
-            },
-          ],
-        });
-      }
-    }
-    return claims;
-  }
-
   /**
    * "Copy connections" (docs/phases/2-sheet.md section 4): makes each edge
    * between the pictures it names, by imageId, never by element id. An
@@ -267,7 +192,7 @@ export function createSheetActions(deps: ActionDeps) {
     return made;
   }
 
-  return { bringBeside, connectFrom, copyConnections, extract, reportClaims };
+  return { bringBeside, connectFrom, copyConnections, extract };
 }
 
 export type SheetActions = ReturnType<typeof createSheetActions>;

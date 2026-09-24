@@ -223,7 +223,7 @@ describe('the document', () => {
     const html = renderDocument(data, { ...MEDIA, pictures });
     expect(html.split('base64,AAAA').length - 1).toBe(1);
     // The region's crop: x 0.25*400, y 0.5*200, w 0.5*400, h 0.25*200.
-    expect(html).toContain('viewBox="100 100 200 50"');
+    expect(html).toContain('viewBox="100 100 200 50" width="260" height="65"');
     expect(html).toContain('<rect x="100" y="100" width="200" height="50"');
     expect(html).toContain('<use href="#pic-0"/>');
   });

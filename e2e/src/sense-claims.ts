@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import type { EdgeRow, GetBoardResponse } from '@digsite/shared';
 import { createCanvas } from '@napi-rs/canvas';
 import { type BrowserContext, type Page, chromium } from 'playwright';
-import { shortestPath } from '../../web/src/board/path.ts';
+import { shortestPath } from '../../shared/src/sheet/path.ts';
 import { edgePaths, midSegment } from '../../web/src/sheet/routing.ts';
 import { SERVER, type Session, WEB, signIn } from './session.ts';
 
@@ -1006,6 +1006,21 @@ async function main(): Promise<void> {
         (report.match(/data:image\/jpeg;base64,/g)?.length ?? 0) >= 4 &&
         report.includes(`?claim=${e45r.id}`),
       'the report lacks the claim, its reason, its author or its pictures',
+    );
+    // Gathered by the server: the data travels with the document, each
+    // picture is carried once and every crop is a view of it, and the
+    // sheet stands as figure 1.
+    const data = JSON.parse(
+      report.match(
+        /<script type="application\/json" id="digsite-report">(.*?)<\/script>/s,
+      )?.[1] ?? 'null',
+    ) as { format: string; claims: { elementId: string }[] } | null;
+    assert(
+      data?.format === 'digsite-report/1' &&
+        data.claims.some((c) => c.elementId === e45r.id) &&
+        report.includes('<use href="#pic-') &&
+        report.includes('Figure 1.'),
+      'the report carries no data, no picture views or no still of the sheet',
     );
     // The report's link to a claim opens the sheet on that claim.
     await m.goto(`${WEB}/s/${firstPass.id}?claim=${e45r.id}`);

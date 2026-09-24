@@ -34,8 +34,9 @@ export interface SheetMenuActions {
   undo: () => void;
   redo: () => void;
   help: () => void;
-  /** Downloads the sheet's claims as one document. */
-  report: () => void;
+  /** Downloads the sheet's claims as one document; with ids, only those
+   * claims and the claims on those pictures (a selection report). */
+  report: (ids?: string[]) => void;
 }
 
 const HOW_SURE: [Confidence | null, string][] = [
@@ -139,9 +140,18 @@ export function sheetMenu(
     {
       label: 'Export a report',
       testId: 'sheet-menu-report',
-      onSelect: act.report,
+      onSelect: () => act.report(),
     },
   ];
+  if (target) {
+    const ids = several ? [...selectedIds] : [target.id];
+    view.push({
+      label:
+        ids.length > 1 ? `Report on these ${ids.length}` : 'Report on this',
+      testId: 'sheet-menu-report-selection',
+      onSelect: () => act.report(ids),
+    });
+  }
   const history: MenuSection = [
     { label: 'Undo', keys: `${MOD}+Z`, onSelect: act.undo },
     { label: 'Redo', keys: `${MOD}+Shift+Z`, onSelect: act.redo },

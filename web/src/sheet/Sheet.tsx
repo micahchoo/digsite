@@ -42,7 +42,6 @@ import type {
   SceneElement,
   Viewport,
 } from './canvas/types.ts';
-import { cropToDataUrl } from './crop.ts';
 import { type ImageMeta, loadImageFiles } from './images.ts';
 import { Overlay } from './overlay/Overlay.tsx';
 import { Reach } from './overlay/Reach.tsx';
@@ -50,10 +49,12 @@ import { revealRect, sceneToScreen, screenToScene } from './overlay/screen.ts';
 import { usePolled } from './overlay/usePolled.ts';
 import { peerCursors } from './presence.ts';
 import { nextImage } from './reading-order.ts';
-import { buildReport } from './report.ts';
 import { useRoom } from './room.ts';
 import { type MenuTarget, sheetMenu } from './sheet-menu.ts';
 import './sheet.css';
+import { download, fileName, reportHtml } from '../report/file.ts';
+import { previewSource } from '../report/pictures.ts';
+import { whenSaved } from '../report/saved.ts';
 import { Toolbar } from './Toolbar.tsx';
 import { useCopyConnections } from './use-copy-connections.ts';
 import { useForeignShapes } from './use-foreign-shapes.ts';
@@ -173,16 +174,6 @@ export function Sheet() {
         scene: () => canvasRef.current,
         tools,
         server: api,
-        crop: (imageId, fraction) =>
-          cropToDataUrl(
-            filesRef.current.get(fileId(imageId))?.dataURL ??
-              api.previewUrl(imageId),
-            fraction,
-          ),
-        nameOf: (imageId) =>
-          sheetInfoRef.current?.images.find((img) => img.id === imageId)
-            ?.name ?? 'picture',
-        origin: window.location.origin,
         changed: rerender,
       }),
     [sheetId, tools, rerender],
@@ -455,33 +446,34 @@ export function Sheet() {
   }
 
   /**
-   * A report of this sheet's claims, downloaded as one HTML file that
-   * carries its own pictures (report.ts): the work, shown to someone who
-   * does not use digsite.
+   * A report of this sheet's claims (CONTEXT.md "Report"; web/src/report/):
+   * the server gathers it from the saved sheet, once the save holds what
+   * this tab shows, and it becomes one HTML file with its pictures, a still
+   * of the sheet and, when built, the live viewer. With `ids`, only those
+   * claims and the claims on those pictures.
    */
-  async function exportReport() {
-    const info = sheetInfo;
-    if (!info) return;
-    setWorking('Making the report…');
+  async function exportReport(ids?: string[]) {
+    const canvas = canvasRef.current;
+    if (!sheetInfo || !canvas) return;
+    setWorking('Waiting for the sheet to save…');
     try {
-      const claims = await actions.reportClaims();
-      const boardName =
-        (await api.getBoard(info.boardId).catch(() => null))?.name ?? '';
-      const html = buildReport({
-        sheetName: info.name,
-        boardName,
-        by: authorRef.current?.name ?? 'someone',
-        at: new Date().toISOString(),
-        link: `${window.location.origin}/s/${sheetId}`,
-        claims,
-      });
-      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${info.name.replace(/[^\w.-]+/g, '-') || 'sheet'}-report.html`;
-      a.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      setWorking(null);
+      const { report, complete } = await whenSaved(
+        () => api.getSheetReport(sheetId, ids ? { ids } : {}),
+        canvas.elements(),
+        (ms) => new Promise((r) => window.setTimeout(r, ms)),
+      );
+      const html = await reportHtml(
+        report,
+        previewSource(api.previewUrl),
+        setWorking,
+      );
+      download(html, fileName(report));
+      setWorking(
+        complete
+          ? null
+          : 'The report was made before your last change was saved. Make it again in a moment to include it.',
+      );
+      if (!complete) window.setTimeout(() => setWorking(null), 8000);
     } catch (err) {
       setWorking(
         `Could not make the report: ${err instanceof Error ? err.message : 'unknown error'}`,
@@ -533,7 +525,7 @@ export function Sheet() {
       undo: () => canvas.undo(),
       redo: () => canvas.redo(),
       help: () => setHelp(true),
-      report: () => void exportReport(),
+      report: (ids) => void exportReport(ids),
     });
     rerender();
     setMenu({ x: clientX, y: clientY, sections });

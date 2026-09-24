@@ -128,6 +128,9 @@ function defs(data: ReportData, media: ReportMedia, pics: Pictures): string {
 
 const num = (n: number) => Number(n.toFixed(2));
 
+/** The most room a crop takes on the page, in CSS pixels. */
+const CROP_BOX = { width: 260, height: 220 };
+
 /** A picture, or the part a fraction names, cut out of the one copy. */
 function crop(pics: Pictures, end: ReportEnd, alt: string): string {
   const pic = pics.get(end.imageId);
@@ -141,7 +144,10 @@ function crop(pics: Pictures, end: ReportEnd, alt: string): string {
   const f = end.fraction ?? { fx: 0, fy: 0, fw: 1, fh: 1 };
   const w = Math.max(1, f.fw * W);
   const h = Math.max(1, f.fh * H);
-  return `<svg class="crop" viewBox="${num(f.fx * W)} ${num(f.fy * H)} ${num(w)} ${num(h)}" style="aspect-ratio:${num(w)}/${num(h)}" role="img" aria-label="${e(alt)}"><use href="#${pic.ref}"/></svg>`;
+  // Its own size, fitted into the box, so the picture fills it exactly: a
+  // box of fixed width and a height limit letterboxes a tall crop.
+  const fit = Math.min(CROP_BOX.width / w, CROP_BOX.height / h);
+  return `<svg class="crop" viewBox="${num(f.fx * W)} ${num(f.fy * H)} ${num(w)} ${num(h)}" width="${Math.round(w * fit)}" height="${Math.round(h * fit)}" role="img" aria-label="${e(alt)}"><use href="#${pic.ref}"/></svg>`;
 }
 
 /** The whole picture, the region outlined and the rest dimmed: where the
@@ -360,6 +366,7 @@ h1{margin:var(--space-1) 0 var(--space-2);font-size:var(--text-3xl);line-height:
 nav.contents{margin:var(--space-6) 0;padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-l);background:var(--surface-raised)}
 nav.contents h2{margin:0 0 var(--space-2);font-size:var(--text-sm);color:var(--text-secondary);border:0;padding:0}
 nav.contents ol{margin:0;padding-left:var(--space-5);columns:2 220px;font-size:var(--text-sm)}
+nav.contents .count{display:inline-block;text-decoration:none}
 .sheet-figure{margin:var(--space-6) 0;padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-l);background:var(--surface-canvas)}
 .sheet-figure img{display:block;width:100%;height:auto;border-radius:var(--radius-m)}
 figcaption{font-size:var(--text-xs);color:var(--text-secondary);margin-top:var(--space-1);overflow-wrap:anywhere}
@@ -377,9 +384,9 @@ h3 .on{color:var(--text-secondary);font-weight:400}
 h4{margin:var(--space-4) 0 var(--space-1);font-size:var(--text-sm);color:var(--text-secondary)}
 .ends{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap}
 .arrow{font-size:var(--text-2xl);color:var(--claim-edge)}
-figure.end{margin:0;width:min(260px,100%);display:grid;grid-template-columns:1fr auto;gap:var(--space-2);align-items:end}
+figure.end{margin:0;max-width:100%;display:grid;grid-template-columns:auto auto;justify-content:start;gap:var(--space-2);align-items:end}
 figure.end figcaption{grid-column:1/-1}
-.crop{display:block;width:100%;max-height:240px;border-radius:var(--radius-m);border:1px solid var(--line);background:var(--placeholder)}
+.crop{display:block;max-width:100%;height:auto;border-radius:var(--radius-m);border:1px solid var(--line);background:var(--placeholder)}
 .context{display:block;width:64px;border-radius:var(--radius-s);border:1px solid var(--line)}
 .context .dim{fill:rgba(0,0,0,.45)}
 .context rect{fill:none;stroke:var(--claim-own);stroke-width:2}

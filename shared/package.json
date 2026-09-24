@@ -16,7 +16,10 @@
     "./sheet/layout": "./src/sheet/layout.ts",
     "./sheet/sense": "./src/sheet/sense.ts",
     "./sheet/segment": "./src/sheet/segment.ts",
-    "./api": "./src/api.ts"
+    "./api": "./src/api.ts",
+    "./report/data": "./src/report/data.ts",
+    "./report/order": "./src/report/order.ts",
+    "./report/document": "./src/report/document.ts"
   },
   "scripts": {
     "test": "bun test",
