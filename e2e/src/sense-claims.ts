@@ -1489,11 +1489,23 @@ async function main(): Promise<void> {
           goToRank: (r: number) => void;
         };
       };
+      // A clean map: the steps before leave Find and Explore open over it.
+      await m.goto(`${WEB}/b/${field.id}`);
+      await m.waitForFunction(
+        () =>
+          (window as unknown as BoardProbe).__digsiteBoard?.getCamera() != null,
+      );
       await m.evaluate(() => {
         (window as unknown as BoardProbe).__digsiteBoard.clear();
         (window as unknown as BoardProbe).__digsiteBoard.goToRank(0);
       });
       await m.waitForTimeout(600);
+      /** The press lands on the map itself, not a panel over it. */
+      const onMap = (at: { x: number; y: number }) =>
+        m.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.tagName ?? 'nothing',
+          at,
+        );
       const cellAt = (rank: number) =>
         m.evaluate((rank) => {
           const b = (window as unknown as BoardProbe).__digsiteBoard;
@@ -1519,18 +1531,31 @@ async function main(): Promise<void> {
       ] as const) {
         const at = await cellAt(rank);
         assert(at, 'no board camera');
+        const under = await onMap(at);
+        assert(
+          under === 'CANVAS',
+          `cell ${rank} is under a ${under}, not the map`,
+        );
         await m.mouse.move(at.x, at.y);
         await m.mouse.down();
         await m.mouse.move(at.x + drift, at.y - drift, { steps: 2 });
         await m.waitForTimeout(hold);
         await m.mouse.up();
-        await m.waitForFunction(
-          (rank) =>
-            JSON.stringify(
-              (window as unknown as BoardProbe).__digsiteBoard.getSelection(),
-            ) === JSON.stringify([rank]),
-          rank,
-          { timeout: 5000 },
+        // A pick asks the server which picture the cell holds.
+        const picked = await m
+          .waitForFunction(
+            (rank) =>
+              JSON.stringify(
+                (window as unknown as BoardProbe).__digsiteBoard.getSelection(),
+              ) === JSON.stringify([rank]),
+            rank,
+            { timeout: 15_000 },
+          )
+          .then(() => true)
+          .catch(() => false);
+        assert(
+          picked,
+          `a click on cell ${rank} (held ${hold} ms, ${drift} px of wobble) selected ${JSON.stringify(await m.evaluate(() => (window as unknown as BoardProbe).__digsiteBoard.getSelection()))}`,
         );
       }
       // A real drag still pans, and selects nothing new.
