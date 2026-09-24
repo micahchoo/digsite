@@ -177,6 +177,42 @@ another board and download (walk claim 18), presence on the board (walk
 claim 19), region-level label suggestions, and the whole web of one
 relation. Label-suggestion tuning waits for a board with real labels.
 
+## Architecture passes 2 and 3 (2026-09-23, afternoon and evening; committed)
+
+The user ran /improve-codebase-architecture, asked for the fixes, a second
+run, then "do these fixes and commit". Both reports were in /tmp and were
+lost to a reboot at 16:08. Everything is committed on main, one commit per
+fix, no attribution (c0d6a5d..4b8a0f7):
+- Server: `boards/removal.ts` (a deleted board now gives its bytes back to
+  the group's quota; rule `removal-is-one-module.md`); `sheets/foreign.ts`
+  (the delete dialog's footprint counted the wrong direction);
+  `sheets/layout.ts` + `sheets/membership.ts` (the grid once; add-images
+  off the route; the room gets the scene with stamps signed);
+  `intake.ts#storeAll`, properties judged in `examine` on every path,
+  extract through intake as `asStored`; find answers 400 only for
+  `FilterRefused`.
+- Web: shared API types only; `board/camera.ts`; `board/selection.ts#pressMove`;
+  `board/board-menu.ts`; the always-zero `offset` gone and
+  `screen.ts#revealRect`; `useForeign.ts` deleted; one `Tool`; copy
+  connections in `actions.ts`; `canvas/native/sheet-scene.ts` (the scene
+  model out of React); `tools.ownSelected` (an own pick ends a foreign
+  selection, which it did not); `sync.ts#createSceneSync` (scene sync, both
+  directions, tested with a hand clock).
+- Left on purpose: `sheet/hit.ts` beside the native hitAt (different
+  question, behind the canvas seam); a shared "image is on this board"
+  helper (each site reads different columns; fails the deletion test); the
+  stub server's fate is the user's decision (it still drifts from the server).
+Verified: `bun run check` exit 0; `bun run test` shared 72 / web 315 /
+server 222, 0 fail; smokes board, selection, phone, draw, sheet, sense,
+explore, threads on fresh stubs (8811/5191); `e2e:fresh` default suites
+pass, and `e2e:fresh src/sense-claims.ts` passes alone.
+Known: in the COMBINED e2e:fresh run, sense-claims claim 3 finds two
+"disagree" items for Faces, because sheet-hour's random connection
+("hour-run") joins the same pair. Same class as 3ca8f1f; the walk should
+pick its own connection. Not fixed.
+Also: run smoke-selection on a fresh stub; smoke-board edits an image's
+year and the later year filter then times out.
+
 ## Server roadmap (2026-09-23)
 
 All six stages built and measured; not committed. Server suite 132/133 (one
