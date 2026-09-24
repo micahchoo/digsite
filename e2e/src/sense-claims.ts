@@ -2040,13 +2040,29 @@ async function main(): Promise<void> {
             getForeign: () => {
               id: string;
               kind: string;
-              row: { relation: string; properties: Record<string, unknown> };
+              row: {
+                relation: string;
+                properties: Record<string, unknown>;
+                source?: { regionSourceId?: string };
+                target?: { regionSourceId?: string };
+              };
             }[];
           };
         }
       ).__digsite;
+      // Picture to picture, which is what this claim checks. Other sheets
+      // (the imported report's, 13d) also hold connections that rest on
+      // regions, and their order differs from run to run.
       return (
-        d.getForeign().find((s) => s.kind === 'edge' && s.row.relation) ?? null
+        d
+          .getForeign()
+          .find(
+            (s) =>
+              s.kind === 'edge' &&
+              s.row.relation &&
+              !s.row.source?.regionSourceId &&
+              !s.row.target?.regionSourceId,
+          ) ?? null
       );
     });
     assert(foreignEdge, 'First pass shows no connection from another sheet');
