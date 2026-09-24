@@ -103,7 +103,7 @@ import { schedule } from '../worker/schedule.ts';
 import { boardChanged } from './change.ts';
 import { COPY_MAX, examineCopies } from './copy.ts';
 import { extractRegion, parseFraction } from './extract.ts';
-import type { FilterClause } from './filter.ts';
+import { type FilterClause, FilterRefused } from './filter.ts';
 import { FIND_WINDOW_MAX, findRanks } from './find.ts';
 import {
   ImportRefused,
@@ -1502,12 +1502,9 @@ export function registerBoardRoutes(router: Router) {
       const response: FindBoardResponse = { ranks, imageIds, count };
       json(ctx.res, 200, response);
     } catch (err) {
-      // filter.ts#buildFilterSql throws a plain Error for anything the
-      // grammar rejects (bad op for the property's type, wrong value
-      // shape, and so on) — the one place that becomes a 400 instead of a
-      // 500, same "strict on write" posture as image-graph's shard
-      // validation.
-      if (err instanceof Error) {
+      // The grammar's refusals (a bad op for the property's type, a wrong
+      // value shape) are the asker's: 400. The database's are not.
+      if (err instanceof FilterRefused) {
         return json(ctx.res, 400, { error: err.message });
       }
       throw err;

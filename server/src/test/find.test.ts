@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { parseSortId, sortId } from '@digsite/shared/board/sort';
+import { FilterRefused, buildFilterSql } from '../boards/filter.ts';
 import { findRanks } from '../boards/find.ts';
 import { buildOf } from '../boards/ranks.ts';
 import { pool } from '../db/pool.ts';
@@ -133,5 +134,20 @@ describe('find and typed property sorts', () => {
     expect(empty.count).toBe(0);
     expect(empty.ranks).toEqual([]);
     expect(empty.imageIds).toEqual([]);
+  });
+});
+
+describe('a filter the grammar refuses', () => {
+  test('is FilterRefused, which the route answers 400; nothing else is', async () => {
+    await expect(
+      buildFilterSql(boardId, [{ key: '', op: 'eq', value: 1 } as never], 1),
+    ).rejects.toBeInstanceOf(FilterRefused);
+    await expect(
+      buildFilterSql(
+        boardId,
+        [{ key: 'name', op: 'nope', value: 1 } as never],
+        1,
+      ),
+    ).rejects.toBeInstanceOf(FilterRefused);
   });
 });

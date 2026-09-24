@@ -7,10 +7,10 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { createHttpServer } from '../app.ts';
-import { examine, store, storeAll } from '../boards/intake.ts';
 import { extractRegion } from '../boards/extract.ts';
-import { storageOf } from '../storage/quota.ts';
+import { examine, store, storeAll } from '../boards/intake.ts';
 import { pool } from '../db/pool.ts';
+import { storageOf } from '../storage/quota.ts';
 
 const HEIC = join(import.meta.dir, 'fixtures', 'split-64x48.heic');
 const png = () =>
@@ -90,7 +90,14 @@ describe('properties', () => {
 
 describe('storeAll', () => {
   const coloured = (r: number) =>
-    sharp({ create: { width: 8, height: 8, channels: 3, background: { r, g: 1, b: 2 } } })
+    sharp({
+      create: {
+        width: 8,
+        height: 8,
+        channels: 3,
+        background: { r, g: 1, b: 2 },
+      },
+    })
       .png({ compressionLevel: 0 })
       .toBuffer();
 
@@ -120,8 +127,8 @@ describe('storeAll', () => {
 
     expect(images).toHaveLength(2);
     expect(full?.accepted).toEqual([
-      { name: 'f10.png', id: images[0]?.id },
-      { name: 'f20.png', id: images[1]?.id },
+      { name: 'f10.png', id: images[0]?.id as string },
+      { name: 'f20.png', id: images[1]?.id as string },
     ]);
     expect(full?.reason).toBe('quota');
     expect((await storageOf(orgId)).usedBytes).toBe(size * 2);
@@ -133,7 +140,11 @@ describe('storeAll', () => {
       name: 'one.png',
       bytes: new Uint8Array(await coloured(77)),
     });
-    const { images, full } = await storeAll(boardId, 'tester', got.ok ? [got] : []);
+    const { images, full } = await storeAll(
+      boardId,
+      'tester',
+      got.ok ? [got] : [],
+    );
     expect(images).toHaveLength(1);
     expect(full).toBeNull();
   });
@@ -158,9 +169,9 @@ describe('an extracted region goes through intake', () => {
       'corner',
       'tester',
     );
-    expect(extracted && 'reason' in extracted ? extracted.reason : 'taken').toBe(
-      'taken',
-    );
+    expect(
+      extracted && 'reason' in extracted ? extracted.reason : 'taken',
+    ).toBe('taken');
   });
 });
 

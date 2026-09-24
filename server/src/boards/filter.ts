@@ -77,11 +77,15 @@ export type BuiltFilter = { sql: string; params: unknown[] };
 
 /** Validates and compiles one board's worth of filter clauses into a single
  * SQL boolean expression plus its parameters, starting at `$(paramOffset)`.
- * Throws a plain `Error` (the route turns it into 400) on anything
+ * Throws FilterRefused (the route turns it into 400) on anything
  * strict — an unknown key's type, a bad op for that type, or a
  * value shape that doesn't match. Every VALUE is a bind parameter; the only
  * things ever interpolated are the property key (regex-checked first, same
  * as ranks.ts#orderExpr) and the fixed op-to-SQL-operator mapping below. */
+/** A filter the grammar refuses: the asker's fault, and a 400. Anything
+ * else thrown while finding (the database) is the server's. */
+export class FilterRefused extends Error {}
+
 export async function buildFilterSql(
   boardId: string,
   clauses: FilterClause[],
@@ -93,13 +97,13 @@ export async function buildFilterSql(
 
   for (const clause of clauses) {
     if (!clause || typeof clause.key !== 'string') {
-      throw new Error('filter clause needs a key');
+      throw new FilterRefused('filter clause needs a key');
     }
     if (!isValidPropertyKey(clause.key)) {
-      throw new Error(`bad filter key: ${clause.key}`);
+      throw new FilterRefused(`bad filter key: ${clause.key}`);
     }
     if (!FILTER_OPS.has(clause.op)) {
-      throw new Error(`bad filter op: ${clause.op}`);
+      throw new FilterRefused(`bad filter op: ${clause.op}`);
     }
     const type = await propertyTypeOf(boardId, clause.key);
     if (type === 'unknown') {
@@ -110,7 +114,9 @@ export async function buildFilterSql(
       continue;
     }
     if (!OPS_BY_TYPE[type].has(clause.op)) {
-      throw new Error(`op ${clause.op} does not apply to a ${type} property`);
+      throw new FilterRefused(
+        `op ${clause.op} does not apply to a ${type} property`,
+      );
     }
 
     try {
@@ -127,7 +133,8 @@ export async function buildFilterSql(
           : `CASE WHEN jsonb_typeof(properties->'${clause.key}') = '${type === 'list' ? 'array' : 'string'}' THEN properties->>'${clause.key}' END`;
 
     if (clause.op === 'has') {
-      if (!isScalar(clause.value)) throw new Error('has needs a scalar value');
+      if (!isScalar(clause.value))
+        throw new FilterRefused('has needs a scalar value');
       parts.push(`properties->'${clause.key}' @> $${n}::jsonb`);
       params.push(JSON.stringify([clause.value]));
       n++;
@@ -136,10 +143,10 @@ export async function buildFilterSql(
 
     if (clause.op === 'in') {
       if (!Array.isArray(clause.value) || clause.value.length === 0) {
-        throw new Error('in needs a non-empty array of values');
+        throw new FilterRefused('in needs a non-empty array of values');
       }
       if (!clause.value.every((v) => matchesType(v, type))) {
-        throw new Error(`in values must all be ${type}`);
+        throw new FilterRefused(`in values must all be ${type}`);
       }
       parts.push(`${col} = ANY($${n})`);
       params.push(clause.value);
@@ -149,11 +156,11 @@ export async function buildFilterSql(
 
     if (clause.op === 'between') {
       if (!Array.isArray(clause.value) || clause.value.length !== 2) {
-        throw new Error('between needs a [lo, hi] array');
+        throw new FilterRefused('between needs a [lo, hi] array');
       }
       const [lo, hi] = clause.value;
       if (!matchesType(lo, type) || !matchesType(hi, type)) {
-        throw new Error(`between values must be ${type}`);
+        throw new FilterRefused(`between values must be ${type}`);
       }
       parts.push(`${col} BETWEEN $${n} AND $${n + 1}`);
       params.push(lo, hi);
@@ -163,7 +170,7 @@ export async function buildFilterSql(
 
     // eq/neq/lt/lte/gt/gte: one scalar value of the property's own type.
     if (!matchesType(clause.value, type)) {
-      throw new Error(`value must be ${type}`);
+      throw new FilterRefused(`value must be ${type}`);
     }
     const opSql: Record<string, string> = {
       eq: '=',
