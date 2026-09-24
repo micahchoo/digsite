@@ -600,6 +600,11 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: () => '/reports/00000000-0000-0000-0000-000000000000/changes',
     outsider: 403,
   },
+  'GET /reports/:id/bundle': {
+    method: 'GET',
+    path: () => '/reports/00000000-0000-0000-0000-000000000000/bundle',
+    outsider: 403,
+  },
   'DELETE /reports/:id': {
     method: 'DELETE',
     path: () => '/reports/00000000-0000-0000-0000-000000000000',

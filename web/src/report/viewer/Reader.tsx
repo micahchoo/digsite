@@ -12,6 +12,7 @@ import {
   type ReportData,
   claimGroups,
   numbered,
+  reportFiles,
 } from '@digsite/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -28,6 +29,8 @@ interface Props {
   cards: readonly Card[];
   /** The figure the reader scrolls back to when a card asks to show. */
   figure: HTMLElement;
+  /** Where the Data section's downloads go. */
+  files: HTMLElement | null;
 }
 
 const ARROW: Record<string, string> = {
@@ -37,7 +40,24 @@ const ARROW: Record<string, string> = {
   none: '—',
 };
 
-export function Reader({ data, pictures, cards, figure }: Props) {
+/** The Data section's files (shared/report/formats.ts), by name. */
+const DATA_FILES: Record<string, string> = {
+  'report.json': 'The report (JSON)',
+  'annotations.jsonld': 'Web Annotations (JSON-LD)',
+  'claims.csv': 'Claims (CSV)',
+  'graph.graphml': 'Graph (GraphML)',
+};
+
+function save(name: string, body: string) {
+  const url = URL.createObjectURL(new Blob([body]));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+export function Reader({ data, pictures, cards, figure, files }: Props) {
   const sheetRef = useRef<SheetFigureHandle | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [picked, setPicked] = useState<string | null>(null);
@@ -196,6 +216,20 @@ export function Reader({ data, pictures, cards, figure }: Props) {
           card.key,
         );
       })}
+      {files &&
+        createPortal(
+          Object.entries(DATA_FILES).map(([name, label]) => (
+            <button
+              key={name}
+              type="button"
+              data-testid={`report-data-${name}`}
+              onClick={() => save(name, reportFiles(data)[name] ?? '')}
+            >
+              {label}
+            </button>
+          )),
+          files,
+        )}
       {comparing && (
         <Compare
           a={comparing.a}

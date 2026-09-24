@@ -20,7 +20,8 @@
     "./report/data": "./src/report/data.ts",
     "./report/order": "./src/report/order.ts",
     "./report/document": "./src/report/document.ts",
-    "./report/changes": "./src/report/changes.ts"
+    "./report/changes": "./src/report/changes.ts",
+    "./report/formats": "./src/report/formats.ts"
   },
   "scripts": {
     "test": "bun test",

@@ -1057,6 +1057,20 @@ async function main(): Promise<void> {
       `the report's viewer did not show its first claim (${status}; ${reportErrors.join('; ')})`,
     );
     await reportPage.screenshot({ path: `${SHOTS}13-report-live.png` });
+    // The Data section hands over the claims as Web Annotations, made in
+    // the file from its own data.
+    const [annotations] = await Promise.all([
+      reportPage.waitForEvent('download'),
+      reportPage.getByTestId('report-data-annotations.jsonld').click(),
+    ]);
+    const annotated = JSON.parse(
+      await Bun.file((await annotations.path()) ?? '').text(),
+    ) as { type: string; first: { items: { target: unknown }[] } };
+    assert(
+      annotated.type === 'AnnotationCollection' &&
+        JSON.stringify(annotated.first.items).includes('xywh=percent:'),
+      'the file gave no Web Annotations with region fragments',
+    );
     await reportPage.close();
     pass(
       '13. "Export a report" downloads one file with every claim, its reasons, authors and pictures; in it the sheet is live, Compare opens, Show frames a claim; a claim link opens the sheet on it',
@@ -1085,6 +1099,17 @@ async function main(): Promise<void> {
     assert(
       /Nothing has changed|the same/.test(changesText),
       `a report kept a moment ago reads: ${changesText}`,
+    );
+    const [evidence] = await Promise.all([
+      m.waitForEvent('download'),
+      m.getByTestId(`report-bundle-${keptId}`).click(),
+    ]);
+    const evidenceBytes = await Bun.file((await evidence.path()) ?? '').text();
+    assert(
+      evidence.suggestedFilename().endsWith('evidence.zip') &&
+        evidenceBytes.includes('SHA256SUMS') &&
+        evidenceBytes.includes('annotations.jsonld'),
+      `the evidence download is ${evidence.suggestedFilename()}`,
     );
     await m.getByTestId(`report-publish-${keptId}`).click();
     const linkBox = m.getByTestId(`report-link-${keptId}`);
@@ -1115,7 +1140,7 @@ async function main(): Promise<void> {
     await stranger.getByTestId('published-gone').waitFor({ timeout: 15_000 });
     await strangerContext.close();
     pass(
-      '13c. "Keep a report" keeps it with an id; the board lists it and says nothing changed; its link opens the live report for a stranger with no account, and stops when stopped',
+      '13c. "Keep a report" keeps it with an id; the board lists it, says nothing changed and hands over its evidence zip; its link opens the live report for a stranger with no account, and stops when stopped',
     );
     await M.open(firstPass.id);
 

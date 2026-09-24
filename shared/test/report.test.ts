@@ -10,6 +10,12 @@ import {
 } from '../src/report/data.ts';
 import { renderDocument, scopeSentence } from '../src/report/document.ts';
 import {
+  csvField,
+  toCsv,
+  toGraphMl,
+  toWebAnnotation,
+} from '../src/report/formats.ts';
+import {
   claimGroups,
   disagreeingPairs,
   numbered,
@@ -338,5 +344,81 @@ describe('changes since a kept report', () => {
       'ends',
       'replies',
     ]);
+  });
+});
+
+describe('formats other tools read', () => {
+  const data = () =>
+    report([
+      region('r', 'a', 'chimney'),
+      connection('x', 'a', 'b', {
+        note: 'same line, "exactly"',
+        direction: 'reverse',
+        confidence: 'likely',
+        made: { name: 'Ada', at: '2026-09-20T10:00:00.000Z' },
+        replies: [{ name: 'Bo', at: '2026-09-21T10:00:00.000Z', text: 'Yes' }],
+      }),
+    ]);
+
+  test('Web Annotation: a region is an xywh=percent fragment of the picture by hash', () => {
+    const w = toWebAnnotation(data()) as {
+      type: string;
+      total: number;
+      first: { items: Record<string, unknown>[] };
+    };
+    expect(w.type).toBe('AnnotationCollection');
+    const [link, reply, tag] = w.first.items;
+    expect(tag).toMatchObject({
+      motivation: 'tagging',
+      body: { type: 'TextualBody', value: 'chimney', purpose: 'tagging' },
+      target: {
+        type: 'SpecificResource',
+        source: { id: 'urn:sha256:sha-a', type: 'Image' },
+        selector: {
+          type: 'FragmentSelector',
+          value: 'xywh=percent:25,50,50,25',
+        },
+      },
+    });
+    expect(link).toMatchObject({
+      motivation: 'linking',
+      creator: { type: 'Person', name: 'Ada' },
+      created: '2026-09-20T10:00:00.000Z',
+      'digsite:direction': 'reverse',
+      'digsite:confidence': 'likely',
+    });
+    expect((link?.target as unknown[]).length).toBe(2);
+    expect(reply).toMatchObject({
+      motivation: 'replying',
+      target: 'https://dig.example/s/s1?claim=x',
+    });
+    expect(w.total).toBe(3);
+  });
+
+  test('CSV quotes what needs quoting and nothing else', () => {
+    expect(csvField('plain')).toBe('plain');
+    expect(csvField('a,b')).toBe('"a,b"');
+    expect(csvField('say "no"')).toBe('"say ""no"""');
+    expect(csvField('two\nlines')).toBe('"two\nlines"');
+    const lines = toCsv(data()).trimEnd().split('\r\n');
+    expect(lines).toHaveLength(3);
+    expect(lines[0]?.startsWith('n,kind,says,written_as,from')).toBe(true);
+    expect(lines[1]).toContain(
+      'connection,same place,,a,,b,,reverse,likely,"same line, ""exactly"""',
+    );
+    expect(lines[2]).toContain('region,chimney,,a,chimney,,,,');
+  });
+
+  test('GraphML turns a reverse connection round, and escapes names', () => {
+    const d = data();
+    d.images[0] = { ...(d.images[0] as ReportImage), name: 'a <&> b' };
+    const g = toGraphMl(d);
+    expect(g).toContain(
+      '<node id="a"><data key="name">a &lt;&amp;&gt; b</data>',
+    );
+    expect(g).toContain('<edge id="x" source="b" target="a">');
+    expect(g).toContain('<data key="direction">forward</data>');
+    expect(g.match(/<node /g)).toHaveLength(3);
+    expect(g.match(/<edge /g)).toHaveLength(1);
   });
 });

@@ -155,6 +155,14 @@ export function BoardReports({
                 >
                   Download
                 </button>
+                <a
+                  className="board-sheet-open"
+                  href={api.reportBundleUrl(r.id)}
+                  data-testid={`report-bundle-${r.id}`}
+                  title="The data in every format, the original pictures and their SHA-256 sums, as one zip"
+                >
+                  Evidence
+                </a>
                 <button
                   type="button"
                   className="board-quiet-button"

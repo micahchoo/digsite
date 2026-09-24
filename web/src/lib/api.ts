@@ -564,6 +564,10 @@ export const api = {
   getReport: (reportId: string) => request<ReportData>(`/reports/${reportId}`),
   reportChanges: (reportId: string) =>
     request<ReportChanges & { now: string }>(`/reports/${reportId}/changes`),
+  /** A kept report's evidence: its data in every format, the originals and
+   * SHA256SUMS, as one zip (server reports/bundle.ts). */
+  reportBundleUrl: (reportId: string) =>
+    `${SERVER_ORIGIN}/reports/${reportId}/bundle`,
   deleteReport: (reportId: string) =>
     request<{ ok: true }>(`/reports/${reportId}`, { method: 'DELETE' }),
   /** `days: null` makes a link with no end. */

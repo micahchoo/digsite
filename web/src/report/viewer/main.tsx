@@ -72,7 +72,13 @@ function start() {
   shadow.append(style, mount);
 
   createRoot(mount).render(
-    <Reader data={data} pictures={pictures} cards={cards} figure={figure} />,
+    <Reader
+      data={data}
+      pictures={pictures}
+      cards={cards}
+      figure={figure}
+      files={document.querySelector<HTMLElement>('.rv-data')}
+    />,
   );
   document.documentElement.dataset.viewer = 'on';
 }

@@ -18,4 +18,5 @@ export * from './sheet/path.ts';
 export * from './report/data.ts';
 export * from './report/order.ts';
 export * from './report/changes.ts';
+export * from './report/formats.ts';
 export * from './api.ts';

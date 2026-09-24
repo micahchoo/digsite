@@ -5,9 +5,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { ReportChanges, ReportData } from '@digsite/shared';
+import { createCanvas } from '@napi-rs/canvas';
 import { createHttpServer } from '../app.ts';
 import { pool } from '../db/pool.ts';
 import { saveSnapshotAndProject } from '../sheets/snapshot.ts';
+import { drain } from '../worker/index.ts';
 
 let server: Server;
 let base = '';
@@ -255,5 +257,111 @@ describe('kept and published reports', () => {
       id,
     ]);
     expect(rows.length).toBe(0);
+  });
+});
+
+/** The entries of a zip whose entries are stored whole (boards/zip.ts). */
+function unzip(buf: Uint8Array): Map<string, Uint8Array> {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const out = new Map<string, Uint8Array>();
+  let at = 0;
+  while (at + 30 <= buf.length && view.getUint32(at, true) === 0x04034b50) {
+    const size = view.getUint32(at + 18, true);
+    const nameLength = view.getUint16(at + 26, true);
+    const name = new TextDecoder().decode(
+      buf.subarray(at + 30, at + 30 + nameLength),
+    );
+    const start = at + 30 + nameLength;
+    out.set(name, buf.subarray(start, start + size));
+    at = start + size;
+  }
+  return out;
+}
+
+describe('a kept report’s evidence', () => {
+  test('holds its data in every format and every original, each checkable by SHA256SUMS', async () => {
+    const ts = Date.now();
+    const owner = await signUp(`rb-owner-${ts}@example.test`);
+    const group = (
+      await owner.req<{ id: string }>('POST', '/groups', { name: `RB-${ts}` })
+    ).json;
+    const board = (
+      await owner.req<{ id: string }>('POST', `/groups/${group.id}/boards`, {
+        name: 'Evidence',
+        open: true,
+      })
+    ).json;
+    const form = new FormData();
+    for (const [name, colour] of [
+      ['north.png', '#a33'],
+      ['south.png', '#3a3'],
+    ] as const) {
+      const canvas = createCanvas(8, 6);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = colour;
+      ctx.fillRect(0, 0, 8, 6);
+      form.append('files', new Blob([canvas.encodeSync('png')]), name);
+    }
+    const upload = await fetch(`${base}/boards/${board.id}/images?wait=0`, {
+      method: 'POST',
+      headers: { Origin: base, cookie: owner.cookie },
+      body: form,
+    });
+    expect(upload.status).toBe(202);
+    const [north, south] = ((await upload.json()) as { id: string }[]).map(
+      (i) => i.id,
+    );
+    await drain();
+    const sheet = (
+      await owner.req<{ id: string }>('POST', `/boards/${board.id}/sheets`, {
+        name: 'Both',
+        imageIds: [north, south],
+      })
+    ).json;
+    await saveSnapshotAndProject(sheet.id, [
+      pic('pn', north as string, 0),
+      pic('ps', south as string, 300),
+      line('e', 'pn', 'ps', 'confirmed'),
+    ]);
+    const kept = await owner.req<ReportData>(
+      'POST',
+      `/boards/${board.id}/reports`,
+      { scope: { kind: 'sheet', sheetId: sheet.id } },
+    );
+    const res = await fetch(`${base}/reports/${kept.json.id}/bundle`, {
+      headers: { Origin: base, cookie: owner.cookie },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/zip');
+    const files = unzip(new Uint8Array(await res.arrayBuffer()));
+    expect([...files.keys()].sort()).toEqual([
+      'README.txt',
+      'SHA256SUMS',
+      'annotations.jsonld',
+      'claims.csv',
+      'graph.graphml',
+      'pictures/north.png',
+      'pictures/south.png',
+      'report.json',
+    ]);
+    // Every line of SHA256SUMS holds for the bytes beside it.
+    const sums = new TextDecoder()
+      .decode(files.get('SHA256SUMS'))
+      .trim()
+      .split('\n');
+    expect(sums).toHaveLength(7);
+    for (const line of sums) {
+      const [hash, name] = line.split('  ');
+      const bytes = files.get(name ?? '') as Uint8Array;
+      expect(new Bun.CryptoHasher('sha256').update(bytes).digest('hex')).toBe(
+        hash as string,
+      );
+    }
+    // And a picture's file is the one the report cites.
+    const cited = kept.json.images.find((i) => i.name === 'north.png');
+    expect(sums).toContain(`${cited?.sha256}  pictures/north.png`);
+    const readme = new TextDecoder().decode(files.get('README.txt'));
+    expect(readme).toContain('sha256sum -c SHA256SUMS');
+    expect(readme).not.toContain('differ');
   });
 });

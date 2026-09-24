@@ -402,6 +402,9 @@ time{color:var(--text-secondary);font-size:var(--text-xs)}
 .link{margin:var(--space-3) 0 0;font-size:var(--text-sm)}
 .rv-actions{display:flex;flex-wrap:wrap;gap:var(--space-2);margin:var(--space-3) 0 0}
 .rv-actions:empty{display:none}
+.rv-data{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3)}
+.rv-data:empty{display:none}
+.rv-data button{min-height:32px;padding:0 var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-m);background:var(--surface-raised);color:var(--text-primary);font:inherit;font-size:var(--text-sm);cursor:pointer}
 .rv-actions button{min-height:32px;padding:0 var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-m);background:var(--surface-raised);color:var(--text-primary);font:inherit;font-size:var(--text-sm);cursor:pointer}
 .rv-actions button:hover{border-color:var(--accent)}
 .claim.is-focus{outline:2px solid var(--accent);outline-offset:2px}
@@ -416,7 +419,7 @@ footer{margin-top:var(--space-10);color:var(--text-faint);font-size:var(--text-x
   body{background:#fff;color:#000;font-size:11pt}
   .page{max-width:none;padding:0}
   .claim,.picture{box-shadow:none;border-color:#bbb}
-  nav.contents{break-after:page}
+  nav.contents,.sheet-figure{break-inside:avoid}
   h2{break-after:avoid}
   .link a::after{content:" (" attr(href) ")";font-size:8pt;color:#555;overflow-wrap:anywhere}
   .rv-host,.rv-actions{display:none}
@@ -525,7 +528,11 @@ ${body}
 <section id="pictures"><h2>Pictures <span class="count">${plural(data.images.length, 'picture')}</span></h2>
 ${data.images.map((img) => pictureEntry(img, pics)).join('\n')}
 </section>
-<footer>Made with digsite. Data format ${e(data.format)}; the data is inside this file.</footer>
+<section id="data"><h2>Data</h2>
+<p class="meta">Everything above is in this file as data too, format ${e(data.format)}: as the report itself, as W3C Web Annotations (each region a fragment of its picture, each picture named by its SHA-256), as a table of claims, and as a graph for Gephi or yEd.</p>
+<div class="rv-data"></div>
+</section>
+<footer>Made with digsite.</footer>
 </div>
 ${dataScript(data)}
 ${media.viewer ? `<script type="module">${media.viewer.replace(/<\/script/gi, '<\\/script')}</script>` : ''}

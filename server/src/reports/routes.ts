@@ -9,6 +9,7 @@
 //   GET    /boards/:id/reports           the board's kept reports
 //   GET    /reports/:id                  a kept report, as kept
 //   GET    /reports/:id/changes          what changed since
+//   GET    /reports/:id/bundle           its evidence, as a zip (bundle.ts)
 //   DELETE /reports/:id                  remove it
 //   POST   /reports/:id/link             publish a link    {days?}
 //   DELETE /reports/:id/link             revoke it
@@ -40,6 +41,7 @@ import {
   requireAuth,
 } from '../http.ts';
 import { checkLimit, tooManyRequests } from '../limits.ts';
+import { writeBundle } from './bundle.ts';
 import { gatherReport } from './gather.ts';
 import {
   LINK_DAYS,
@@ -229,6 +231,20 @@ export function registerReportRoutes(router: Router) {
     const report = await reportForViewing(userId, param(ctx, 'id'));
     const board = await boardForViewing(userId, report.board_id);
     json(ctx.res, 200, await changesSince(report, board.name));
+  });
+
+  router.get('/reports/:id/bundle', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const report = await reportForViewing(userId, param(ctx, 'id'));
+    const data = keptData(report);
+    const file = `${data.title.replace(/[^\p{L}\p{N} ._-]/gu, '') || 'report'} evidence.zip`;
+    ctx.res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file)}`,
+      'Cache-Control': 'private, no-store',
+    });
+    await writeBundle(data, report.board_id, (chunk) => ctx.res.write(chunk));
+    ctx.res.end();
   });
 
   router.del('/reports/:id', async (ctx) => {
