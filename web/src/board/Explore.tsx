@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiError, api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
-import type { PendingCopyEdge } from '../sheet/Sheet.tsx';
+import type { PendingCopyEdge } from '../sheet/actions.ts';
 
 interface Props {
   boardId: string;

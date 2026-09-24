@@ -33,11 +33,10 @@ import {
 } from '@digsite/shared';
 import { useEffect, useRef, useState } from 'react';
 import { TermInput } from '../components/TermInput.tsx';
-import type { WheelInput } from './canvas/types.ts';
+import type { Tool, WheelInput } from './canvas/types.ts';
 import {
   type Point,
   type Target,
-  type Tool,
   movedEnough,
   pointerIntent,
   rectFromDrag,

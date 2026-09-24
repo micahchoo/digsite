@@ -2,7 +2,7 @@
 // and tooltips from here, and the `?` panel lists it, so a key and the help
 // that names it cannot drift apart. Ported from image-graph's
 // `shortcuts.ts`: one action, one key, one line of help.
-import type { Tool } from './gestures.ts';
+import type { Tool } from './canvas/types.ts';
 
 export interface Shortcut {
   /** What a person presses, as it is shown: each entry is one key cap. */

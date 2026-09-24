@@ -11,7 +11,8 @@ source: hand-written
 over more than one step: bring a picture beside another (wait for it to
 arrive through the room, then place it), connect from "Looks like",
 extract a region into a picture (crop, wait for the worker, bring, connect
-"derived from", select), and gather the report's claims.
+"derived from", select), gather the report's claims, and copy the
+connections Explore hands a new sheet (by imageId).
 
 It takes a narrow port: the scene's `elements()` and `select()`, the
 tools' `moveImage` and `connect`, four api calls, a crop function and a

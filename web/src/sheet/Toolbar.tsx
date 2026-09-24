@@ -7,7 +7,7 @@ import { Icon, type IconName } from '../components/Icon.tsx';
 import { modalOpen } from '../lib/modal.ts';
 import { ShortcutsPanel } from './ShortcutsPanel.tsx';
 import type { CanvasHandle } from './canvas/types.ts';
-import type { Tool } from './gestures.ts';
+import type { Tool } from './canvas/types.ts';
 import { TOOLS } from './shortcuts.ts';
 
 interface Props {

@@ -1,7 +1,7 @@
 // Foreign claims and presentation-only labels share one SVG layer above the
 // native canvas. Foreign geometry stays outside the native scene, scene
 // history, persistence, native hit testing, and collaboration.
-import { type Foreign, dataOf } from '@digsite/shared';
+import { dataOf } from '@digsite/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SceneElement } from '../canvas/types.ts';
 import {
@@ -17,13 +17,13 @@ import type { PeerCursor } from '../presence.ts';
 import { edgePaths, foreignPaths, midSegment } from '../routing.ts';
 import {
   type ConnectionLabelJob,
+  type ForeignShape,
   type LabelObstacle,
   type PlacedConnectionLabel,
   type PlacedRegionLabel,
   type Rect,
   type RegionLabelJob,
   type Viewport,
-  foreignShapes,
   placeConnectionLabels,
   placeRegionLabels,
   rectToScreen,
@@ -31,7 +31,9 @@ import {
 } from './screen.ts';
 
 interface Props {
-  rows: Foreign;
+  /** The foreign claims as scene shapes, from the one computation
+   * (use-foreign-shapes.ts). */
+  shapes: ForeignShape[];
   elements: readonly SceneElement[];
   viewport: Viewport;
   selectedId: string | null;
@@ -59,7 +61,7 @@ interface ForeignRegionLabel extends PlacedRegionLabel {
 }
 
 export function Overlay({
-  rows,
+  shapes,
   elements,
   viewport,
   selectedId,
@@ -74,7 +76,6 @@ export function Overlay({
     width: window.innerWidth,
     height: window.innerHeight,
   }));
-  const shapes = useMemo(() => foreignShapes(rows, elements), [rows, elements]);
   const foreignLines = useMemo(
     () => shapes.flatMap((shape) => (shape.kind === 'edge' ? [shape] : [])),
     [shapes],

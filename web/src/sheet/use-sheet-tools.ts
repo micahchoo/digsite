@@ -6,7 +6,7 @@
 // composition size (docs/phases/2-sheet.md section 7).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CanvasHandle } from './canvas/types.ts';
-import type { Tool } from './gestures.ts';
+import type { Tool } from './canvas/types.ts';
 import type { ForeignShape } from './overlay/screen.ts';
 import { type SyncStatus, type Tools, createTools } from './tools.ts';
 

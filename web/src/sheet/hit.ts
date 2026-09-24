@@ -6,6 +6,11 @@
 //
 // Regions draw on top of their image whatever the array order; among
 // images, a later element in the array is on top.
+//
+// Edges are left out on purpose: no tool starts on a line. The canvas's
+// own hit test (canvas/native/scene.ts#hitAt) answers the pointer's
+// question behind the canvas seam, edges first, and product code does not
+// import it.
 
 import { dataOf } from '@digsite/shared';
 import type { ElementLike, Point } from './overlay/screen.ts';

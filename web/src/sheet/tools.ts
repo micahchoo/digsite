@@ -24,9 +24,10 @@ import {
 import { api as httpApi } from '../lib/api.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
 import type { CanvasHandle, PatchOp, SceneElement } from './canvas/types.ts';
+import type { Tool } from './canvas/types.ts';
 import { type CopyChoice, fullChoice, planCopy } from './copy-foreign.ts';
 import { isDangling } from './dangling.ts';
-import { type Tool, rectFromDrag } from './gestures.ts';
+import { rectFromDrag } from './gestures.ts';
 import { hitAt } from './hit.ts';
 import { truncateLabel } from './labels.ts';
 import { type ForeignShape, foreignCopyRect } from './overlay/screen.ts';

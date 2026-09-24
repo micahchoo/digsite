@@ -482,7 +482,7 @@ svg and `pointer-events: all` on each foreign shape. It reads
 `appState.scrollX`, `scrollY` and `zoom.value` from `onChange` and the
 current image and region elements from the scene, and computes every
 foreign shape's pixels on every render: `fromFraction(row, imageRectNow)`
-for a region, current end rects for an edge. `useForeign.ts` polls
+for a region, current end rects for an edge. `use-foreign-shapes.ts` polls
 `/sheets/:id/foreign` every 3,000 ms and holds the rows. A click on a
 foreign shape sets `selectedForeign` in React state and stops
 propagation; a drag does nothing; the pointer never reaches the canvas.

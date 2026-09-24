@@ -27,7 +27,11 @@ import { ConnectLayer } from './ConnectLayer.tsx';
 import { DrawLayer } from './DrawLayer.tsx';
 import { RelationPicker } from './RelationPicker.tsx';
 import { SidePanel } from './SidePanel.tsx';
-import { createSheetActions, imageElementOf } from './actions.ts';
+import {
+  type PendingCopyEdge,
+  createSheetActions,
+  imageElementOf,
+} from './actions.ts';
 import { describeSelection } from './announce.ts';
 import { type Direction, nextInDirection } from './arrow-walk.ts';
 import { Canvas } from './canvas/Canvas.tsx';
@@ -52,14 +56,9 @@ import { reconcileLocalChange } from './scene-diff.ts';
 import { type MenuTarget, sheetMenu } from './sheet-menu.ts';
 import './sheet.css';
 import { Toolbar } from './Toolbar.tsx';
-import {
-  type PendingCopyEdge,
-  useCopyConnections,
-} from './use-copy-connections.ts';
+import { useCopyConnections } from './use-copy-connections.ts';
 import { useForeignShapes } from './use-foreign-shapes.ts';
 import { useSheetTools } from './use-sheet-tools.ts';
-
-export type { PendingCopyEdge };
 
 type SheetInfo = Awaited<ReturnType<typeof api.getSheet>>;
 const ZERO_VIEWPORT: Viewport = { scrollX: 0, scrollY: 0, zoom: 1 };
@@ -348,7 +347,7 @@ export function Sheet() {
   );
   type LocationState = { copyEdges?: PendingCopyEdge[] } | null;
   const copyEdges = (location.state as LocationState)?.copyEdges;
-  useCopyConnections(copyEdges, sceneElements, tools, rerender);
+  useCopyConnections(copyEdges, sceneElements, actions);
   const sheetIndex = boardSheets.findIndex((sheet) => sheet.id === sheetId);
   const previousSheet =
     sheetIndex > 0 ? (boardSheets[sheetIndex - 1] ?? null) : null;
@@ -736,7 +735,7 @@ export function Sheet() {
           />
         )}
         <Overlay
-          rows={foreign.rows}
+          shapes={foreign.shapes}
           elements={sceneElements}
           viewport={viewport}
           selectedId={selectedForeignId}

@@ -11,7 +11,7 @@
 // lands on an image or an own region, and a second pick (there is already a
 // pending source) completes the edge rather than starting a new one.
 
-export type Tool = 'select' | 'region' | 'edge' | 'pan';
+import type { Tool } from './canvas/types.ts';
 
 /** What the pointer's press landed on, decided by the caller (a hit test
  * against the live scene) — this module never touches a scene itself. */

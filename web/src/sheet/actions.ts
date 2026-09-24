@@ -11,7 +11,12 @@
 // `groupIds` crashed the move. So the sequences live here, behind a port
 // that takes only what they use, and a test hands them an in-memory scene
 // and a fake server (image-graph's Exploration seam, moved to the sheet).
-import { type Fraction, dataOf, toFraction } from '@digsite/shared';
+import {
+  type Direction,
+  type Fraction,
+  dataOf,
+  toFraction,
+} from '@digsite/shared';
 import type { ClaimReply } from '@digsite/shared/api';
 import type { api } from '../lib/api.ts';
 import { besideSpot } from './beside.ts';
@@ -47,6 +52,15 @@ export interface ActionDeps {
   /** Tells the view the scene changed. */
   changed: () => void;
   wait?: (ms: number) => Promise<void>;
+}
+
+/** A connection to make again on a new sheet, named by its pictures: the
+ * neighbourhood's edges that Explore hands a sheet it creates. */
+export interface PendingCopyEdge {
+  sourceImageId: string;
+  targetImageId: string;
+  relation: string;
+  direction: Direction;
 }
 
 /** How long a new picture may take to reach the sheet through the room,
@@ -231,7 +245,29 @@ export function createSheetActions(deps: ActionDeps) {
     return claims;
   }
 
-  return { bringBeside, connectFrom, extract, reportClaims };
+  /**
+   * "Copy connections" (docs/phases/2-sheet.md section 4): makes each edge
+   * between the pictures it names, by imageId, never by element id. An
+   * edge whose picture is not on the sheet is left out. Every edge made is
+   * this sheet's own. Returns how many were made.
+   */
+  function copyConnections(pending: readonly PendingCopyEdge[]): number {
+    const scene = deps.scene();
+    if (!scene) return 0;
+    const elements = scene.elements();
+    let made = 0;
+    for (const edge of pending) {
+      const from = imageElementOf(elements, edge.sourceImageId);
+      const to = imageElementOf(elements, edge.targetImageId);
+      if (!from || !to) continue;
+      deps.tools.connect(from.id, to.id, edge.relation, edge.direction);
+      made += 1;
+    }
+    if (made) deps.changed();
+    return made;
+  }
+
+  return { bringBeside, connectFrom, copyConnections, extract, reportClaims };
 }
 
 export type SheetActions = ReturnType<typeof createSheetActions>;

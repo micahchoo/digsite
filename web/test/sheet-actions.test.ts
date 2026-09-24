@@ -3,7 +3,7 @@
 // added on the server reaches the scene only after some waits, as it does
 // through the socket.
 import { describe, expect, test } from 'bun:test';
-import type { ClaimReply } from '@digsite/shared';
+import { type ClaimReply, dataOf } from '@digsite/shared';
 import {
   type ActionServer,
   createSheetActions,
@@ -263,5 +263,44 @@ describe('the report', () => {
     const [claim] = await s.actions.reportClaims();
     expect(claim).toMatchObject({ kind: 'region', term: 'door' });
     expect(claim?.ends[0]?.crop).toBe('crop:a:0.25');
+  });
+});
+
+describe('copy connections', () => {
+  const b = picture('el-b', 'b', { x: 300, y: 0, width: 200, height: 200 });
+  const edges = (s: ReturnType<typeof sheet>) =>
+    s.elements.filter((el) => dataOf(el)?.kind === 'edge');
+
+  test('joins the pictures they name by imageId, not element id', () => {
+    const s = sheet([parent, b]);
+    const made = s.actions.copyConnections([
+      {
+        sourceImageId: 'a',
+        targetImageId: 'b',
+        relation: 'same place',
+        direction: 'forward',
+      },
+    ]);
+    expect(made).toBe(1);
+    const [edge] = edges(s);
+    expect(edge?.startBinding?.elementId).toBe('el-a');
+    expect(edge?.endBinding?.elementId).toBe('el-b');
+    expect(dataOf(edge as SceneElement)).toMatchObject({
+      relation: 'same place',
+    });
+  });
+
+  test('an edge whose picture is not on the sheet is left out', () => {
+    const s = sheet([parent]);
+    const made = s.actions.copyConnections([
+      {
+        sourceImageId: 'a',
+        targetImageId: 'b',
+        relation: '',
+        direction: 'none',
+      },
+    ]);
+    expect(made).toBe(0);
+    expect(edges(s)).toEqual([]);
   });
 });
