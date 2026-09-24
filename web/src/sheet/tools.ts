@@ -72,6 +72,10 @@ export interface Tools {
     onRefused?: (reason: string) => void,
   ) => string | null;
   select: (id: string) => void;
+  /** The canvas says what of this sheet's own is selected. The selection is
+   * one thing: an own element chosen by any path (a click on the canvas, a
+   * picture on the overlay, the arrow walk) ends a foreign one. */
+  ownSelected: (ids: readonly string[]) => void;
   deleteSelected: () => void;
   getElements: () => SceneElement[];
   getForeign: () => ForeignShape[];
@@ -307,6 +311,10 @@ export function createTools(deps: ToolsDeps): Tools {
     }
     setSelectedForeign(null);
     handle.select([id]);
+  }
+
+  function ownSelected(ids: readonly string[]): void {
+    if (ids.length && getSelectedForeignId()) setSelectedForeign(null);
   }
 
   function getElements(): SceneElement[] {
@@ -564,6 +572,7 @@ export function createTools(deps: ToolsDeps): Tools {
     setRegionRect,
     copyForeign,
     select,
+    ownSelected,
     deleteSelected,
     getElements,
     getForeign,

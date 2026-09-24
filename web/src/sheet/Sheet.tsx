@@ -283,6 +283,7 @@ export function Sheet() {
     (scene: SceneChange) => {
       const handle = canvasRef.current;
       if (!handle) return;
+      tools.ownSelected(scene.selectedIds);
       const { ops, elements: next } = reconcileLocalChange(scene.elements);
       if (ops.length) handle.apply(ops, { history: false });
       room.sendScene(next);
@@ -305,8 +306,9 @@ export function Sheet() {
       // `room` is a fresh object every render; `sendScene`'s identity is
       // stable (room.ts's own useCallback) — depend on that, not the whole
       // object, so this handler is never rebuilt yet never goes stale.
+      // `tools` is made once (use-sheet-tools.ts).
     },
-    [room.sendScene],
+    [room.sendScene, tools],
   );
   const focusInspectorToggle = useCallback(
     () => inspectorToggleRef.current?.focus(),
