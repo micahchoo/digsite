@@ -1,0 +1,94 @@
+# digsite as a Portainer stack on a host whose ports 80/443 already belong
+# to nginx-proxy-manager (see deploy/PORTAINER.md). Differences from
+# deploy/docker-compose.yml, and why:
+#
+# - No Caddy. nginx-proxy-manager terminates TLS and forwards by container
+#   name over its own network (`nginx_network`), so nothing here publishes a
+#   port. On a host where Docker's published ports bypass the firewall, a
+#   port never published is the only one known to be closed.
+# - No `build:`. Portainer deploys a stack from text, with no build context,
+#   so deploy/portainer-deploy.sh builds the images on this host first and
+#   passes their tags in SERVER_IMAGE and WEB_IMAGE. The web image carries
+#   the API's address, baked in when it is built.
+# - Every secret and setting comes from the stack's environment (Portainer
+#   stores it); none is written in this file.
+name: digsite
+
+services:
+  db:
+    image: digsite-postgres:16-pgvector
+    container_name: digsite-prod-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-digsite}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:-digsite}
+    volumes:
+      - digsite-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-digsite} -d ${POSTGRES_DB:-digsite}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    image: ${SERVER_IMAGE:?SERVER_IMAGE required}
+    container_name: digsite-server
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-digsite}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-digsite}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET required}
+      HOST: 0.0.0.0
+      PUBLIC_ORIGIN: https://${API_DOMAIN:?API_DOMAIN required}
+      WEB_ORIGIN: https://${DOMAIN:?DOMAIN required}
+      DATA_DIR: /data
+      STORAGE: fs
+      # Who may make an account, and how much one person can store
+      # (CONTEXT.md "Sign-up", "Operator", "Storage quota").
+      SIGNUP: ${SIGNUP:-invite}
+      OPERATOR_EMAILS: ${OPERATOR_EMAILS:?OPERATOR_EMAILS required}
+      GROUP_QUOTA_GB: ${GROUP_QUOTA_GB:-20}
+      MAX_GROUPS_PER_USER: ${MAX_GROUPS_PER_USER:-3}
+      # Meaning: find by meaning, "Looks like", near-duplicates. The first
+      # start downloads CLIP's weights (~150 MB) into /data/models.
+      EMBEDDINGS: ${EMBEDDINGS:-on}
+      MODELS_DIR: /data/models
+      INVITATION_EXPIRES_IN: ${INVITATION_EXPIRES_IN:-172800}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      LADDER_BUDGET_MB: ${LADDER_BUDGET_MB:-4096}
+      MATERIALISE_BUDGET_MB: ${MATERIALISE_BUDGET_MB:-2048}
+      COARSE_BUDGET_MB: ${COARSE_BUDGET_MB:-1024}
+      SESSION_EXPIRES_IN: ${SESSION_EXPIRES_IN:-604800}
+      SESSION_UPDATE_AGE: ${SESSION_UPDATE_AGE:-86400}
+      AUTH_RATE_LIMIT_WINDOW: ${AUTH_RATE_LIMIT_WINDOW:-10}
+      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-100}
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-50}
+      UPLOAD_BATCH_MAX_MB: ${UPLOAD_BATCH_MAX_MB:-100}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+    volumes:
+      - digsite-data:/data
+    networks: [default, proxy]
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8800/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE:?WEB_IMAGE required}
+    container_name: digsite-web
+    networks: [default, proxy]
+    restart: unless-stopped
+
+networks:
+  proxy:
+    name: ${PROXY_NETWORK:-nginx_network}
+    external: true
+
+volumes:
+  digsite-postgres:
+  digsite-data:
