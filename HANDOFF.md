@@ -4,6 +4,24 @@ Updated 2026-09-22 after the upload-throughput and interface Luna pass.
 The product repository is `app/`; roadmap: `docs/roadmap.md`.
 Nothing was deployed. The isolated functional preview uses ports 5292/8892.
 
+## Report export (2026-09-23, a third session)
+
+Seven horizons, all committed on main (`aeee3c9`..`059acc6`), the table in
+`docs/roadmap.md` § "Report export"; terms in CONTEXT.md § "Showing the
+work"; rules `report-viewer-stands-alone.md`, `report-links.md`.
+- Server: `reports/gather.ts` (scopes from rows), `kept.ts` (keep, changes,
+  link), `bundle.ts` (evidence zip), `routes.ts`; migration `0031_reports.sql`;
+  four new intents in `access/` with matrix rows.
+- Shared: `report/` — data, order, document (pure HTML), changes, formats.
+  Reading order and the path search moved to `shared/sheet/`.
+- Web: `report/` — file, pictures, still, saved, import, use-report;
+  `report/viewer/` is a separate build (`bun run build:viewer`, into
+  `public/`, ignored by git; `dev`, `build` and `e2e:fresh` run it).
+  `board/WebDiagram.tsx` split from WebView. `/r/:token` is public.
+- Walk: claims 9d, 13, 13c, 13d. All of `sense-claims.ts` passes.
+- The preview on 8892 was restarted on this tree at 19:5x and its database
+  migrated through 0031 (the user was testing the report there).
+
 ## Interface and "making sense" in progress (2026-09-23)
 
 A second session, working beside the server-roadmap one. Committed on main as it goes.

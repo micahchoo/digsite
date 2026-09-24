@@ -154,6 +154,34 @@ sheet that made it. The board never writes a claim.
   not oppose; otherwise they disagree. Shown, never resolved by the
   system.
 
+## Showing the work
+
+- **Report** — the claims a **report scope** names, with what each rests
+  on: its ends as pictures, canonical term and the term as typed, how
+  sure, why, who and when, the discussion, and what other sheets say about
+  the same pair. Gathered by the server from rows (`reports/gather.ts`);
+  its data is `digsite-report/1` (`shared/report/data.ts`). A **report
+  file** is one HTML document carrying that data, each picture once, and
+  the **viewer**; it reads with no server, and prints.
+- **Report scope** — what a report gathers: a sheet, a selection on one,
+  the whole board (the union), one relation, or the path between two
+  pictures.
+- **Viewer** — the app's own canvas (read only), Compare and web view,
+  inside a report file or a published page. It adds to the document;
+  nothing a citation needs depends on it.
+- **Kept report** — a report frozen with an id, so a citation points at
+  what was said. Never changed; **what changed** is the same scope
+  gathered again and compared claim by claim. Goes with its board.
+- **Published report** — a kept report with a link: anyone holding the
+  token reads it and its pictures, without an account, until it expires
+  or someone stops it. Made only by the board's manager.
+- **Evidence** — a kept report's data in every format (Web Annotations,
+  CSV, GraphML) with the original of every picture and their SHA-256
+  sums, as one zip. A picture is cited by that hash.
+- **Report import** — a report file made into a new sheet: its pictures
+  found on the board by hash, its claims made the sheet's own. What cannot
+  land is said.
+
 ## Work behind the map
 
 - **Job** — one unit of background work in `jobs`: `ladder`,

@@ -84,8 +84,37 @@ image-graph are mapped per horizon in `ux/image-graph-patterns.md`.
 | 2 | Claims you can trust | compare two pictures side by side; who said what and when; replies on a claim; extract a region as its own picture | DONE 2026-09-23: Compare, stamps (signed in the room), replies (0023), extract (`POST /images/:id/extract`); walked 6e, 10, 11 |
 | 3 | A web you can walk | explore a connection or a relation; "how are A and B connected"; a graph view with hop rings | mostly done 2026-09-23: path up to six steps (9), the web view with hop rings, from a picture or a connection (9b, 12). The web of one relation, from Terms (9c) |
 | 4 | The machine suggests, never decides | suggested connections, labels and near-duplicates from embeddings, each accepted by a person | mostly done 2026-09-23: Find by meaning, More like this, "Looks like" on a sheet picture (Bring here, then a click connects: "copy of" for a near-duplicate, else "resembles"), "Copies of this picture" on the board, label suggestions on a new region (the board's own words only). DONE 2026-09-23; the CLIP prompt is untuned until a board has real labels |
-| 5 | Show the work | stable links to a claim or a view, a read-only view, a citable export | mostly done 2026-09-23: links to a picture (`/b/<id>?image=`) and to a claim (`/s/<id>?claim=`), "Export a report" (one HTML file with crops, reasons, authors, discussion). Open: a read-only view for people outside the group |
+| 5 | Show the work | stable links to a claim or a view, a read-only view, a citable export | mostly done 2026-09-23: links to a picture (`/b/<id>?image=`) and to a claim (`/s/<id>?claim=`), "Export a report" (one HTML file with crops, reasons, authors, discussion). The read-only view for people outside the group is the published report (below) |
 | 6 | The quality floor | dark mode, phone width, arrow keys and an announcer, screenshots and the claims walk in CI | done 2026-09-23: `smoke-surfaces.ts` (dark, 390 px), arrow keys and a live announcer on the sheet, CI runs the claims walk on a pgvector database. The rest of the app at 390 and 320 px: `smoke-phone.ts` (sign in, join, groups, the board map, details, upload queue, allowlist) |
+
+## Report export — from a download to a record others can cite
+
+Horizon 5's "Export a report" grown into its own line of work (CONTEXT.md
+"Showing the work"). The report reads like the app: the file carries the
+app's own sheet, Compare and web view, over a document that stands alone.
+Every row is walked on the real server by `e2e/src/sense-claims.ts`.
+
+| # | horizon | done when | status |
+| --- | --- | --- | --- |
+| R0 | An honest report | canonical terms with the typed one kept, dangling said, reading order, a context view of each region, captured properties and hashes | DONE 2026-09-23 (`aeee3c9`): each picture carried once, every crop a `<use>` of it |
+| R1 | Built on the server | the client's gathering deleted; `GET /sheets/:id/report` | DONE (`aeee3c9`, `30083d2`): waits for the save that holds what the tab shows; figure 1 drawn by `renderFrame`. Walk 13 |
+| R1b | The viewer | the same pixels in the app and the file | DONE (`091606b`): canvas `readOnly` (gesture mode `read`), shadow-root CSS, 330 kB bundle; seam check keeps its tree off the server. Walk 13 |
+| R2 | Choose what goes in | selection, path, relation, the whole board with disagreement | DONE (`b6ab268`): the board's report shows its web live. Walk 9d |
+| R3 | Citable | kept with an id; what changed since | DONE (`36ab636`): `0031_reports.sql`, `shared/report/changes.ts`. Walk 13c |
+| R4 | Readable outside the group | a link, revocable, expiring, no account | DONE (`36ab636`): `/r/<token>`, sandboxed frame; only the board's manager publishes. Walk 13c |
+| R5 | Formats a tool can read | Web Annotation, CSV, GraphML, an evidence zip, print | DONE (`02580a3`): regions as `xywh=percent:`, pictures as `urn:sha256:`; `sha256sum -c SHA256SUMS` holds. Walks 13, 13c |
+| R6 | The sheet as a figure | a still for print | DONE for sheets (R1's still). OPEN: a board, relation or path report has no printed figure; its web is drawn live only |
+| R7 | Round trip | a report file imports as a sheet | DONE (`059acc6`): pictures matched by hash, the report's arrangement kept, one undo. Walk 13d |
+
+Open, measured nowhere yet:
+- A report file with 150 photographs is roughly 150 × 150 kB of JPEG; no
+  cap or warning exists past the sheet's own 150.
+- A published link counts per token (`RATE_PUBLISHED_PER_MIN`); nothing
+  counts a stranger guessing tokens across links.
+- Explore's `copyEdges` stays in `history.state` after it runs. Read in the
+  code, not run: a reload of the new sheet would copy the connections
+  again (`use-copy-connections.ts` guards only per mount). The import
+  clears its own plan for this reason. Not fixed here.
 
 ## Server — next (2026-09-23)
 
