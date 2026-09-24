@@ -3,10 +3,10 @@
 // relation, picture. Searches three steps out from each end (the
 // neighbourhood route's limit), so it finds any chain up to six steps.
 import type { BoardImageWithRank, EdgeRow } from '@digsite/shared';
+import { type PathStep, shortestPath } from '@digsite/shared';
 import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
 import { api } from '../lib/api.ts';
-import { type PathStep, shortestPath } from './path.ts';
 
 interface Props {
   boardId: string;

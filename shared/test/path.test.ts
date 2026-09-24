@@ -1,7 +1,7 @@
-// How two pictures are connected (board/path.ts).
+// How two pictures are connected (shared/sheet/path.ts).
 import { describe, expect, test } from 'bun:test';
-import type { EdgeRow } from '@digsite/shared';
-import { shortestPath } from '../src/board/path.ts';
+import type { EdgeRow } from '../src/sheet/claims.ts';
+import { shortestPath } from '../src/sheet/path.ts';
 
 let n = 0;
 const edge = (

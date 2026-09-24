@@ -13,4 +13,8 @@ export * from './sheet/project.ts';
 export * from './sheet/layout.ts';
 export * from './sheet/sense.ts';
 export * from './sheet/segment.ts';
+export * from './sheet/reading-order.ts';
+export * from './sheet/path.ts';
+export * from './report/data.ts';
+export * from './report/order.ts';
 export * from './api.ts';

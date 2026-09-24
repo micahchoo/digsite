@@ -1,11 +1,13 @@
 // How two pictures are connected: the shortest chain of claims between
 // them, across every sheet on the board (image-graph's `tracePath`, over
 // the board's union of claims). Pure: rows in, steps out.
+// One definition for the board's path panel and a path report
+// (report scope "path", server/src/reports/gather.ts).
 //
 // Fewest steps first. Between chains of the same length, the more certain
 // one: a confirmed step costs less than a likely one, which costs less
 // than an unverified or unstated one, but never as much as a whole step.
-import type { EdgeRow } from '@digsite/shared';
+import type { EdgeRow } from './claims.ts';
 
 export interface PathStep {
   from: string;

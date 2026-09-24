@@ -26,6 +26,7 @@ import { registerHealthRoutes } from './health.ts';
 import { Router, json, param } from './http.ts';
 import { logError, logRequest, requestIdFor } from './logging.ts';
 import { registerMetricsRoutes } from './metrics.ts';
+import { registerReportRoutes } from './reports/routes.ts';
 import { mountSheetRoom } from './sheets/room.ts';
 import { registerSheetRoutes } from './sheets/routes.ts';
 import { registerSiteRoutes } from './site/routes.ts';
@@ -74,6 +75,7 @@ export function buildRouter(opts: HttpServerOptions = {}): Router {
   registerGroupRoutes(router);
   registerBoardRoutes(router);
   registerSheetRoutes(router);
+  registerReportRoutes(router);
   registerSiteRoutes(router);
   registerMetricsRoutes(router, opts.metricsToken ?? env.METRICS_TOKEN);
 

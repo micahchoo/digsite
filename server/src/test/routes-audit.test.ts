@@ -567,6 +567,16 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/sheets/${fx.sheetId}/rows`,
     outsider: 403,
   },
+  'GET /sheets/:id/report': {
+    method: 'GET',
+    path: (fx) => `/sheets/${fx.sheetId}/report`,
+    outsider: 403,
+  },
+  'GET /boards/:id/report': {
+    method: 'GET',
+    path: (fx) => `/boards/${fx.bOpenId}/report`,
+    outsider: 403,
+  },
   // The site's operator (site/routes.ts): an outsider is not one.
   'GET /operator': {
     method: 'GET',
