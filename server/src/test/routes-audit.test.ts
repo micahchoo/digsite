@@ -577,6 +577,59 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/boards/${fx.bOpenId}/report`,
     outsider: 403,
   },
+  'POST /boards/:id/reports': {
+    method: 'POST',
+    path: (fx) => `/boards/${fx.bOpenId}/reports`,
+    outsider: 403,
+  },
+  'GET /boards/:id/reports': {
+    method: 'GET',
+    path: (fx) => `/boards/${fx.bOpenId}/reports`,
+    outsider: 403,
+  },
+  // A kept report's routes ask for a report the outsider may not see; the
+  // fixture holds none, so the id is a stranger's and the intent's own
+  // "report not found" denial is the 403 (existence never leaks).
+  'GET /reports/:id': {
+    method: 'GET',
+    path: () => '/reports/00000000-0000-0000-0000-000000000000',
+    outsider: 403,
+  },
+  'GET /reports/:id/changes': {
+    method: 'GET',
+    path: () => '/reports/00000000-0000-0000-0000-000000000000/changes',
+    outsider: 403,
+  },
+  'DELETE /reports/:id': {
+    method: 'DELETE',
+    path: () => '/reports/00000000-0000-0000-0000-000000000000',
+    outsider: 403,
+  },
+  'POST /reports/:id/link': {
+    method: 'POST',
+    path: () => '/reports/00000000-0000-0000-0000-000000000000/link',
+    outsider: 403,
+  },
+  'DELETE /reports/:id/link': {
+    method: 'DELETE',
+    path: () => '/reports/00000000-0000-0000-0000-000000000000/link',
+    outsider: 403,
+  },
+  // A published report is read with no session: the token is the whole
+  // permission (access/index.ts#publishedReportForReading). A wrong token
+  // is 404 for everyone, signed in or not.
+  'GET /published/:token': {
+    method: 'GET',
+    path: () => '/published/not-a-token',
+    public: true,
+    outsider: (status) => status === 404,
+  },
+  'GET /published/:token/images/:imageId': {
+    method: 'GET',
+    path: (fx) => `/published/not-a-token/images/${fx.imageId}`,
+    public: true,
+    outsider: (status) => status === 404,
+  },
   // The site's operator (site/routes.ts): an outsider is not one.
   'GET /operator': {
     method: 'GET',

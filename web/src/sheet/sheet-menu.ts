@@ -37,6 +37,8 @@ export interface SheetMenuActions {
   /** Downloads the sheet's claims as one document; with ids, only those
    * claims and the claims on those pictures (a selection report). */
   report: (ids?: string[]) => void;
+  /** Keeps the sheet's report on digsite with an id, and downloads it. */
+  keepReport: () => void;
 }
 
 const HOW_SURE: [Confidence | null, string][] = [
@@ -141,6 +143,11 @@ export function sheetMenu(
       label: 'Export a report',
       testId: 'sheet-menu-report',
       onSelect: () => act.report(),
+    },
+    {
+      label: 'Keep a report',
+      testId: 'sheet-menu-keep-report',
+      onSelect: act.keepReport,
     },
   ];
   if (target) {

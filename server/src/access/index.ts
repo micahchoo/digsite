@@ -350,6 +350,94 @@ export async function imageForDeleting(
   return image;
 }
 
+// -- Reports (CONTEXT.md "Kept report", "Published report") --------------
+
+export type ReportRow = {
+  id: string;
+  board_id: string;
+  title: string;
+  scope: unknown;
+  data: unknown;
+  made_by: string;
+  made_at: Date;
+  share_token: string | null;
+  published_by: string | null;
+  published_at: Date | null;
+  expires_at: Date | null;
+};
+
+async function findReport(db: Pool, reportId: string): Promise<ReportRow> {
+  const { rows } = await db.query('SELECT * FROM reports WHERE id = $1', [
+    reportId,
+  ]);
+  const report = rows[0];
+  if (!report) deny('report not found');
+  return report;
+}
+
+/** GET /reports/:id, its changes: exactly the viewers of its board, the
+ * same cells as boardForViewing. A kept report says what the board's claims
+ * said; whoever may read the claims may read it. */
+export async function reportForViewing(
+  userId: string,
+  reportId: string,
+  db: Pool = pool,
+): Promise<ReportRow> {
+  const report = await findReport(db, reportId);
+  await boardForViewing(userId, report.board_id, db);
+  return report;
+}
+
+/** DELETE /reports/:id, revoking its link: whoever made it, or the board's
+ * manager (boardForManagingAllowlist). Must be able to view the board. */
+export async function reportForManaging(
+  userId: string,
+  reportId: string,
+  db: Pool = pool,
+): Promise<ReportRow> {
+  const report = await reportForViewing(userId, reportId, db);
+  if (report.made_by === userId) return report;
+  try {
+    await boardForManagingAllowlist(userId, report.board_id, db);
+    return report;
+  } catch (err) {
+    if (err instanceof AccessDenied)
+      deny("not the report's maker or the board's manager");
+    throw err;
+  }
+}
+
+/** POST /reports/:id/link: a link shows the board's pictures to anyone who
+ * has it, so only the board's manager may make one (decided 2026-09-23;
+ * the same people who decide who may see a private board). */
+export async function reportForPublishing(
+  userId: string,
+  reportId: string,
+  db: Pool = pool,
+): Promise<ReportRow> {
+  const report = await findReport(db, reportId);
+  await boardForManagingAllowlist(userId, report.board_id, db);
+  return report;
+}
+
+/** GET /published/:token and its pictures: no user at all. The token is
+ * the whole permission; one that is unknown, revoked or past its expiry
+ * reads as unknown, so a revoked link and a guess look the same. */
+export async function publishedReportForReading(
+  token: string,
+  db: Pool = pool,
+): Promise<ReportRow> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) deny('no such report');
+  const { rows } = await db.query(
+    `SELECT * FROM reports WHERE share_token = $1
+       AND (expires_at IS NULL OR expires_at > now())`,
+    [token],
+  );
+  const report = rows[0];
+  if (!report) deny('no such report');
+  return report;
+}
+
 // -- Phase 6 (docs/phases/6-product.md): three new listing intents, same
 // "boardsForListing is one query" discipline (this file's own comment on
 // that function) — a private board the viewer is not on is ABSENT from

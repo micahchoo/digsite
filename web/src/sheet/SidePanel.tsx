@@ -44,6 +44,8 @@ interface HeaderProps {
   onConnectionRelationChange: (relation: string | null) => void;
   /** Downloads the sheet's claims as one self-contained document. */
   onExportReport?: () => void;
+  /** Keeps the report on digsite, with an id, and downloads it. */
+  onKeepReport?: () => void;
 }
 
 function Header({
@@ -65,6 +67,7 @@ function Header({
   connectionRelation,
   onConnectionRelationChange,
   onExportReport,
+  onKeepReport,
 }: HeaderProps) {
   const relationGroup = useId();
   const lastSyncAt = Math.max(status.lastEmitAt ?? 0, status.lastRecvAt ?? 0);
@@ -139,6 +142,17 @@ function Header({
           onClick={onExportReport}
         >
           Export a report
+        </button>
+      )}
+      {onKeepReport && (
+        <button
+          type="button"
+          className="sheet-header-action"
+          data-testid="keep-report"
+          title="Keep it on digsite with an id, to cite it and see what changes"
+          onClick={onKeepReport}
+        >
+          Keep a report
         </button>
       )}
       {peers.length > 0 && (

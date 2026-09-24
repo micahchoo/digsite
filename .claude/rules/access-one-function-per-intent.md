@@ -19,7 +19,10 @@ checks:
 `src/access/index.ts` holds one function per intent: `groupForViewing`,
 `groupForInviting`, `boardForViewing`, `boardForUploading`,
 `boardForCreatingSheet`, `boardForManagingAllowlist`, `boardForCreating`,
-`boardsForListing`, `sheetForEditing`, `imageForViewing`. Each returns
+`boardsForListing`, `sheetForEditing`, `imageForViewing`, the report
+intents (`reportForViewing`, `reportForManaging`, `reportForPublishing`),
+and `publishedReportForReading`, the one intent that takes a token instead
+of a user (`report-links.md`). Each returns
 the object or throws `AccessDenied(reason)`; a route turns that into
 `403 {reason}`. The predicate
 `member(user, group) AND (board.open OR member(user, allowlist))` is

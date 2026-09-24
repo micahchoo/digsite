@@ -15,7 +15,8 @@ import { stillOf } from './still.ts';
 /** Built by `vite.viewer.config.ts` into public/, so the app serves it. */
 export const VIEWER_URL = '/report-viewer.js';
 
-async function viewerBundle(): Promise<string | null> {
+/** The viewer bundle this app serves, or null when it has none built. */
+export async function viewerBundle(): Promise<string | null> {
   try {
     const res = await fetch(VIEWER_URL);
     const type = res.headers.get('content-type') ?? '';

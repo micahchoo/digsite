@@ -19,7 +19,8 @@
     "./api": "./src/api.ts",
     "./report/data": "./src/report/data.ts",
     "./report/order": "./src/report/order.ts",
-    "./report/document": "./src/report/document.ts"
+    "./report/document": "./src/report/document.ts",
+    "./report/changes": "./src/report/changes.ts"
   },
   "scripts": {
     "test": "bun test",

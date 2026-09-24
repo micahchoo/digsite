@@ -3,7 +3,13 @@
 // twice. `credentials: 'include'` on every call — the session lives in a
 // cookie (docs/design.md "web/").
 
-import type { Fraction, ReportData, TermKind } from '@digsite/shared';
+import type {
+  Fraction,
+  ReportChanges,
+  ReportData,
+  ReportScope,
+  TermKind,
+} from '@digsite/shared';
 import type {
   AcceptInvitationResponse,
   AddImagesToSheetRequest,
@@ -56,6 +62,7 @@ import type {
   ListMembersResponse,
   ListPendingInvitationsResponse,
   ListRecentSheetsResponse,
+  ListReportsResponse,
   ListSheetsResponse,
   MarkSheetSeenResponse,
   MeaningResponse,
@@ -549,6 +556,28 @@ export const api = {
       `/boards/${boardId}/report${qs ? `?${qs}` : ''}`,
     );
   },
+  // CONTEXT.md "Kept report", "Published report" (server reports/kept.ts).
+  keepReport: (boardId: string, body: { scope: ReportScope; title?: string }) =>
+    request<ReportData>(`/boards/${boardId}/reports`, post(body)),
+  listReports: (boardId: string) =>
+    request<ListReportsResponse>(`/boards/${boardId}/reports`),
+  getReport: (reportId: string) => request<ReportData>(`/reports/${reportId}`),
+  reportChanges: (reportId: string) =>
+    request<ReportChanges & { now: string }>(`/reports/${reportId}/changes`),
+  deleteReport: (reportId: string) =>
+    request<{ ok: true }>(`/reports/${reportId}`, { method: 'DELETE' }),
+  /** `days: null` makes a link with no end. */
+  publishReport: (reportId: string, days: number | null) =>
+    request<{ token: string; expiresAt: string | null }>(
+      `/reports/${reportId}/link`,
+      post({ days }),
+    ),
+  revokeReportLink: (reportId: string) =>
+    request<{ ok: true }>(`/reports/${reportId}/link`, { method: 'DELETE' }),
+  publishedReport: (token: string) =>
+    request<ReportData>(`/published/${encodeURIComponent(token)}`),
+  publishedImageUrl: (token: string, imageId: string) =>
+    `${SERVER_ORIGIN}/published/${encodeURIComponent(token)}/images/${imageId}`,
   getStats: () => request<GetStatsResponse>('/stats'),
 
   // -- the site's operator (Settings › Accounts) -------------------------

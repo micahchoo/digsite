@@ -452,28 +452,38 @@ export function Sheet() {
    * of the sheet and, when built, the live viewer. With `ids`, only those
    * claims and the claims on those pictures.
    */
-  async function exportReport(ids?: string[]) {
+  async function exportReport(ids?: string[], keep = false) {
     const canvas = canvasRef.current;
     if (!sheetInfo || !canvas) return;
     setWorking('Waiting for the sheet to save…');
     try {
-      const { report, complete } = await whenSaved(
+      const { report: now, complete } = await whenSaved(
         () => api.getSheetReport(sheetId, ids ? { ids } : {}),
         canvas.elements(),
         (ms) => new Promise((r) => window.setTimeout(r, ms)),
       );
+      // Kept (CONTEXT.md "Kept report"): the server gathers it once more,
+      // from the save just waited for, and keeps it with an id.
+      const report = keep
+        ? await api.keepReport(sheetInfo.boardId, {
+            scope: ids
+              ? { kind: 'selection', sheetId, ids }
+              : { kind: 'sheet', sheetId },
+          })
+        : now;
       const html = await reportHtml(
         report,
         previewSource(api.previewUrl),
         setWorking,
       );
       download(html, fileName(report));
-      setWorking(
-        complete
-          ? null
-          : 'The report was made before your last change was saved. Make it again in a moment to include it.',
-      );
-      if (!complete) window.setTimeout(() => setWorking(null), 8000);
+      const said = !complete
+        ? 'The report was made before your last change was saved. Make it again in a moment to include it.'
+        : keep
+          ? 'Kept. It is listed under Reports on the board, where you can see what changes and make a link.'
+          : null;
+      setWorking(said);
+      if (said) window.setTimeout(() => setWorking(null), 8000);
     } catch (err) {
       setWorking(
         `Could not make the report: ${err instanceof Error ? err.message : 'unknown error'}`,
@@ -526,6 +536,7 @@ export function Sheet() {
       redo: () => canvas.redo(),
       help: () => setHelp(true),
       report: (ids) => void exportReport(ids),
+      keepReport: () => void exportReport(undefined, true),
     });
     rerender();
     setMenu({ x: clientX, y: clientY, sections });
@@ -843,6 +854,7 @@ export function Sheet() {
           connectionRelation,
           onConnectionRelationChange: setConnectionRelation,
           onExportReport: () => void exportReport(),
+          onKeepReport: () => void exportReport(undefined, true),
         }}
         dangling={tools.getDangling()}
         onRemoveDangling={() => tools.removeDangling()}

@@ -6,6 +6,7 @@ import { Board } from './pages/Board.tsx';
 import { Group } from './pages/Group.tsx';
 import { Groups } from './pages/Groups.tsx';
 import { Join } from './pages/Join.tsx';
+import { PublishedReport } from './pages/PublishedReport.tsx';
 import { SignIn } from './pages/SignIn.tsx';
 import { Sheet } from './sheet/Sheet.tsx';
 import { Shell } from './shell/Shell.tsx';
@@ -25,6 +26,9 @@ export function App() {
         {/* Public — the invitation link itself must work signed out
             (docs/phases/3-groups.md section 1). */}
         <Route path="/join/:id" element={<Join />} />
+        {/* Public — a published report is read without an account
+            (CONTEXT.md "Published report"); the token is the permission. */}
+        <Route path="/r/:token" element={<PublishedReport />} />
         {/* docs/ux/design.md §3: every signed-in route renders inside the
             persistent shell (rail, channel column, top bar) — a layout
             route, so navigating between groups/boards/sheets swaps only

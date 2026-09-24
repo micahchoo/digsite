@@ -14,3 +14,72 @@
   color: var(--text-primary);
   font-size: var(--text-sm);
 }
+
+/* The board's kept reports (board/BoardReports.tsx), in the sheets list's
+   own two-column rows; the link and the changes take a whole row. */
+.board-report-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.board-report-link {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.board-report-link input {
+  flex: 1;
+  min-width: 10em;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+.board-report-changes {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.board-report-changes p {
+  margin: 0 0 var(--space-1);
+}
+.board-report-changes ul {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+/* A published report (pages/PublishedReport.tsx): a bar, then the document
+   in its frame, the whole window. */
+.published-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-app);
+}
+.published-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.published-page iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+}
+.published-note {
+  max-width: 36rem;
+  margin: 15vh auto 0;
+  padding: 0 var(--space-4);
+  color: var(--text-secondary);
+}
+.published-note h1 {
+  color: var(--text-primary);
+  font-size: var(--text-xl);
+}

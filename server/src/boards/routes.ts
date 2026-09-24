@@ -200,6 +200,28 @@ async function originalPreview(
   });
 }
 
+/** The picture a sheet shows (GET /images/:id/preview): the original
+ * scaled, else its ladder cell; null when neither can be read. Also what a
+ * published report's link serves (reports/routes.ts), so a reader outside
+ * the group sees exactly the pixels a member does. */
+export async function previewOf(image: {
+  board_id: string;
+  sha256: string;
+  slot: number;
+}): Promise<Buffer | null> {
+  try {
+    const buf = await originalPreview(image.board_id, image.sha256);
+    if (buf) return buf;
+  } catch {
+    // an unreadable/corrupt original — fall through to the ladder
+  }
+  try {
+    return await ladderPreview(image.board_id, image.slot);
+  } catch {
+    return null;
+  }
+}
+
 /** The fallback when the original is gone (CONTEXT.md "Missing" — the
  * synthetic million-image board's own shape: ladder pages painted at
  * upload, no original ever kept): this image's S=128 ladder cell, cropped
@@ -1101,20 +1123,7 @@ export function registerBoardRoutes(router: Router) {
     const userId = requireAuth(ctx);
     const image = await imageForViewing(userId, param(ctx, 'id'));
     if (image.missing) return json(ctx.res, 404, { error: 'missing' });
-
-    let buf: Buffer | null = null;
-    try {
-      buf = await originalPreview(image.board_id, image.sha256);
-    } catch {
-      buf = null; // an unreadable/corrupt original — fall through to the ladder
-    }
-    if (!buf) {
-      try {
-        buf = await ladderPreview(image.board_id, image.slot);
-      } catch {
-        buf = null;
-      }
-    }
+    const buf = await previewOf(image);
     if (!buf) return json(ctx.res, 404, { error: 'no preview available' });
 
     ctx.res.writeHead(200, {

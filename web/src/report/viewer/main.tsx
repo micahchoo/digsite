@@ -45,15 +45,18 @@ function start() {
     cards.push({ key: article.dataset.key ?? '', article, slot });
   }
 
-  // Figure 1: the still of the sheet, or a new figure for the web.
+  // Figure 1: the still of the sheet, or a new figure when there is none
+  // (a board's web, or a published page, which carries no still).
   let figure = document.getElementById('sheet');
   if (!figure) {
     figure = document.createElement('figure');
     figure.className = 'sheet-figure';
-    figure.id = 'web';
+    figure.id = data.scene ? 'sheet' : 'web';
     const caption = document.createElement('figcaption');
-    caption.textContent =
-      'Figure 1. The web of this report’s connections, around the pictures they join.';
+    // A file has the still; a published page draws from the data alone.
+    caption.textContent = data.scene
+      ? `Figure 1. The sheet ${data.sheets[0]?.name ?? ''} as it stood at ${new Date(data.at).toISOString().slice(0, 16).replace('T', ' ')} UTC.`
+      : 'Figure 1. The web of this report’s connections, around the pictures they join.';
     figure.append(caption);
     document.getElementById('claims')?.before(figure);
   }

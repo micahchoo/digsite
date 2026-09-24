@@ -9,6 +9,7 @@
 // answers with a URL in a JSON body anywhere in this file today.
 
 import type { SortKey } from './board/sort.ts';
+import type { ReportScope } from './report/data.ts';
 import type { EdgeRow, Foreign, Reach, RegionRow } from './sheet/claims.ts';
 import type { Properties } from './sheet/elements.ts';
 import type { Aliases, TermKind, Vocabulary } from './sheet/sense.ts';
@@ -556,3 +557,19 @@ export type ListAccountsResponse = Account[];
 // POST /operator/accounts/:id/password: the account's sessions end.
 export type SetAccountPasswordRequest = { password: string };
 export type SetAccountPasswordResponse = { signedOut: true };
+
+// -- reports (CONTEXT.md "Kept report", "Published report") ---------------
+
+/** One kept report in a board's list. The link's token is never listed:
+ * it is shown once, to whoever made it. */
+export type KeptReport = {
+  id: string;
+  title: string;
+  scope: ReportScope;
+  claims: number;
+  by: string;
+  at: string;
+  /** Set while the report has a link. */
+  link: { publishedAt: string; expiresAt: string | null } | null;
+};
+export type ListReportsResponse = { reports: KeptReport[] };

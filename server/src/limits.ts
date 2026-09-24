@@ -12,7 +12,8 @@ export type LimitAction =
   | 'upload'
   | 'tus-create'
   | 'socket-connect'
-  | 'scene-emit';
+  | 'scene-emit'
+  | 'published';
 
 type LimitConfig = { capacity: number; windowMs: number };
 
@@ -28,6 +29,7 @@ const LIMITS: Record<LimitAction, LimitConfig> = {
     windowMs: 60_000,
   },
   'scene-emit': { capacity: env.RATE_SCENE_EMIT_PER_SEC, windowMs: 1_000 },
+  published: { capacity: env.RATE_PUBLISHED_PER_MIN, windowMs: 60_000 },
 };
 
 type Bucket = { tokens: number; updatedAt: number };

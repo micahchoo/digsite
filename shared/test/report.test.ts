@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { reportChanges } from '../src/report/changes.ts';
 import {
   REPORT_FORMAT,
   type ReportClaim,
@@ -286,5 +287,56 @@ describe('the document', () => {
     expect(withViewer).toContain(
       '<script type="module">console.log("<\\/script>")',
     );
+  });
+});
+
+describe('changes since a kept report', () => {
+  test('added, removed, changed by field, and the same', () => {
+    const kept = report([
+      connection('stays', 'a', 'b'),
+      connection('goes', 'b', 'c'),
+      connection('moves', 'a', 'c', { confidence: 'likely', note: 'x' }),
+      region('r', 'a', 'chimney'),
+    ]);
+    const moved = region('r', 'a', 'chimney');
+    const f = moved.ends[0]?.fraction;
+    if (f) f.fx += 0.00001; // float noise from a save, not a move
+    const now = report([
+      connection('stays', 'a', 'b', { properties: {} }),
+      connection('moves', 'a', 'c', { confidence: 'confirmed', note: 'x' }),
+      moved,
+      connection('new', 'c', 'a'),
+    ]);
+    const c = reportChanges(kept, now);
+    expect(c.added.map((x) => x.key)).toEqual(['new']);
+    expect(c.removed.map((x) => x.key)).toEqual(['goes']);
+    expect(c.changed.map((x) => [x.key, x.fields])).toEqual([
+      ['moves', ['confidence']],
+    ]);
+    expect(c.same).toBe(2);
+  });
+
+  test('a region moved, a reply added, an alias applied later', () => {
+    const kept = report([region('r', 'a', 'stack')]);
+    const now = report([
+      {
+        ...region('r', 'a', 'chimney'),
+        typed: 'stack',
+        replies: [{ name: 'Ada', at: '2026-09-23T10:00:00Z', text: 'Yes' }],
+        ends: [
+          {
+            imageId: 'a',
+            regionKey: 'r',
+            label: 'chimney',
+            fraction: { fx: 0.3, fy: 0.5, fw: 0.5, fh: 0.25 },
+          },
+        ],
+      },
+    ]);
+    expect(reportChanges(kept, now).changed[0]?.fields).toEqual([
+      'term',
+      'ends',
+      'replies',
+    ]);
   });
 });

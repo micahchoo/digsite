@@ -274,7 +274,7 @@ function claimSection(
 <h3><span class="n">${n.get(claim.key)}</span> ${title}${marks}</h3>
 <div class="ends">${ends}</div>
 ${facts.length ? `<dl>${facts.join('')}</dl>` : ''}${replies}
-${link ? `<p class="link"><a href="${e(link)}">Open this claim in digsite</a></p>` : ''}
+${link ? `<p class="link"><a href="${e(link)}" target="_blank" rel="noopener">Open this claim in digsite</a></p>` : ''}
 </article>`;
 }
 
@@ -493,7 +493,7 @@ export function renderDocument(data: ReportData, media: ReportMedia): string {
     : '<p class="meta">Nothing to report: the scope holds no claims.</p>';
 
   const kept = data.id
-    ? `Report <code>${e(data.id)}</code>, kept by digsite; this file is a copy of it.`
+    ? `Report <code>${e(data.id)}</code>, kept by digsite, which can say what has changed since.`
     : 'This file is the only copy of this report.';
   const read = data.sheets
     .filter((s) => s.savedAt)
@@ -513,7 +513,7 @@ ${defs(data, media, pics)}
 <header class="masthead">
 <p class="kicker">Report · ${e(data.board.name)}</p>
 <h1>${e(data.title)}</h1>
-<p class="meta">${e(scopeSentence(data))} Made by ${e(data.by)}, ${e(when(data.at))}.${home ? ` <a href="${e(home)}">Open in digsite</a>` : ''}</p>
+<p class="meta">${e(scopeSentence(data))} Made by ${e(data.by)}, ${e(when(data.at))}.${home ? ` <a href="${e(home)}" target="_blank" rel="noopener">Open in digsite</a>` : ''}</p>
 <ul class="summary">${summary}</ul>
 <p class="cite">${kept}${read ? ` Read from: ${read}.` : ''}</p>
 </header>

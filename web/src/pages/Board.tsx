@@ -115,6 +115,7 @@ import { modalOpen } from '../lib/modal.ts';
 import { noteOrderVersion, waitForOrderVersion } from '../lib/order-version.ts';
 import '../board/board.css';
 import type { GetBoardResponse } from '@digsite/shared/api';
+import { BoardReports } from '../board/BoardReports.tsx';
 import { Confirm } from '../components/Confirm.tsx';
 import {
   ErrorState,
@@ -1765,6 +1766,7 @@ export function Board() {
           sheets={sheets}
           onSelect={(sheetId) => void selectSheetImages(sheetId)}
         />
+        <BoardReports boardId={boardId} make={report.make} />
         <BoardAdministration board={board} />
       </div>
     ),

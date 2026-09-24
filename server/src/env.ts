@@ -114,6 +114,9 @@ export const env = {
     process.env.RATE_SOCKET_CONNECT_PER_MIN ?? 30,
   ),
   RATE_SCENE_EMIT_PER_SEC: Number(process.env.RATE_SCENE_EMIT_PER_SEC ?? 30),
+  // A published report's link (CONTEXT.md "Published report"), counted per
+  // link: one reading is the report and up to 150 pictures.
+  RATE_PUBLISHED_PER_MIN: Number(process.env.RATE_PUBLISHED_PER_MIN ?? 2_000),
   // boards/validate.ts: an upload's byte size cap and, read from its header
   // before decode, its pixel budget (width*height) — docs/phases/
   // 5-hardening.md section 2.

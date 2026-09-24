@@ -100,6 +100,9 @@ export async function removeBoard(boardId: string): Promise<void> {
       'board_selections',
       'board_property_indexes',
       'activity',
+      // Kept reports go with their board; a sheet's removal leaves them,
+      // since they record what the sheet said (0031_reports.sql).
+      'reports',
     ]) {
       await client.query(`DELETE FROM ${table} WHERE board_id = $1`, [boardId]);
     }

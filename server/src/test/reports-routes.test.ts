@@ -1,0 +1,259 @@
+// Kept and published reports over HTTP (CONTEXT.md "Kept report",
+// "Published report"): keep one, see what changed since, publish a link a
+// stranger reads with no session, revoke it, let it expire, remove it.
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import type { ReportChanges, ReportData } from '@digsite/shared';
+import { createHttpServer } from '../app.ts';
+import { pool } from '../db/pool.ts';
+import { saveSnapshotAndProject } from '../sheets/snapshot.ts';
+
+let server: Server;
+let base = '';
+
+beforeAll(async () => {
+  server = createHttpServer();
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+afterAll(
+  () =>
+    new Promise<void>((resolve) => {
+      server.closeAllConnections();
+      server.close(() => resolve());
+    }),
+);
+
+class Session {
+  cookie = '';
+  async req<T>(
+    method: string,
+    path: string,
+    json?: unknown,
+  ): Promise<{ status: number; json: T; type: string | null }> {
+    const headers: Record<string, string> = { Origin: base };
+    if (this.cookie) headers.cookie = this.cookie;
+    if (json !== undefined) headers['Content-Type'] = 'application/json';
+    const res = await fetch(`${base}${path}`, {
+      method,
+      headers,
+      body: json === undefined ? undefined : JSON.stringify(json),
+    });
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) this.cookie = setCookie.split(';')[0] ?? '';
+    const type = res.headers.get('content-type');
+    const text = type?.includes('json') ? await res.text() : '';
+    return {
+      status: res.status,
+      json: (text ? JSON.parse(text) : null) as T,
+      type,
+    };
+  }
+}
+
+async function signUp(email: string): Promise<Session> {
+  const s = new Session();
+  const up = await s.req('POST', '/api/auth/sign-up/email', {
+    email,
+    password: 'password1234',
+    name: email.split('@')[0],
+  });
+  if (up.status !== 200) throw new Error(`sign-up failed: ${up.status}`);
+  return s;
+}
+
+async function makeImage(boardId: string, slot: number): Promise<string> {
+  const { rows } = await pool.query(
+    `INSERT INTO images (board_id, slot, sha256, name, width, height, uploaded_by)
+     VALUES ($1,$2,$3,$4,200,200,'tester') RETURNING id`,
+    [boardId, slot, `sha-rr-${Date.now()}-${Math.random()}`, `img-${slot}`],
+  );
+  return rows[0].id;
+}
+
+let v = 0;
+const el = (id: string, custom: Record<string, unknown>, extra = {}) => ({
+  id,
+  version: ++v,
+  versionNonce: v,
+  type: 'rectangle',
+  isDeleted: false,
+  x: 0,
+  y: 0,
+  width: 200,
+  height: 200,
+  updated: Date.now(),
+  customData: custom,
+  ...extra,
+});
+const pic = (id: string, imageId: string, x: number) =>
+  el(id, { kind: 'image', imageId }, { type: 'image', x });
+const line = (id: string, from: string, to: string, confidence: string) =>
+  el(
+    id,
+    {
+      kind: 'edge',
+      relation: 'same place',
+      direction: 'forward',
+      properties: {},
+      confidence,
+      note: '',
+    },
+    {
+      type: 'arrow',
+      startBinding: { elementId: from },
+      endBinding: { elementId: to },
+    },
+  );
+
+describe('kept and published reports', () => {
+  test('keep, change, compare, publish, read as a stranger, revoke, expire, remove', async () => {
+    const ts = Date.now();
+    const owner = await signUp(`rr-owner-${ts}@example.test`);
+    const stranger = new Session();
+    const group = (
+      await owner.req<{ id: string }>('POST', '/groups', { name: `RR-${ts}` })
+    ).json;
+    const board = (
+      await owner.req<{ id: string }>('POST', `/groups/${group.id}/boards`, {
+        name: 'Chimneys',
+        open: true,
+      })
+    ).json;
+    const other = (
+      await owner.req<{ id: string }>('POST', `/groups/${group.id}/boards`, {
+        name: 'Elsewhere',
+        open: true,
+      })
+    ).json;
+    const [a, b, c] = [
+      await makeImage(board.id, 0),
+      await makeImage(board.id, 1),
+      await makeImage(board.id, 2),
+    ];
+    const sheet = (
+      await owner.req<{ id: string }>('POST', `/boards/${board.id}/sheets`, {
+        name: 'First pass',
+        imageIds: [a, b, c],
+      })
+    ).json;
+    await saveSnapshotAndProject(sheet.id, [
+      pic('pa', a, 0),
+      pic('pb', b, 300),
+      pic('pc', c, 600),
+      line('e1', 'pa', 'pb', 'likely'),
+    ]);
+
+    // Keep it.
+    const kept = await owner.req<ReportData>(
+      'POST',
+      `/boards/${board.id}/reports`,
+      { scope: { kind: 'sheet', sheetId: sheet.id }, title: 'For the museum' },
+    );
+    expect(kept.status).toBe(201);
+    expect(kept.json.id).toBeString();
+    expect(kept.json.title).toBe('For the museum');
+    const id = kept.json.id as string;
+    expect(
+      (await owner.req<ReportData>('GET', `/reports/${id}`)).json.claims.map(
+        (x) => x.elementId,
+      ),
+    ).toEqual(['e1']);
+    const listed = await owner.req<{
+      reports: { id: string; claims: number }[];
+    }>('GET', `/boards/${board.id}/reports`);
+    expect(listed.json.reports).toMatchObject([{ id, claims: 1, link: null }]);
+
+    // A sheet of another board cannot be kept here.
+    const wrong = await owner.req('POST', `/boards/${other.id}/reports`, {
+      scope: { kind: 'sheet', sheetId: sheet.id },
+    });
+    expect(wrong.status).toBe(400);
+
+    // The sheet moves on: the kept report does not, and says what changed.
+    await saveSnapshotAndProject(sheet.id, [
+      pic('pa', a, 0),
+      pic('pb', b, 300),
+      pic('pc', c, 600),
+      line('e1', 'pa', 'pb', 'confirmed'),
+      line('e2', 'pb', 'pc', 'likely'),
+    ]);
+    const changes = await owner.req<ReportChanges>(
+      'GET',
+      `/reports/${id}/changes`,
+    );
+    expect(changes.json.added.map((x) => x.elementId)).toEqual(['e2']);
+    expect(changes.json.changed.map((x) => x.fields)).toEqual([['confidence']]);
+    expect(
+      (await owner.req<ReportData>('GET', `/reports/${id}`)).json.claims[0]
+        ?.confidence,
+    ).toBe('likely');
+
+    // Publish: a stranger with no session reads it and its pictures only.
+    const link = await owner.req<{ token: string; expiresAt: string }>(
+      'POST',
+      `/reports/${id}/link`,
+      { days: 7 },
+    );
+    expect(link.status).toBe(200);
+    expect(link.json.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Date.parse(link.json.expiresAt)).toBeGreaterThan(Date.now());
+    const token = link.json.token;
+    const read = await stranger.req<ReportData>('GET', `/published/${token}`);
+    expect(read.status).toBe(200);
+    expect(read.json.id).toBe(id);
+    const picture = await stranger.req(
+      'GET',
+      `/published/${token}/images/${a}`,
+    );
+    expect(picture.status).toBe(200);
+    expect(picture.type).toBe('image/png');
+    const notShown = await makeImage(board.id, 3);
+    expect(
+      (await stranger.req('GET', `/published/${token}/images/${notShown}`))
+        .status,
+    ).toBe(404);
+    expect((await stranger.req('GET', `/reports/${id}`)).status).toBe(401);
+
+    // A bad number of days is refused; a new link replaces the old one.
+    expect(
+      (await owner.req('POST', `/reports/${id}/link`, { days: 0 })).status,
+    ).toBe(400);
+    const again = await owner.req<{ token: string }>(
+      'POST',
+      `/reports/${id}/link`,
+      {},
+    );
+    expect((await stranger.req('GET', `/published/${token}`)).status).toBe(404);
+    const second = again.json.token;
+    expect((await stranger.req('GET', `/published/${second}`)).status).toBe(
+      200,
+    );
+
+    // Expired reads as unknown; so does revoked.
+    await pool.query(
+      `UPDATE reports SET expires_at = now() - interval '1 minute' WHERE id = $1`,
+      [id],
+    );
+    expect((await stranger.req('GET', `/published/${second}`)).status).toBe(
+      404,
+    );
+    const third = (
+      await owner.req<{ token: string }>('POST', `/reports/${id}/link`, {
+        days: null,
+      })
+    ).json.token;
+    expect((await stranger.req('GET', `/published/${third}`)).status).toBe(200);
+    expect((await owner.req('DELETE', `/reports/${id}/link`)).status).toBe(200);
+    expect((await stranger.req('GET', `/published/${third}`)).status).toBe(404);
+
+    // Removed with the board.
+    expect((await owner.req('DELETE', `/boards/${board.id}`)).status).toBe(200);
+    const { rows } = await pool.query('SELECT 1 FROM reports WHERE id = $1', [
+      id,
+    ]);
+    expect(rows.length).toBe(0);
+  });
+});

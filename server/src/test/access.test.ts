@@ -23,6 +23,9 @@ import {
   groupForManagingMembers,
   groupForViewing,
   imageForDeleting,
+  reportForManaging,
+  reportForPublishing,
+  reportForViewing,
   sheetForDeleting,
   sheetForDiscussing,
   sheetForEditing,
@@ -162,7 +165,7 @@ describe('access matrix', () => {
 
   afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
-  test('35 cells (5 users x 7 intents) match the groups prototype contract, plus boardsForListing', async () => {
+  test('every intent cell (5 users) matches the groups prototype contract, plus boardsForListing', async () => {
     const ts = Date.now();
 
     const owner = await signUpOrIn(`owner-${ts}@example.test`, 'owner');
@@ -260,6 +263,14 @@ describe('access matrix', () => {
     expect(sPrivate.status).toBe(200);
     const sPrivateId = withId(sPrivate.json).id;
 
+    // A kept report on B-private, made by `listed`, who may read it but
+    // does not manage the board (CONTEXT.md "Kept report").
+    const kept = await listed.session.post(`/boards/${bPrivateId}/reports`, {
+      scope: { kind: 'sheet', sheetId: sPrivateId },
+    });
+    expect(kept.status).toBe(201);
+    const reportId = withId(kept.json).id;
+
     const g2Id = withId(g2.json).id;
     const b2Open = await outsider.session.post(`/groups/${g2Id}/boards`, {
       name: 'B2-open',
@@ -306,6 +317,12 @@ describe('access matrix', () => {
       // A reply says something about a claim, never changes one: exactly the
       // viewers of the board, the same cells as sheetForEditing(S-private).
       ['sheetForDiscussing(S-private)', sheetForDiscussing, sPrivateId],
+      // A kept report is read by exactly the board's viewers; removed by
+      // its maker or the board's manager; published only by the manager,
+      // since a link shows the pictures to anyone holding it.
+      ['reportForViewing(R on B-private)', reportForViewing, reportId],
+      ['reportForManaging(R on B-private)', reportForManaging, reportId],
+      ['reportForPublishing(R on B-private)', reportForPublishing, reportId],
     ];
 
     const expected: Record<string, boolean[]> = {
@@ -318,6 +335,9 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
+        false,
+        false,
         false,
         false,
         false,
@@ -338,6 +358,9 @@ describe('access matrix', () => {
         true,
         true,
         true,
+        true,
+        true,
+        true,
       ],
       member: [
         true,
@@ -345,6 +368,9 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
+        false,
+        false,
         false,
         false,
         false,
@@ -368,6 +394,9 @@ describe('access matrix', () => {
         false,
         true,
         true,
+        true,
+        true,
+        false,
       ],
       outsider: [
         false,
@@ -377,6 +406,9 @@ describe('access matrix', () => {
         false,
         false,
         true,
+        false,
+        false,
+        false,
         false,
         false,
         false,

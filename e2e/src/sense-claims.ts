@@ -1063,6 +1063,62 @@ async function main(): Promise<void> {
     );
     await M.open(firstPass.id);
 
+    // -- 13c. Keep it; see what changed; a link a stranger reads ------------
+    const [keptFile] = await Promise.all([
+      m.waitForEvent('download'),
+      m.getByTestId('keep-report').click(),
+    ]);
+    const keptPath = `${SHOTS}13c-kept.html`;
+    await keptFile.saveAs(keptPath);
+    const keptHtml = await Bun.file(keptPath).text();
+    const keptId = keptHtml.match(
+      /Report <code>([0-9a-f-]{36})<\/code>, kept by digsite/,
+    )?.[1];
+    assert(keptId, 'the kept report file does not name its id');
+    await m.goto(`${WEB}/b/${field.id}`);
+    const keptRow = m
+      .getByTestId('report-list-item')
+      .filter({ has: m.getByTestId(`report-download-${keptId}`) });
+    await keptRow.waitFor({ timeout: 20_000 });
+    await m.getByTestId(`report-changes-${keptId}`).click();
+    const changesText = await keptRow.getByTestId('report-changes').innerText();
+    assert(
+      /Nothing has changed|the same/.test(changesText),
+      `a report kept a moment ago reads: ${changesText}`,
+    );
+    await m.getByTestId(`report-publish-${keptId}`).click();
+    const linkBox = m.getByTestId(`report-link-${keptId}`);
+    await linkBox.waitFor({ timeout: 10_000 });
+    const link = await linkBox.inputValue();
+    assert(/\/r\/[A-Za-z0-9_-]{43}$/.test(link), `the link reads ${link}`);
+    // A stranger: a new browser context, no cookies, no account.
+    const strangerBrowser = m.context().browser();
+    assert(strangerBrowser, 'no browser to open a stranger in');
+    const strangerContext = await strangerBrowser.newContext();
+    const stranger = await strangerContext.newPage();
+    await stranger.goto(link);
+    await stranger.getByTestId('published-report').waitFor({ timeout: 20_000 });
+    const frame = stranger.frameLocator('.published-page iframe');
+    await frame.locator('html[data-viewer="on"]').waitFor({ timeout: 15_000 });
+    await frame.locator('.rv-host canvas').first().waitFor();
+    const strangerClaims = await frame.locator('article.claim').count();
+    await stranger.screenshot({ path: `${SHOTS}13c-published.png` });
+    assert(
+      strangerClaims >= 3,
+      `a stranger reads ${strangerClaims} claims through the link`,
+    );
+    await m.getByTestId(`report-revoke-${keptId}`).click();
+    await m
+      .getByTestId(`report-publish-${keptId}`)
+      .waitFor({ timeout: 10_000 });
+    await stranger.reload();
+    await stranger.getByTestId('published-gone').waitFor({ timeout: 15_000 });
+    await strangerContext.close();
+    pass(
+      '13c. "Keep a report" keeps it with an id; the board lists it and says nothing changed; its link opens the live report for a stranger with no account, and stops when stopped',
+    );
+    await M.open(firstPass.id);
+
     // -- 14. Arrow keys walk from picture to picture; a reader hears where ---
     await m.evaluate(
       (id) => (window as unknown as SheetWindow).__digsite.select(id),
