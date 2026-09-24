@@ -67,11 +67,7 @@ import {
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { BoardAdministration } from '../board/BoardAdministration.tsx';
 import { BoardSheets, useBoardSheets } from '../board/BoardSheets.tsx';
-import {
-  ContextMenu,
-  type MenuItem,
-  type MenuSection,
-} from '../board/ContextMenu.tsx';
+import { ContextMenu, type MenuSection } from '../board/ContextMenu.tsx';
 import { Copies } from '../board/Copies.tsx';
 import { CopyToBoard } from '../board/CopyToBoard.tsx';
 import { Detail } from '../board/Detail.tsx';
@@ -84,6 +80,7 @@ import { Tray } from '../board/Tray.tsx';
 import { UploadActivity } from '../board/UploadActivity.tsx';
 import { WebView } from '../board/WebView.tsx';
 import { ZoomControl, zoomIn, zoomOut } from '../board/ZoomControl.tsx';
+import { boardMenu } from '../board/board-menu.ts';
 import {
   type BoardCamera,
   MAX_TILE_ZOOM,
@@ -189,9 +186,8 @@ function storageKey(boardId: string): string {
   return `digsite:sort:${boardId}`;
 }
 
-/** The server's cap on one download, and how many ids go in its URL
- * before the stored selection stands in for them. */
-const DOWNLOAD_MAX = 500;
+/** How many ids go in a download's URL before the stored selection stands
+ * in for them. */
 const DOWNLOAD_BY_IDS = 150;
 const NO_SECTIONS: Section[] = [];
 const NO_BITMAPS: ReadonlyMap<string, ImageBitmap> = new Map();
@@ -1471,128 +1467,54 @@ export function Board() {
     return vp.unproject([x, y]) as [number, number];
   }
 
-  function buildEmptyCanvasMenu(): MenuSection[] {
-    const fitGroup: MenuItem[] = [
-      { label: 'Fit everything', onSelect: fitView },
-    ];
-    if (selection.imageIds.length) {
-      fitGroup.push({
-        label: 'Zoom to the selection',
-        onSelect: zoomToSelection,
-      });
-    }
-    const matchGroup: MenuItem[] = [
-      {
-        label: findResult
-          ? `Select all matches (${Math.min(findResult.count, findResult.imageIds.length)})`
-          : 'Find and filter…',
-        onSelect: findResult ? selectAllMatches : () => setFindOpen(true),
-        disabled: findResult !== null && findResult.imageIds.length === 0,
-      },
-    ];
-    if (selection.imageIds.length) {
-      matchGroup.push({ label: 'Clear selection', onSelect: clearSelection });
-      matchGroup.push(...copyItems(selection.imageIds));
-    }
-    const uploadGroup: MenuItem[] = [
-      { label: 'Upload images', onSelect: () => fileInputRef.current?.click() },
-      {
-        label: 'Import a folder from the server…',
-        testId: 'board-menu-folder-import',
-        onSelect: () => setFolderImport(true),
-      },
-    ];
-    const undoGroup: MenuItem[] = [
-      {
-        label: 'Undo selection',
-        onSelect: () => selection.undo(),
-        disabled: !selection.canUndo,
+  /** The board's menu (board/board-menu.ts decides; these do). */
+  function menuFor(target: { image: BoardImage; rank: number } | null) {
+    const section = target
+      ? sectionsRef.current.find(
+          (s) => target.rank >= s.fromRank && target.rank <= s.toRank,
+        )
+      : undefined;
+    return boardMenu(
+      target && {
+        imageId: target.image.id,
+        section: section ? { label: section.label } : null,
       },
       {
-        label: 'Redo selection',
-        onSelect: () => selection.redo(),
-        disabled: !selection.canRedo,
-      },
-    ];
-    return [fitGroup, matchGroup, uploadGroup, undoGroup];
-  }
-
-  function buildImageMenu(img: BoardImage, rank: number): MenuSection[] {
-    const inSelection = selection.imageIds.includes(img.id);
-    const actingIds =
-      inSelection && selection.imageIds.length > 1
-        ? selection.imageIds
-        : [img.id];
-    const section = sectionsRef.current.find(
-      (s) => rank >= s.fromRank && rank <= s.toRank,
-    );
-    const exploreGroup: MenuItem[] = [
-      {
-        label: 'Explore connections',
-        onSelect: () => setFocusedImageId(img.id),
+        selectedIds: selection.imageIds,
+        find: findResult
+          ? { count: findResult.count, shown: findResult.imageIds.length }
+          : null,
+        canUndo: selection.canUndo,
+        canRedo: selection.canRedo,
       },
       {
-        label: 'Select neighbourhood…',
-        onSelect: () => setFocusedImageId(img.id),
-      },
-    ];
-    if (section) {
-      exploreGroup.push({
-        label: `Select this section ("${section.label}")`,
-        onSelect: () => sectionSelect(section),
-      });
-    }
-    const sheetGroup: MenuItem[] = [
-      {
-        label: 'Start a sheet',
-        onSelect: () => {
-          selection.replace(actingIds);
+        fit: fitView,
+        zoomToSelection,
+        selectAllMatches,
+        openFind: () => setFindOpen(true),
+        clearSelection,
+        upload: () => fileInputRef.current?.click(),
+        importFolder: () => setFolderImport(true),
+        undo: () => selection.undo(),
+        redo: () => selection.redo(),
+        explore: (imageId) => setFocusedImageId(imageId),
+        selectSection: () => section && sectionSelect(section),
+        startSheet: (ids) => {
+          selection.replace([...ids]);
           setStartSheetRequested(true);
         },
-      },
-      {
-        label: 'Add to sheet…',
-        onSelect: () => {
-          selection.replace(actingIds);
+        addToSheet: (ids) => {
+          selection.replace([...ids]);
           setAddSheetRequested(true);
         },
+        openImage: (imageId) => window.open(api.originalUrl(imageId), '_blank'),
+        properties: (imageId) => selection.replace([imageId]),
+        copyTo: (ids) => setCopying([...ids]),
+        download,
       },
-    ];
-    const openGroup: MenuItem[] = [
-      {
-        label: 'Open image',
-        onSelect: () => window.open(api.originalUrl(img.id), '_blank'),
-      },
-    ];
-    const propsGroup: MenuItem[] = [
-      { label: 'Properties', onSelect: () => selection.replace([img.id]) },
-    ];
-    // A picture that is part of the selection stands for all of it.
-    const copyGroup = copyItems(
-      selection.imageIds.includes(img.id) ? selection.imageIds : [img.id],
     );
-    return [exploreGroup, sheetGroup, openGroup, propsGroup, copyGroup];
   }
 
-  // -- copy to another board, and download (POST …/images/copy, GET
-  // …/images/download) ---------------------------------------------------
-  function copyItems(ids: readonly string[]): MenuItem[] {
-    const many = ids.length > 1 ? ` ${ids.length} pictures` : '';
-    return [
-      {
-        label: `Copy${many} to another board…`,
-        testId: 'board-menu-copy',
-        onSelect: () => setCopying([...ids]),
-      },
-      {
-        label: `Download${many}`,
-        testId: 'board-menu-download',
-        onSelect: () => download(ids),
-        disabled: ids.length > DOWNLOAD_MAX,
-        disabledReason: `At most ${DOWNLOAD_MAX} pictures in one download.`,
-      },
-    ];
-  }
   /** A plain link, so the browser keeps its own download: the ids while
    * they fit a URL, else the stored selection they came from. */
   function download(ids: readonly string[]) {
@@ -1606,7 +1528,7 @@ export function Board() {
   }
 
   function openActionsMenu(x: number, y: number) {
-    setContextMenu({ x, y, sections: buildEmptyCanvasMenu() });
+    setContextMenu({ x, y, sections: menuFor(null) });
   }
 
   function clearLongPress() {
@@ -1628,8 +1550,11 @@ export function Board() {
       if (r >= 0 && r < b.imageCount) rank = r;
     }
     const img = rank >= 0 ? await resolveImageAtRank(rank) : null;
-    const sections2 = img ? buildImageMenu(img, rank) : buildEmptyCanvasMenu();
-    setContextMenu({ x: clientX, y: clientY, sections: sections2 });
+    setContextMenu({
+      x: clientX,
+      y: clientY,
+      sections: menuFor(img ? { image: img, rank } : null),
+    });
   }
 
   // -- detail ------------------------------------------------------------------
