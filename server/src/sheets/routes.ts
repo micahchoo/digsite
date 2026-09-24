@@ -21,7 +21,6 @@ import type {
   UpdateSheetRequest,
   UpdateSheetResponse,
 } from '@digsite/shared/api';
-import type { ForeignEdge, ForeignRegion } from '@digsite/shared/sheet/claims';
 // Sheets (CONTEXT.md "Sheet", "Element", "Claim", "Foreign"). See
 // docs/design.md "Routes / Sheets".
 import {
@@ -46,6 +45,7 @@ import {
   readJsonBody,
   requireAuth,
 } from '../http.ts';
+import { foreignOn, sheetsShowing } from './foreign.ts';
 import { neighbourhoodFrom, relationWeb } from './neighbourhood.ts';
 import { participantsOf } from './participants.ts';
 import { reachOf } from './reach.ts';
@@ -535,27 +535,14 @@ export function registerSheetRoutes(router: Router) {
   });
 
   // GET /sheets/:id/footprint (docs/phases/3-groups.md section 4): how many
-  // OTHER sheets hold an image carrying a claim (region or edge) this sheet
-  // made — the delete confirmation's count. A claim counts as held the same
-  // way GET /sheets/:id/foreign does: a region by its image, an edge by
-  // BOTH endpoint images.
+  // other sheets show a claim this sheet made, the delete confirmation's
+  // count (foreign.ts#sheetsShowing).
   router.get('/sheets/:id/footprint', async (ctx) => {
     const userId = requireAuth(ctx);
     const sheet = await sheetForDeleting(userId, param(ctx, 'id'));
-    const { rows } = await pool.query(
-      `SELECT COUNT(DISTINCT other_sheet) AS count FROM (
-         SELECT r.sheet_id AS other_sheet FROM regions r
-         WHERE r.sheet_id != $1
-           AND r.image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)
-         UNION
-         SELECT e.sheet_id AS other_sheet FROM edges e
-         WHERE e.sheet_id != $1
-           AND e.src_image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)
-           AND e.dst_image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)
-       ) other_sheets`,
-      [sheet.id],
-    );
-    const response: SheetFootprint = { foreignViews: Number(rows[0].count) };
+    const response: SheetFootprint = {
+      foreignViews: await sheetsShowing(sheet.id),
+    };
     json(ctx.res, 200, response);
   });
 
@@ -584,30 +571,7 @@ export function registerSheetRoutes(router: Router) {
     const userId = requireAuth(ctx);
     const sheet = await sheetForEditing(userId, param(ctx, 'id'));
 
-    const { rows: regionRows } = await pool.query(
-      `SELECT r.*, s.name AS sheet_name FROM regions r
-       JOIN sheets s ON s.id = r.sheet_id
-       WHERE r.sheet_id != $1
-         AND r.image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)`,
-      [sheet.id],
-    );
-    const { rows: edgeRows } = await pool.query(
-      `SELECT e.*, s.name AS sheet_name FROM edges e
-       JOIN sheets s ON s.id = e.sheet_id
-       WHERE e.sheet_id != $1
-         AND e.src_image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)
-         AND e.dst_image_id IN (SELECT image_id FROM sheet_images WHERE sheet_id = $1)`,
-      [sheet.id],
-    );
-
-    const regions: ForeignRegion[] = regionRows.map((r) => ({
-      ...toRegionRow(r),
-      sheetName: r.sheet_name,
-    }));
-    const edges: ForeignEdge[] = edgeRows.map((e) => ({
-      ...toEdgeRow(e),
-      sheetName: e.sheet_name,
-    }));
+    const { regions, edges } = await foreignOn(sheet.id);
     const response: GetSheetForeignResponse = { regions, edges };
     json(ctx.res, 200, response);
   });
