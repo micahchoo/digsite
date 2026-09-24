@@ -112,7 +112,7 @@ function typing(): boolean {
 
 export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
   function NativeCanvas(
-    { files, tool, onChange, dimRelations, captions },
+    { files, tool, onChange, dimRelations, captions, readOnly = false },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -136,6 +136,13 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
 
     const toolRef = useRef(tool);
     toolRef.current = tool;
+    const readOnlyRef = useRef(readOnly);
+    readOnlyRef.current = readOnly;
+    /** What a pointer may do now: the tool, narrowed for a reader. */
+    const modeNow = useCallback((): Mode => {
+      if (toolRef.current === 'pan') return 'pan';
+      return readOnlyRef.current ? 'read' : 'select';
+    }, []);
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
 
@@ -289,7 +296,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
                 GRIP_REACH_PX / viewportRef.current.zoom,
               )
             : null;
-        const mode: Mode = toolRef.current === 'pan' ? 'pan' : 'select';
+        const mode = modeNow();
         const intent = pressIntent({
           mode,
           forcePan,
@@ -313,7 +320,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           target,
         };
       },
-      [canvasPoint, selectedRegionRect, spatialIndex],
+      [canvasPoint, modeNow, selectedRegionRect, spatialIndex],
     );
 
     const beginDrag = useCallback(
@@ -371,11 +378,11 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
       (worldPt: Point) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const mode: Mode = toolRef.current === 'pan' ? 'pan' : 'select';
+        const mode = modeNow();
         const drag = dragRef.current;
         let target: Target = 'empty';
         let grip: string | null = null;
-        if (!drag && mode === 'select') {
+        if (!drag && mode !== 'pan') {
           const hit = hitAt(
             worldPt,
             sceneRef.current.elements(),
@@ -400,7 +407,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         });
         if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
       },
-      [selectedRegionRect, spatialIndex],
+      [modeNow, selectedRegionRect, spatialIndex],
     );
 
     const onPointerMove = useCallback(
@@ -415,7 +422,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
             return;
           }
           if (!movedEnough(pending.screenStart, screenPt)) return;
-          const mode: Mode = toolRef.current === 'pan' ? 'pan' : 'select';
+          const mode = modeNow();
           dragRef.current = beginDrag(pending, mode);
           showCursor(worldPt);
         }
@@ -458,7 +465,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           scheduleRender();
         }
       },
-      [beginDrag, canvasPoint, scheduleRender, emitChange, showCursor],
+      [beginDrag, canvasPoint, modeNow, scheduleRender, emitChange, showCursor],
     );
 
     const onPointerUp = useCallback(
@@ -552,6 +559,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           spaceHeldRef.current = true;
           return;
         }
+        if (readOnlyRef.current) return;
         const meta = e.metaKey || e.ctrlKey;
         if (meta && e.key.toLowerCase() === 'z') {
           e.preventDefault();

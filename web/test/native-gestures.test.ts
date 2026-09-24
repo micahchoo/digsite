@@ -30,7 +30,7 @@ const drag = (over: Partial<DragInput> = {}): DragInput => ({
   mode: 'select',
   ...over,
 });
-const MODES: Mode[] = ['select', 'pan'];
+const MODES: Mode[] = ['select', 'pan', 'read'];
 
 describe('movedEnough', () => {
   test('holds a press still inside the slack and releases it at the threshold', () => {
@@ -114,6 +114,29 @@ describe('dragBecomes', () => {
         }
       }
     }
+  });
+});
+
+describe('read: a reader selects and pans, and edits nothing', () => {
+  test('no grip, no move: every drag pans', () => {
+    expect(
+      pressIntent({ mode: 'read', forcePan: false, button: 0, onGrip: true }),
+    ).toBe('plain');
+    for (const over of ['image', 'region', 'edge', 'empty'] as const)
+      expect(dragBecomes({ mode: 'read', over, forcePan: false })).toBe('pan');
+  });
+
+  test('the cursor points at what a click would select', () => {
+    for (const target of ['image', 'region', 'edge'] as const)
+      expect(
+        cursorFor({
+          mode: 'read',
+          forcePan: false,
+          dragging: null,
+          target,
+          grip: null,
+        }),
+      ).toBe('pointer');
   });
 });
 

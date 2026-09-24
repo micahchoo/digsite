@@ -5,5 +5,12 @@
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["bun", "vite/client"]
   },
-  "include": ["src", "test", "stub", "scripts", "vite.config.ts"]
+  "include": [
+    "src",
+    "test",
+    "stub",
+    "scripts",
+    "vite.config.ts",
+    "vite.viewer.config.ts"
+  ]
 }

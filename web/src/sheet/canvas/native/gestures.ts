@@ -1,7 +1,10 @@
 // Ported from research/image-graph/src/gestures.ts: "what a pointer is
 // asking for" as one pure decision, no DOM, no camera, no scene. DrawLayer
 // routes its authoring-tool fallback gestures through the same decisions.
-export type Mode = 'select' | 'pan';
+/** `read` is Select with nothing that edits: a click or a Shift-band
+ * selects, every drag pans, no grip is offered. A report's reader
+ * (web/src/report/) gets it; so would anyone else who may only look. */
+export type Mode = 'select' | 'pan' | 'read';
 export type Target = 'image' | 'region' | 'edge' | 'empty';
 
 /** Screen pixels a pointer must travel before a press becomes a drag rather
@@ -71,7 +74,7 @@ export interface DragInput {
  * nothing). Shift-marquee is decided before this function is called.
  */
 export function dragBecomes(input: DragInput): 'pan' | 'move' {
-  if (input.forcePan || input.mode === 'pan') return 'pan';
+  if (input.forcePan || input.mode !== 'select') return 'pan';
   if (input.over === 'image' || input.over === 'region') return 'move';
   return 'pan';
 }
@@ -93,7 +96,8 @@ export function cursorFor(input: {
     return GRIP_CURSOR[input.grip ?? ''] ?? 'nwse-resize';
   if (input.mode === 'pan' || input.forcePan) return 'grab';
   if (input.target === 'edge') return 'pointer';
-  if (input.target === 'image' || input.target === 'region') return 'move';
+  if (input.target === 'image' || input.target === 'region')
+    return input.mode === 'read' ? 'pointer' : 'move';
   return 'default';
 }
 

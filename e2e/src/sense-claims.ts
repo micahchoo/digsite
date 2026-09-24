@@ -1026,14 +1026,40 @@ async function main(): Promise<void> {
     await m.goto(`${WEB}/s/${firstPass.id}?claim=${e45r.id}`);
     await m.getByTestId('inspector-evidence').waitFor({ timeout: 20_000 });
     const reportPage = await m.context().newPage();
+    const reportErrors: string[] = [];
+    reportPage.on('pageerror', (err) => reportErrors.push(err.message));
     await reportPage.goto(`file://${reportPath}`);
     await reportPage.screenshot({
       path: `${SHOTS}13-report.png`,
       fullPage: false,
     });
+    // The file's viewer: the live sheet in figure 1, and each claim's
+    // Compare and Show, working with no server behind them.
+    await reportPage.waitForSelector('html[data-viewer="on"]', {
+      timeout: 10_000,
+    });
+    await reportPage.locator('.rv-host canvas').first().waitFor();
+    const firstCard = reportPage.locator('article.claim').first();
+    await firstCard.getByTestId('report-compare').click();
+    await reportPage.locator('.rv-host dialog.compare[open]').waitFor();
+    await reportPage.screenshot({ path: `${SHOTS}13-report-compare.png` });
+    await reportPage.keyboard.press('Escape');
+    await reportPage
+      .locator('.rv-host dialog.compare[open]')
+      .waitFor({ state: 'detached' });
+    await firstCard.getByTestId('report-show').click();
+    await reportPage.waitForFunction(() =>
+      document.querySelector('article.claim')?.classList.contains('is-focus'),
+    );
+    const status = await reportPage.getByTestId('report-status').innerText();
+    assert(
+      status.startsWith('Chosen: 1.') && reportErrors.length === 0,
+      `the report's viewer did not show its first claim (${status}; ${reportErrors.join('; ')})`,
+    );
+    await reportPage.screenshot({ path: `${SHOTS}13-report-live.png` });
     await reportPage.close();
     pass(
-      '13. "Export a report" downloads one file with every claim, its reasons, authors and pictures; a claim link opens the sheet on it',
+      '13. "Export a report" downloads one file with every claim, its reasons, authors and pictures; in it the sheet is live, Compare opens, Show frames a claim; a claim link opens the sheet on it',
     );
     await M.open(firstPass.id);
 

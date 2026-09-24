@@ -3,7 +3,12 @@
 // graph's hop rings). Deterministic, so walking back to a picture shows
 // the same web, and a picture sits near the ones that led to it: each ring
 // is ordered by the mean angle of its neighbours on the ring inside it.
-import type { EdgeRow } from '@digsite/shared';
+/** All the layout reads of a claim: which two pictures it joins. A board
+ * row and a report's claim both are one. */
+export type LayoutEdge = {
+  source: { imageId: string };
+  target: { imageId: string };
+};
 
 export interface Placed {
   id: string;
@@ -20,7 +25,7 @@ export const RING = 190;
 export function hopsFrom(
   roots: readonly string[],
   ids: readonly string[],
-  edges: readonly EdgeRow[],
+  edges: readonly LayoutEdge[],
 ): Map<string, number> {
   const around = new Map<string, string[]>();
   for (const e of edges) {
@@ -57,7 +62,7 @@ export function hopsFrom(
 export function ringLayout(
   roots: readonly string[],
   ids: readonly string[],
-  edges: readonly EdgeRow[],
+  edges: readonly LayoutEdge[],
 ): Placed[] {
   const parts = components(ids, edges);
   const rooted = new Set(roots);
@@ -94,7 +99,7 @@ export function ringLayout(
 /** The parts of the web no edge joins to each other. */
 function components(
   ids: readonly string[],
-  edges: readonly EdgeRow[],
+  edges: readonly LayoutEdge[],
 ): string[][] {
   const known = new Set(ids);
   const around = new Map<string, string[]>();
@@ -127,7 +132,7 @@ function components(
 }
 
 /** The picture with the most edges; ties by id, so the layout is stable. */
-function busiest(ids: readonly string[], edges: readonly EdgeRow[]): string {
+function busiest(ids: readonly string[], edges: readonly LayoutEdge[]): string {
   const degree = new Map<string, number>();
   for (const e of edges)
     for (const id of [e.source.imageId, e.target.imageId])
@@ -141,7 +146,7 @@ function busiest(ids: readonly string[], edges: readonly EdgeRow[]): string {
 function ringsOf(
   roots: readonly string[],
   ids: readonly string[],
-  edges: readonly EdgeRow[],
+  edges: readonly LayoutEdge[],
 ): Placed[] {
   const hops = hopsFrom(roots, ids, edges);
   const rings = new Map<number, string[]>();

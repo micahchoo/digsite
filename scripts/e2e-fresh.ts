@@ -214,6 +214,10 @@ async function main() {
     });
 
     // -- web --------------------------------------------------------------------
+    // The report viewer is its own build (web/vite.viewer.config.ts); the
+    // dev server only serves it, so a report made here carries it.
+    log('building the report viewer');
+    run(['bun', 'run', 'build:viewer'], { cwd: WEB_DIR });
     log('starting web');
     webProc = Bun.spawn(
       ['bun', 'run', 'vite', '--port', String(webPort), '--strictPort'],

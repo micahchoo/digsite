@@ -120,7 +120,7 @@ function defs(data: ReportData, media: ReportMedia, pics: Pictures): string {
     .map((image) => {
       const ref = pics.get(image.id)?.ref;
       if (!ref) return '';
-      return `<image id="${ref}" href="${e(safeUrl(media.pictures[image.id] ?? ''))}" width="${image.width}" height="${image.height}" preserveAspectRatio="none"/>`;
+      return `<image id="${ref}" data-image-id="${e(image.id)}" href="${e(safeUrl(media.pictures[image.id] ?? ''))}" width="${image.width}" height="${image.height}" preserveAspectRatio="none"/>`;
     })
     .join('');
   return `<svg class="defs" width="0" height="0" aria-hidden="true"><defs>${images}</defs></svg>`;
@@ -400,6 +400,12 @@ dt{color:var(--text-secondary)}dd{margin:0;white-space:pre-wrap;overflow-wrap:an
 .replies p{margin:2px 0 var(--space-2);white-space:pre-wrap}
 time{color:var(--text-secondary);font-size:var(--text-xs)}
 .link{margin:var(--space-3) 0 0;font-size:var(--text-sm)}
+.rv-actions{display:flex;flex-wrap:wrap;gap:var(--space-2);margin:var(--space-3) 0 0}
+.rv-actions:empty{display:none}
+.rv-actions button{min-height:32px;padding:0 var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-m);background:var(--surface-raised);color:var(--text-primary);font:inherit;font-size:var(--text-sm);cursor:pointer}
+.rv-actions button:hover{border-color:var(--accent)}
+.claim.is-focus{outline:2px solid var(--accent);outline-offset:2px}
+.sheet-figure.is-live>img{display:none}
 .picture{display:grid;grid-template-columns:140px 1fr;gap:var(--space-4)}
 .picture h3{font-size:var(--text-md)}
 .picture dl{margin:0;font-size:var(--text-sm)}
@@ -413,6 +419,9 @@ footer{margin-top:var(--space-10);color:var(--text-faint);font-size:var(--text-x
   nav.contents{break-after:page}
   h2{break-after:avoid}
   .link a::after{content:" (" attr(href) ")";font-size:8pt;color:#555;overflow-wrap:anywhere}
+  .rv-host,.rv-actions{display:none}
+  .sheet-figure.is-live>img{display:block}
+  .claim.is-focus{outline:none}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 `;

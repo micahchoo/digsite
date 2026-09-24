@@ -8,7 +8,8 @@
       "data",
       ".cache",
       "docs/ux/scripts",
-      "docs/ux/design/src"
+      "docs/ux/design/src",
+      "web/public/report-viewer.js"
     ]
   },
   "formatter": {

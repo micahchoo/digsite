@@ -1,0 +1,53 @@
+/* The report viewer inside its shadow root (main.tsx). The app's style.css
+   and board.css come first; these place the figure. */
+.rv-root {
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  line-height: 1.45;
+}
+.rv-sheet {
+  position: relative;
+  height: min(72vh, 680px);
+  min-height: 320px;
+  overflow: hidden;
+  border-radius: var(--radius-m);
+  background: var(--surface-canvas);
+}
+.rv-canvas {
+  position: absolute;
+  inset: 0;
+}
+.rv-canvas > * {
+  width: 100%;
+  height: 100%;
+}
+.rv-tools {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  display: flex;
+  gap: var(--space-1);
+}
+.rv-tools button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  padding: 0;
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-s);
+}
+.rv-status {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.rv-link {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: inherit;
+  text-decoration: underline;
+}

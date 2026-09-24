@@ -186,5 +186,8 @@ export interface CanvasProps {
   /** imageId -> the picture's name, drawn under it when there is room.
    * Display only, like `dimRelations`. */
   captions?: ReadonlyMap<string, string>;
+  /** Look, select and pan; never move, resize, delete, undo or redo
+   * (`gestures.ts` mode `read`). A report's reader. */
+  readOnly?: boolean;
   onChange(scene: SceneChange): void;
 }

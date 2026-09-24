@@ -5,5 +5,7 @@ data/
 *.log
 e2e/screenshots/
 e2e/test-results/
+# Built by web/vite.viewer.config.ts.
+web/public/report-viewer.js
 
 .cache/
