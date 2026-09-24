@@ -51,15 +51,19 @@ twice:
 On the **SSL** tab of each: *Request a new SSL Certificate*, *Force SSL*,
 *HTTP/2 Support*, agree to the terms, Save.
 
-On the API's **Advanced** tab, raise the body limit, or uploads over
-NPM's default of 1 MB fail:
+On the API's **Advanced** tab:
 
 ```nginx
-client_max_body_size 110m;
 proxy_read_timeout 300s;
 ```
 
-(`110m` covers `UPLOAD_BATCH_MAX_MB=100`.)
+Uploads need a body limit above NPM's default of 1 MB (at least `110m`,
+for `UPLOAD_BATCH_MAX_MB=100`). Add `client_max_body_size 110m;` here
+**only if** NPM does not already set one for every host in
+`/data/nginx/custom/server_proxy.conf`. Setting it twice makes nginx
+refuse the configuration, and NPM reports only "Internal Error" (the real
+message is in `docker logs nginx-proxy-manager`: "directive is
+duplicate"). On the first deploy host that file already set `5G`.
 
 ## 5. First sign-in
 
