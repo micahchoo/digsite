@@ -228,7 +228,8 @@ export function WebView({
           <Icon name="close" size={16} />
         </button>
       </header>
-      <div className="web-view-outs" role="group" aria-label="Take this web">
+      <fieldset className="web-view-outs">
+        <legend className="visually-hidden">Take this web</legend>
         <button
           type="button"
           data-testid="web-make-sheet"
@@ -263,7 +264,7 @@ export function WebView({
           <Icon name="cursor" size={16} />
           Select on map
         </button>
-      </div>
+      </fieldset>
       {relations.length > 0 && (
         <div
           className="web-view-relations"

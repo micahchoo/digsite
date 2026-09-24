@@ -33,6 +33,17 @@ export function wallTime(d: Date): string | undefined {
   return time === '00:00:00' ? date : `${date} ${time}`;
 }
 
+/** A control character other than tab and line breaks: text that is
+ * really bytes. By code, since a regex of control characters is itself
+ * hard to read and linted out. */
+function hasBinary(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if ((c >= 1 && c <= 8) || (c >= 14 && c <= 31)) return true;
+  }
+  return false;
+}
+
 /** A value as a person reads it, or undefined when it is bytes. */
 export function readable(v: unknown): MetadataGroup[string] | undefined {
   if (v === null || v === undefined) return undefined;
@@ -41,7 +52,7 @@ export function readable(v: unknown): MetadataGroup[string] | undefined {
   if (typeof v === 'boolean') return v;
   if (typeof v === 'string') {
     const clean = v.replace(/\0/g, '').trim();
-    if (!clean || /[\u0001-\u0008\u000e-\u001f]/.test(clean)) return undefined;
+    if (!clean || hasBinary(clean)) return undefined;
     return clean.length > MAX_TEXT ? `${clean.slice(0, MAX_TEXT)}…` : clean;
   }
   if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer) return undefined;

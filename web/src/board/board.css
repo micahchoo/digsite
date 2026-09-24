@@ -1866,8 +1866,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  border-width: 0 0 1px;
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--line);
+  border-style: solid;
+  border-color: var(--line);
   background: var(--surface-raised);
 }
 .web-view-outs button {

@@ -584,10 +584,15 @@ async function main(): Promise<void> {
       (edgeId) => (window as unknown as SheetWindow).__digsite.select(edgeId),
       e1011?.id ?? '',
     );
-    const disagree = m.locator(
-      '[data-testid="inspector-pair"] .claim-pair-item[data-agreement="disagree"]',
-      { hasText: 'Faces' },
-    );
+    // The seed's own claim, by its relation: when the full suite runs,
+    // sheet-hour.ts has left random claims on Faces, and one on this pair
+    // is a second disagreement from the same sheet.
+    const disagree = m
+      .locator(
+        '[data-testid="inspector-pair"] .claim-pair-item[data-agreement="disagree"]',
+        { hasText: 'Faces' },
+      )
+      .filter({ hasText: 'different place' });
     await disagree.waitFor({ timeout: 15_000 });
     await m.screenshot({ path: `${SHOTS}3-disagree.png` });
     await disagree.click();

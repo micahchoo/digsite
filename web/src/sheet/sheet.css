@@ -779,20 +779,6 @@
   background: var(--surface-sunken);
 }
 
-/* -- a11y utility -------------------------------------------------------- */
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 /* Canvas-first document chrome, following the image-graph toolbar and
    inspector: controls float above the work, while metadata stays compact. */
 .sheet-page {
@@ -1319,20 +1305,6 @@
 }
 .claim-link-button:hover {
   background: var(--surface-sunken);
-}
-
-/* -- a11y utility -------------------------------------------------------- */
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 
 /* Canvas-first document chrome, following the image-graph toolbar and
