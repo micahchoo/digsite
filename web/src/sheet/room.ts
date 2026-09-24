@@ -1,18 +1,15 @@
-// The socket (docs/phases/2-sheet.md section 3, CONTEXT.md "Snapshot"):
-// join, the scene in (a remote 'joined'/'scene' payload reconciled onto the
-// canvas through `CanvasHandle#applyRemote`) and out (our own changes,
-// debounced and de-duplicated by `sync.ts#signature`), presence pointers and
-// the peer roster. Moved out of Sheet.tsx so that file is composition only
-// (docs/phases/2-sheet.md section 7). Talks to the canvas only through
-// `CanvasHandle` — no canvas implementation details.
+// The socket (docs/phases/2-sheet.md section 3): join, the scene in and
+// out, presence pointers and the peer roster. What the scene does in each
+// direction is sync.ts#createSceneSync; this hook holds the socket and the
+// React state the page shows. Talks to the canvas only through
+// `CanvasHandle`.
 import type { PeersPayload, PointerBroadcastPayload } from '@digsite/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Socket, io } from 'socket.io-client';
 import { SERVER_ORIGIN } from '../lib/api.ts';
 import type { CanvasHandle, SceneElement } from './canvas/types.ts';
 import { canSendPointer } from './presence.ts';
-import { RemoteSceneBuffer } from './remote-scenes.ts';
-import { isSyncable, signature } from './sync.ts';
+import { type SceneSync, createSceneSync } from './sync.ts';
 
 export interface Peer {
   id: string;
@@ -26,8 +23,6 @@ export interface RoomStatus {
   lastRecvAt: number | null;
   peers: Peer[];
 }
-
-const EMIT_DEBOUNCE_MS = 100;
 
 export interface RoomDeps {
   sheetId: string;
@@ -47,10 +42,10 @@ export interface Room {
   peers: Peer[];
   peerPointers: PointerBroadcastPayload[];
   getStatus: () => RoomStatus;
-  /** Debounced 100ms and skipped when nothing syncable actually changed
-   * (`sync.ts#signature`) — the same discipline the pre-split Sheet.tsx
-   * had. */
-  sendScene: (elements: SceneElement[]) => void;
+  /** A change made on this sheet (sync.ts#publish): corrected, written
+   * back, then sent when something syncable changed. Returns what the
+   * caller's own state should hold. */
+  publish: (elements: SceneElement[]) => SceneElement[];
   /** Throttled client-side to `presence.ts#POINTER_RATE_PER_S`, on top of
    * the server's own per-socket rate limit. */
   sendPointer: (x: number, y: number, selectedIds: string[]) => void;
@@ -60,8 +55,7 @@ export function useRoom(deps: RoomDeps): Room {
   const { sheetId, getHandle, loadImages, onRemoteChange } = deps;
 
   const socketRef = useRef<Socket | null>(null);
-  const lastEmittedSig = useRef('');
-  const emitTimer = useRef<number | null>(null);
+  const syncRef = useRef<SceneSync | null>(null);
   const lastPointerSentRef = useRef<number | null>(null);
   const statusRef = useRef<RoomStatus>({
     emits: 0,
@@ -85,105 +79,47 @@ export function useRoom(deps: RoomDeps): Room {
     let cancelled = false;
     const socket = io(SERVER_ORIGIN, { withCredentials: true });
     socketRef.current = socket;
-    const loadedImageIds = new Set<string>();
-    const pendingScenes = new RemoteSceneBuffer();
-    let processingScenes = false;
-    let pendingSceneCount = 0;
-    let pendingLastRecvAt: number | null = null;
     let pendingJoinedPeers: string[] | null = null;
     let receivedPeerRoster = false;
-
-    const drainRemoteScenes = () => {
-      if (processingScenes || cancelled) return;
-      processingScenes = true;
-      void (async () => {
-        let elements = pendingScenes.take();
-        while (elements && !cancelled) {
-          const imageIds = new Set<string>();
-          for (const el of elements as {
-            customData?: { kind?: string; imageId?: string };
-          }[]) {
-            if (
-              el.customData?.kind === 'image' &&
-              el.customData.imageId &&
-              !loadedImageIds.has(el.customData.imageId)
-            ) {
-              imageIds.add(el.customData.imageId);
-            }
+    const sync = createSceneSync({
+      scene: getHandle,
+      send: (elements) => {
+        socketRef.current?.emit('scene', { elements });
+        statusRef.current = {
+          ...statusRef.current,
+          lastEmitAt: Date.now(),
+          emits: statusRef.current.emits + 1,
+        };
+        rerender();
+      },
+      loadImages,
+      landed: (scenes) => {
+        if (cancelled) return;
+        // joined carries ids only; the named peers event can arrive while
+        // pictures load, so its roster wins over these blank names.
+        if (pendingJoinedPeers !== null) {
+          if (!receivedPeerRoster) {
+            const joinedAsPeers = pendingJoinedPeers.map((id) => ({
+              id,
+              name: '',
+            }));
+            setPeers(joinedAsPeers);
+            statusRef.current = { ...statusRef.current, peers: joinedAsPeers };
           }
-          if (imageIds.size) {
-            try {
-              await loadImages([...imageIds]);
-              for (const imageId of imageIds) loadedImageIds.add(imageId);
-            } catch (err) {
-              console.error('remote sheet image load failed', err);
-            }
-          }
-          if (cancelled) return;
-
-          // Fold any scenes received during the asset load into this one.
-          // Recheck assets after merging because the newer scene may add an
-          // image that was not in the scene whose load just completed.
-          const later = pendingScenes.take();
-          if (later) {
-            pendingScenes.enqueue(elements);
-            pendingScenes.enqueue(later);
-            elements = pendingScenes.take();
-            continue;
-          }
-
-          getHandle()?.applyRemote(elements);
-          lastEmittedSig.current = signature(
-            (getHandle()?.elements() ?? []).filter(isSyncable),
-          );
-
-          if (pendingJoinedPeers !== null) {
-            if (!receivedPeerRoster) {
-              const joinedAsPeers = pendingJoinedPeers.map((id) => ({
-                id,
-                name: '',
-              }));
-              setPeers(joinedAsPeers);
-              statusRef.current = {
-                ...statusRef.current,
-                peers: joinedAsPeers,
-              };
-            }
-            pendingJoinedPeers = null;
-          }
-          if (pendingSceneCount > 0) {
-            statusRef.current = {
-              ...statusRef.current,
-              lastRecvAt: pendingLastRecvAt,
-              recvs: statusRef.current.recvs + pendingSceneCount,
-            };
-            pendingSceneCount = 0;
-            pendingLastRecvAt = null;
-          }
-          onRemoteChange();
-          rerender();
-          elements = pendingScenes.take();
+          pendingJoinedPeers = null;
         }
-      })()
-        .catch((err) => console.error('remote sheet scene failed', err))
-        .finally(() => {
-          processingScenes = false;
-          if (pendingScenes.hasPending() && !cancelled) drainRemoteScenes();
-        });
-    };
-
-    const queueRemoteScene = (
-      elements: unknown[],
-      opts: { joinedPeers?: string[]; scene?: boolean } = {},
-    ) => {
-      pendingScenes.enqueue(elements);
-      if (opts.joinedPeers) pendingJoinedPeers = opts.joinedPeers;
-      if (opts.scene) {
-        pendingSceneCount++;
-        pendingLastRecvAt = Date.now();
-      }
-      drainRemoteScenes();
-    };
+        if (scenes > 0) {
+          statusRef.current = {
+            ...statusRef.current,
+            lastRecvAt: Date.now(),
+            recvs: statusRef.current.recvs + scenes,
+          };
+        }
+        onRemoteChange();
+        rerender();
+      },
+    });
+    syncRef.current = sync;
 
     socket.on('join-denied', ({ reason }: { reason: string }) => {
       if (cancelled) return;
@@ -198,9 +134,8 @@ export function useRoom(deps: RoomDeps): Room {
         peers: joinedPeers,
       }: { elements: unknown[]; peers: string[] }) => {
         if (cancelled) return;
-        // joined carries ids only; the named peers event can arrive while
-        // image files load, so its roster must win over these blank names.
-        queueRemoteScene(elements, { joinedPeers });
+        pendingJoinedPeers = joinedPeers;
+        void sync.receive(elements);
       },
     );
 
@@ -235,37 +170,24 @@ export function useRoom(deps: RoomDeps): Room {
 
     socket.on('scene', ({ elements: remote }: { elements: unknown[] }) => {
       if (cancelled) return;
-      queueRemoteScene(remote, { scene: true });
+      void sync.receive(remote, { delta: true });
     });
 
     socket.emit('join', { sheetId });
 
     return () => {
       cancelled = true;
-      pendingScenes.take();
+      sync.stop();
+      syncRef.current = null;
       socket.disconnect();
       socketRef.current = null;
     };
   }, [sheetId]);
 
-  const sendScene = useCallback(
-    (elements: SceneElement[]) => {
-      const syncable = elements.filter(isSyncable);
-      const sig = signature(syncable);
-      if (sig === lastEmittedSig.current) return;
-      lastEmittedSig.current = sig;
-      if (emitTimer.current !== null) window.clearTimeout(emitTimer.current);
-      emitTimer.current = window.setTimeout(() => {
-        socketRef.current?.emit('scene', { elements: syncable });
-        statusRef.current = {
-          ...statusRef.current,
-          lastEmitAt: Date.now(),
-          emits: statusRef.current.emits + 1,
-        };
-        rerender();
-      }, EMIT_DEBOUNCE_MS);
-    },
-    [rerender],
+  const publish = useCallback(
+    (elements: SceneElement[]) =>
+      syncRef.current ? syncRef.current.publish(elements) : elements,
+    [],
   );
 
   const sendPointer = useCallback(
@@ -285,7 +207,7 @@ export function useRoom(deps: RoomDeps): Room {
     peers,
     peerPointers,
     getStatus: () => ({ ...statusRef.current }),
-    sendScene,
+    publish,
     sendPointer,
   };
 }

@@ -52,7 +52,6 @@ import { peerCursors } from './presence.ts';
 import { nextImage } from './reading-order.ts';
 import { buildReport } from './report.ts';
 import { useRoom } from './room.ts';
-import { reconcileLocalChange } from './scene-diff.ts';
 import { type MenuTarget, sheetMenu } from './sheet-menu.ts';
 import './sheet.css';
 import { Toolbar } from './Toolbar.tsx';
@@ -284,9 +283,7 @@ export function Sheet() {
       const handle = canvasRef.current;
       if (!handle) return;
       tools.ownSelected(scene.selectedIds);
-      const { ops, elements: next } = reconcileLocalChange(scene.elements);
-      if (ops.length) handle.apply(ops, { history: false });
-      room.sendScene(next);
+      const next = room.publish(scene.elements);
       // Coalesce a burst of changes into one render, but always flush the
       // LATEST one: an animation-frame closure over the first change dropped
       // every later change in that frame (a fit right after a relayed scene
@@ -303,12 +300,12 @@ export function Sheet() {
           setViewport(latest.viewport);
         });
       }
-      // `room` is a fresh object every render; `sendScene`'s identity is
+      // `room` is a fresh object every render; `publish`'s identity is
       // stable (room.ts's own useCallback) — depend on that, not the whole
       // object, so this handler is never rebuilt yet never goes stale.
       // `tools` is made once (use-sheet-tools.ts).
     },
-    [room.sendScene, tools],
+    [room.publish, tools],
   );
   const focusInspectorToggle = useCallback(
     () => inspectorToggleRef.current?.focus(),

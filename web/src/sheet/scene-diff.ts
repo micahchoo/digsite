@@ -1,9 +1,8 @@
-// The local correction pass Sheet.tsx's `onChange` runs after every
-// committed scene change (docs/phases/2-sheet.md section 1): clamp every
-// region against its image's CURRENT rect, then the delete cascade +
-// dangling rebind (dangling.ts). Pure — no `CanvasHandle`, no React — so
-// it's testable the same way clamp.ts/dangling.ts already are; Sheet.tsx
-// just applies the ops this returns and stores the elements.
+// The local correction pass sync.ts#publish runs on every change made on
+// this sheet (docs/phases/2-sheet.md section 1): clamp every region against
+// its image's CURRENT rect, then the delete cascade + dangling rebind
+// (dangling.ts). Pure — no `CanvasHandle`, no React; sync.ts applies the
+// ops this returns, outside undo, and sends the elements.
 import { dataOf } from '@digsite/shared';
 import type { PatchOp, SceneElement } from './canvas/types.ts';
 import { clampRegion } from './clamp.ts';
