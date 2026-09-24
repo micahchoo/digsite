@@ -1,11 +1,11 @@
 // The native adapter's one component: a plain `<canvas>`, sized to its
 // container with devicePixelRatio, drawn every frame by `render.ts` from
-// the sheet's scene (sheet-scene.ts) and this file's viewport.
+// the sheet's scene (sheet-sceneRef.current.ts) and this file's viewport.
 //
 // Its division of labour is:
 // `camera.ts` is the arithmetic, `gestures.ts` decides what a pointer press
-// means, `scene.ts` is what is on screen and what a point lands on,
-// `sheet-scene.ts` holds the elements, the selection and the undo history,
+// means, `sceneRef.current.ts` is what is on screen and what a point lands on,
+// `sheet-sceneRef.current.ts` holds the elements, the selection and the undo history,
 // `images.ts` is the decoded-bitmap cache, `render.ts` draws one frame. This
 // file is the seam: DOM events in, `CanvasHandle` out, nothing else.
 import { dataOf } from '@digsite/shared';
@@ -57,7 +57,7 @@ import {
   resizeRegion,
   selectedGroupMembers,
 } from './scene.ts';
-import { createSheetScene } from './sheet-scene.ts';
+import { type SheetScene, createSheetScene } from './sheet-scene.ts';
 import type { SpatialIndex } from './spatial.ts';
 
 const ZERO_VIEWPORT: Viewport = { scrollX: 0, scrollY: 0, zoom: 1 };
@@ -123,10 +123,10 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
     // The scene tells `sceneChanged` what to redraw and announce; the
     // callback is filled in below, once scheduleRender and emitChange exist.
     const sceneChanged = useRef<(what: { remote: boolean }) => void>(() => {});
-    const sceneRef = useRef<ReturnType<typeof createSheetScene> | null>(null);
+    // Made once, on the first render; `.current` is never replaced after.
+    const sceneRef = useRef<SheetScene>(null as unknown as SheetScene);
     if (!sceneRef.current)
       sceneRef.current = createSheetScene((what) => sceneChanged.current(what));
-    const scene = sceneRef.current;
     const viewportRef = useRef<Viewport>(ZERO_VIEWPORT);
     const imagesRef = useRef(new ImageCache());
     const indexRef = useRef<{
@@ -150,9 +150,10 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
 
     const spatialIndex = useCallback((): SpatialIndex => {
       const held = indexRef.current;
-      if (held && held.elements === scene.elements()) return held.index;
-      const index = buildIndex(scene.elements());
-      indexRef.current = { index, elements: scene.elements() };
+      if (held && held.elements === sceneRef.current.elements())
+        return held.index;
+      const index = buildIndex(sceneRef.current.elements());
+      indexRef.current = { index, elements: sceneRef.current.elements() };
       return index;
     }, []);
 
@@ -171,8 +172,8 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         width,
         height,
         viewport: viewportRef.current,
-        elements: scene.elements(),
-        selectedIds: scene.selectedSet(),
+        elements: sceneRef.current.elements(),
+        selectedIds: sceneRef.current.selectedSet(),
         images: imagesRef.current,
         marquee,
         dimRelations,
@@ -189,16 +190,16 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
       });
     }, [draw]);
 
-    // A new palette (theme change) or emphasis changes the frame, not the scene.
+    // A new palette (theme change) or emphasis changes the frame, not the sceneRef.current.
     useEffect(() => {
       scheduleRender();
     }, [scheduleRender]);
 
     const emitChange = useCallback(() => {
       const change: SceneChange = {
-        elements: scene.elements(),
+        elements: sceneRef.current.elements(),
         viewport: viewportRef.current,
-        selectedIds: scene.selectedIds(),
+        selectedIds: sceneRef.current.selectedIds(),
       };
       onChangeRef.current(change);
     }, []);
@@ -256,17 +257,17 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
     );
 
     const selectedRegionRect = useCallback((): Rect | null => {
-      if (scene.selectedSet().size !== 1) return null;
-      const [id] = scene.selectedSet();
-      const el = scene.elements().find((e) => e.id === id);
+      if (sceneRef.current.selectedSet().size !== 1) return null;
+      const [id] = sceneRef.current.selectedSet();
+      const el = sceneRef.current.elements().find((e) => e.id === id);
       if (!el || el.isDeleted) return null;
       if (dataOf(el)?.kind !== 'region') return null;
       return { x: el.x, y: el.y, width: el.width, height: el.height };
     }, []);
 
     const setSelection = useCallback(
-      (ids: string[]) => scene.select(ids),
-      [scene],
+      (ids: string[]) => sceneRef.current.select(ids),
+      [],
     );
 
     // -- pointer handling (select/pan only — DrawLayer.tsx owns region/edge) --
@@ -297,7 +298,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         });
         const hit = hitAt(
           worldPt,
-          scene.elements(),
+          sceneRef.current.elements(),
           viewportRef.current.zoom,
           spatialIndex(),
         );
@@ -323,16 +324,16 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
             startWorld: pending.worldStart,
             nowWorld: pending.worldStart,
             additive: true,
-            selectedAtStart: scene.selectedIds(),
+            selectedAtStart: sceneRef.current.selectedIds(),
           };
         }
-        if (pending.grip && scene.selectedSet().size === 1) {
-          const [regionId] = scene.selectedSet();
+        if (pending.grip && sceneRef.current.selectedSet().size === 1) {
+          const [regionId] = sceneRef.current.selectedSet();
           const rect = selectedRegionRect();
           if (regionId && rect) {
             return {
               kind: 'resize',
-              origin: scene.elements(),
+              origin: sceneRef.current.elements(),
               regionId,
               handle: pending.grip,
               originRect: rect,
@@ -348,13 +349,13 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           return { kind: 'pan', lastScreen: pending.screenStart };
         if (decided === 'move' && pending.hit) {
           const ids = selectedGroupMembers(
-            scene.elements(),
+            sceneRef.current.elements(),
             pending.hit.id,
-            scene.selectedIds(),
+            sceneRef.current.selectedIds(),
           );
           return {
             kind: 'move',
-            origin: scene.elements(),
+            origin: sceneRef.current.elements(),
             ids,
             startWorld: pending.worldStart,
           };
@@ -377,7 +378,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         if (!drag && mode === 'select') {
           const hit = hitAt(
             worldPt,
-            scene.elements(),
+            sceneRef.current.elements(),
             viewportRef.current.zoom,
             spatialIndex(),
           );
@@ -437,19 +438,19 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           const shifted = drag.origin.map((el) =>
             drag.ids.has(el.id) ? { ...el, x: el.x + dx, y: el.y + dy } : el,
           );
-          scene.preview(shifted);
+          sceneRef.current.preview(shifted);
           return;
         }
         if (drag.kind === 'resize') {
           const nextRect = resizeRegion(drag.originRect, drag.handle, worldPt);
-          const resized = scene
+          const resized = sceneRef.current
             .elements()
             .map((el) =>
               el.id === drag.regionId ? { ...el, ...nextRect } : el,
             );
           // A region can be an edge's endpoint too — follow it the same
           // way a moved image's edges follow (retargetEdges' own contract).
-          scene.preview(resized);
+          sceneRef.current.preview(resized);
           return;
         }
         if (drag.kind === 'marquee') {
@@ -473,7 +474,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         }
 
         if (drag?.kind === 'move' || drag?.kind === 'resize') {
-          scene.commitDrag(drag.origin);
+          sceneRef.current.commitDrag(drag.origin);
           return;
         }
         if (drag?.kind === 'marquee') {
@@ -481,7 +482,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           setSelection(
             selectionAfterMarquee(
               drag.selectedAtStart,
-              marqueeSelect(scene.elements(), band),
+              marqueeSelect(sceneRef.current.elements(), band),
               drag.additive,
             ),
           );
@@ -493,14 +494,14 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         if (pending) {
           setSelection(
             selectionAfterClick(
-              scene.selectedIds(),
+              sceneRef.current.selectedIds(),
               pending.hit?.id ?? null,
               pending.additive,
             ),
           );
         }
       },
-      [canvasPoint, emitChange, scheduleRender, setSelection, showCursor],
+      [canvasPoint, setSelection, showCursor],
     );
 
     const applyWheel = useCallback(
@@ -562,10 +563,10 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           (e.key === 'Delete' || e.key === 'Backspace') &&
           toolRef.current === 'select'
         ) {
-          if (!scene.selectedSet().size) return;
+          if (!sceneRef.current.selectedSet().size) return;
           e.preventDefault();
           handleRef.current?.apply([
-            { op: 'remove', ids: scene.selectedIds() },
+            { op: 'remove', ids: sceneRef.current.selectedIds() },
           ]);
           setSelection([]);
         }
@@ -588,11 +589,11 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
     // -- the imperative handle ------------------------------------------------
     useImperativeHandle(ref, (): CanvasHandle => {
       const handle: CanvasHandle = {
-        elements: scene.elements,
-        apply: scene.apply,
-        applyRemote: scene.applyRemote,
-        select: scene.select,
-        selectedIds: scene.selectedIds,
+        elements: sceneRef.current.elements,
+        apply: sceneRef.current.apply,
+        applyRemote: sceneRef.current.applyRemote,
+        select: sceneRef.current.select,
+        selectedIds: sceneRef.current.selectedIds,
         viewport() {
           return { ...viewportRef.current };
         },
@@ -612,7 +613,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           const screen = canvasPoint(client.x, client.y);
           const hit = hitAt(
             toWorld(viewportRef.current, screen.x, screen.y),
-            scene.elements(),
+            sceneRef.current.elements(),
             viewportRef.current.zoom,
             spatialIndex(),
           );
@@ -620,7 +621,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         },
         zoomToFit(ids) {
           const wanted = ids && new Set(ids);
-          const rects = scene
+          const rects = sceneRef.current
             .elements()
             .filter((e) => !e.isDeleted && (!wanted || wanted.has(e.id)))
             .map((e) => ({ x: e.x, y: e.y, width: e.width, height: e.height }));
@@ -642,8 +643,8 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           scheduleRender();
           emitChange();
         },
-        undo: scene.undo,
-        redo: scene.redo,
+        undo: sceneRef.current.undo,
+        redo: sceneRef.current.redo,
       };
       handleRef.current = handle;
       return handle;
