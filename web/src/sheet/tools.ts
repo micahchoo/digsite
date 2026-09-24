@@ -23,12 +23,14 @@ import {
 // (rename) among all these scene-only tools.
 import { api as httpApi } from '../lib/api.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
+import type { ImportPlan } from '../report/import.ts';
 import type { CanvasHandle, PatchOp, SceneElement } from './canvas/types.ts';
 import type { Tool } from './canvas/types.ts';
 import { type CopyChoice, fullChoice, planCopy } from './copy-foreign.ts';
 import { isDangling } from './dangling.ts';
 import { rectFromDrag } from './gestures.ts';
 import { hitAt } from './hit.ts';
+import { importOps } from './import-ops.ts';
 import { truncateLabel } from './labels.ts';
 import { type ForeignShape, foreignCopyRect } from './overlay/screen.ts';
 import type { RoomStatus } from './room.ts';
@@ -64,6 +66,9 @@ export interface Tools {
     relation?: string,
     direction?: Direction,
   ) => string | null;
+  /** Makes an import plan's claims this sheet's own, as one undo
+   * (import-ops.ts). Returns how many claims were made. */
+  addClaims: (claims: ImportPlan['claims']) => number;
   moveImage: (imageId: string, dx: number, dy: number) => void;
   setRegionRect: (id: string, fraction: Partial<Fraction>) => void;
   copyForeign: (
@@ -233,6 +238,19 @@ export function createTools(deps: ToolsDeps): Tools {
       },
     ]);
     return id;
+  }
+
+  function addClaims(imported: ImportPlan['claims']): number {
+    const handle = getHandle();
+    if (!handle) return 0;
+    const { ops, claims } = importOps(
+      imported,
+      handle.elements(),
+      stamp(),
+      newId,
+    );
+    if (ops.length) handle.apply(ops);
+    return claims;
   }
 
   function moveImage(imageId: string, dx: number, dy: number): void {
@@ -568,6 +586,7 @@ export function createTools(deps: ToolsDeps): Tools {
   return {
     drawRegion,
     connect,
+    addClaims,
     moveImage,
     setRegionRect,
     copyForeign,

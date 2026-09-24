@@ -564,6 +564,13 @@ export const api = {
   getReport: (reportId: string) => request<ReportData>(`/reports/${reportId}`),
   reportChanges: (reportId: string) =>
     request<ReportChanges & { now: string }>(`/reports/${reportId}/changes`),
+  /** Which of these SHA-256s the board holds as pictures: a report being
+   * imported names its pictures by them (report/import.ts). */
+  imagesBySha256: (boardId: string, hashes: string[]) =>
+    request<{ images: { id: string; sha256: string; name: string }[] }>(
+      `/boards/${boardId}/images/by-sha256`,
+      post({ hashes }),
+    ),
   /** A kept report's evidence: its data in every format, the originals and
    * SHA256SUMS, as one zip (server reports/bundle.ts). */
   reportBundleUrl: (reportId: string) =>

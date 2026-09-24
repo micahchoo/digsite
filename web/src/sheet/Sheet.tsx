@@ -53,6 +53,7 @@ import { useRoom } from './room.ts';
 import { type MenuTarget, sheetMenu } from './sheet-menu.ts';
 import './sheet.css';
 import { download, fileName, reportHtml } from '../report/file.ts';
+import type { ImportPlan } from '../report/import.ts';
 import { previewSource } from '../report/pictures.ts';
 import { whenSaved } from '../report/saved.ts';
 import { Toolbar } from './Toolbar.tsx';
@@ -335,9 +336,34 @@ export function Sheet() {
     () => peerCursors(room.peerPointers, sceneElements),
     [room.peerPointers, sceneElements],
   );
-  type LocationState = { copyEdges?: PendingCopyEdge[] } | null;
+  type LocationState = {
+    copyEdges?: PendingCopyEdge[];
+    importPlan?: ImportPlan;
+  } | null;
   const copyEdges = (location.state as LocationState)?.copyEdges;
   useCopyConnections(copyEdges, sceneElements, actions);
+  // A report brought in (report/import.ts): its claims become this new
+  // sheet's own, once its pictures are here. The plan leaves the history
+  // entry at once, so a reload cannot import it twice.
+  const importPlan = (location.state as LocationState)?.importPlan;
+  const importedRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, when the new sheet's first scene lands
+  useEffect(() => {
+    if (!importPlan || importedRef.current || !sceneElements.length) return;
+    importedRef.current = true;
+    navigate(location.pathname, { replace: true, state: null });
+    const made = tools.addClaims(importPlan.claims);
+    canvasRef.current?.zoomToFit();
+    const missed = importPlan.skipped;
+    setWorking(
+      `Imported ${made} claim${made === 1 ? '' : 's'} from “${importPlan.title}”.${
+        missed.length
+          ? ` ${missed.length} could not land. ${missed[0]}${missed.length > 1 ? ', and more.' : '.'}`
+          : ''
+      }`,
+    );
+    window.setTimeout(() => setWorking(null), 12_000);
+  }, [sceneElements.length]);
   const sheetIndex = boardSheets.findIndex((sheet) => sheet.id === sheetId);
   const previousSheet =
     sheetIndex > 0 ? (boardSheets[sheetIndex - 1] ?? null) : null;

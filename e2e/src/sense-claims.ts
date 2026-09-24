@@ -1144,6 +1144,52 @@ async function main(): Promise<void> {
     );
     await M.open(firstPass.id);
 
+    // -- 13d. The report back in: a file becomes a sheet of its own claims --
+    const keptData = JSON.parse(
+      keptHtml.match(
+        /<script type="application\/json" id="digsite-report">(.*?)<\/script>/s,
+      )?.[1] ?? 'null',
+    ) as { claims: { kind: string }[] };
+    await m.goto(`${WEB}/b/${field.id}`);
+    await m.getByTestId('board-actions-button').click();
+    await m.getByTestId('board-menu-import-report').waitFor();
+    await m.keyboard.press('Escape');
+    await m.getByTestId('board-import-report-input').setInputFiles(keptPath);
+    await m.waitForURL(
+      (url) =>
+        /\/s\/[0-9a-f-]{36}$/.test(url.pathname) &&
+        !url.pathname.endsWith(firstPass.id),
+      { timeout: 30_000 },
+    );
+    await m.waitForFunction(
+      (want) => {
+        const els =
+          (
+            window as unknown as {
+              __digsite?: {
+                getElements: () => {
+                  isDeleted?: boolean;
+                  customData?: { kind?: string };
+                }[];
+              };
+            }
+          ).__digsite?.getElements() ?? [];
+        const claims = els.filter(
+          (e) =>
+            !e.isDeleted &&
+            (e.customData?.kind === 'edge' || e.customData?.kind === 'region'),
+        );
+        return claims.length >= want;
+      },
+      keptData.claims.length,
+      { timeout: 30_000 },
+    );
+    await m.screenshot({ path: `${SHOTS}13d-imported.png` });
+    pass(
+      `13d. the kept report's file imports as a new sheet: its pictures found by hash, where the report had them, all ${keptData.claims.length} claims this sheet's own`,
+    );
+    await M.open(firstPass.id);
+
     // -- 14. Arrow keys walk from picture to picture; a reader hears where ---
     await m.evaluate(
       (id) => (window as unknown as SheetWindow).__digsite.select(id),

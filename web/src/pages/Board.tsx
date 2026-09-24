@@ -251,6 +251,7 @@ export function Board() {
   const [folderImport, setFolderImport] = useState(false);
   /** A board, relation or path report being made (report/use-report). */
   const report = useReport();
+  const reportInputRef = useRef<HTMLInputElement | null>(null);
   /** The pictures being copied to another board, while its dialog is open. */
   const [copying, setCopying] = useState<string[] | null>(null);
   const currentSortId = sort ? sortId(sort) : DEFAULT_SORT.key.toString();
@@ -1516,6 +1517,7 @@ export function Board() {
         copyTo: (ids) => setCopying([...ids]),
         download,
         report: () => void report.make(() => api.getBoardReport(boardId)),
+        importReport: () => reportInputRef.current?.click(),
       },
     );
   }
@@ -2021,6 +2023,21 @@ export function Board() {
       )}
       <UploadActivity boardId={boardId} snapshot={uploadSnapshot} />
       <ReportWorking message={report.working} />
+      <input
+        ref={reportInputRef}
+        type="file"
+        accept=".html,.htm,.json,text/html,application/json"
+        hidden
+        data-testid="board-import-report-input"
+        onChange={(e) => {
+          const file = e.currentTarget.files?.[0];
+          e.currentTarget.value = '';
+          if (file)
+            void report.bringIn(boardId, file, (sheetId, plan) =>
+              navigate(`/s/${sheetId}`, { state: { importPlan: plan } }),
+            );
+        }}
+      />
       {copying && (
         <CopyToBoard
           boardId={boardId}

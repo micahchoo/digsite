@@ -15,6 +15,8 @@
 //   DELETE /reports/:id/link             revoke it
 //   GET    /published/:token             the report, with no sign-in
 //   GET    /published/:token/images/:id  one of its pictures
+//   POST   /boards/:id/images/by-sha256  which of these pictures the board
+//                                        holds, to import a report {hashes}
 //
 // Every one asks its intent first (access/index.ts); the two public ones
 // ask `publishedReportForReading`, which takes a token, not a user.
@@ -279,6 +281,34 @@ export function registerReportRoutes(router: Router) {
     const report = await reportForManaging(userId, param(ctx, 'id'));
     await revokeLink(report.id);
     json(ctx.res, 200, { ok: true });
+  });
+
+  // Importing a report (CONTEXT.md "Report import"): a report names its
+  // pictures by the SHA-256 of their originals, so the board answers which
+  // of them it holds. Missing images do not count: a claim cannot rest on
+  // a picture that is gone.
+  router.post('/boards/:id/images/by-sha256', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const board = await boardForViewing(userId, param(ctx, 'id'));
+    const body = ((await readJsonBody(ctx.req)) ?? {}) as { hashes?: unknown };
+    const hashes = Array.isArray(body.hashes)
+      ? body.hashes.filter(
+          (h): h is string => typeof h === 'string' && /^[0-9a-f]{64}$/.test(h),
+        )
+      : [];
+    if (hashes.length > MAX_IDS)
+      return json(ctx.res, 400, { error: `at most ${MAX_IDS} hashes` });
+    const { rows } = await pool.query<{
+      id: string;
+      sha256: string;
+      name: string;
+    }>(
+      `SELECT DISTINCT ON (sha256) id, sha256, name FROM images
+        WHERE board_id = $1 AND missing = false AND sha256 = ANY($2::text[])
+        ORDER BY sha256, slot`,
+      [board.id, hashes],
+    );
+    json(ctx.res, 200, { images: rows });
   });
 
   // -- public: the token is the permission ---------------------------------

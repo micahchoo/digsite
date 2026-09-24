@@ -44,6 +44,8 @@ export interface BoardMenuActions {
   download: (ids: readonly string[]) => void;
   /** Every claim on the board, from every sheet, as one report file. */
   report: () => void;
+  /** A report file's claims, as a new sheet here. */
+  importReport: () => void;
 }
 
 /**
@@ -94,6 +96,11 @@ function mapMenu(state: BoardMenuState, act: BoardMenuActions): MenuSection[] {
       label: 'Report on this board',
       testId: 'board-menu-report',
       onSelect: act.report,
+    },
+    {
+      label: 'Import a report as a sheet…',
+      testId: 'board-menu-import-report',
+      onSelect: act.importReport,
     },
   ];
   const history: MenuItem[] = [

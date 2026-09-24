@@ -363,5 +363,19 @@ describe('a kept report’s evidence', () => {
     const readme = new TextDecoder().decode(files.get('README.txt'));
     expect(readme).toContain('sha256sum -c SHA256SUMS');
     expect(readme).not.toContain('differ');
+
+    // Importing it: the board says which cited pictures it holds.
+    const found = await owner.req<{
+      images: { id: string; sha256: string; name: string }[];
+    }>('POST', `/boards/${board.id}/images/by-sha256`, {
+      hashes: [cited?.sha256, 'f'.repeat(64), 'not a hash'],
+    });
+    expect(found.json.images).toEqual([
+      {
+        id: north as string,
+        sha256: cited?.sha256 as string,
+        name: 'north.png',
+      },
+    ]);
   });
 });
