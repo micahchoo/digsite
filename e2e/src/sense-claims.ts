@@ -1538,28 +1538,42 @@ async function main(): Promise<void> {
           under === 'CANVAS',
           `cell ${rank} is under a ${under}, not the map`,
         );
-        await m.mouse.move(at.x, at.y);
-        const pressed = Date.now();
-        await m.mouse.down();
-        await m.mouse.move(at.x + drift, at.y - drift, { steps: 2 });
-        await m.waitForTimeout(hold);
-        await m.mouse.up();
-        const held = Date.now() - pressed;
-        // A pick asks the server which picture the cell holds.
-        const picked = await m
-          .waitForFunction(
-            (rank) =>
-              JSON.stringify(
-                (window as unknown as BoardProbe).__digsiteBoard.getSelection(),
-              ) === JSON.stringify([rank]),
-            rank,
-            { timeout: 15_000 },
-          )
-          .then(() => true)
-          .catch(() => false);
+        // A loaded runner can stretch the hold far past what was asked
+        // (1,162 ms for 300 on CI, 2026-09-24). Only a press that really
+        // stayed under the click limit tests the claim, so a stretched one
+        // is tried again.
+        let result: { held: number; picked: boolean } | null = null;
+        for (let attempt = 0; attempt < 6 && !result; attempt++) {
+          await m.evaluate(() =>
+            (window as unknown as BoardProbe).__digsiteBoard.clear(),
+          );
+          await m.mouse.move(at.x, at.y);
+          const pressed = Date.now();
+          await m.mouse.down();
+          await m.mouse.move(at.x + drift, at.y - drift);
+          await m.waitForTimeout(hold);
+          await m.mouse.up();
+          const held = Date.now() - pressed;
+          // A pick asks the server which picture the cell holds.
+          const picked = await m
+            .waitForFunction(
+              (rank) =>
+                JSON.stringify(
+                  (
+                    window as unknown as BoardProbe
+                  ).__digsiteBoard.getSelection(),
+                ) === JSON.stringify([rank]),
+              rank,
+              { timeout: 15_000 },
+            )
+            .then(() => true)
+            .catch(() => false);
+          if (held < 480) result = { held, picked };
+        }
+        assert(result, `every press on cell ${rank} was held past the limit`);
         assert(
-          picked,
-          `a click on cell ${rank} (held ${held} ms, ${drift} px of wobble) selected ${JSON.stringify(await m.evaluate(() => (window as unknown as BoardProbe).__digsiteBoard.getSelection()))}`,
+          result.picked,
+          `a click on cell ${rank} (held ${result.held} ms, ${drift} px of wobble) selected ${JSON.stringify(await m.evaluate(() => (window as unknown as BoardProbe).__digsiteBoard.getSelection()))}`,
         );
       }
       // A real drag still pans, and selects nothing new.
