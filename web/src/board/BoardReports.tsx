@@ -129,23 +129,23 @@ export function BoardReports({
           Keep a report from a sheet to cite it later and see what changes.
         </p>
       ) : (
-        <ul className="board-sheet-list">
+        <ul className="board-report-list">
           {reports.map((r) => (
             <li
               key={r.id}
-              className="board-sheet-row"
+              className="board-report-row"
               data-testid="report-list-item"
             >
-              <div className="board-sheet-copy">
+              <div className="board-report-copy">
                 <span className="board-report-title">{r.title}</span>
-                <span className="board-sheet-meta">
+                <span className="board-report-meta">
                   Of {SCOPE[r.scope.kind]} · {plural(r.claims, 'claim')} ·{' '}
                   {r.by}, {when(r.at)}
                   {r.link &&
                     ` · linked${r.link.expiresAt ? ` until ${when(r.link.expiresAt)}` : ''}`}
                 </span>
               </div>
-              <div className="board-sheet-actions">
+              <div className="board-report-actions">
                 <button
                   type="button"
                   className="board-quiet-button"
@@ -156,7 +156,7 @@ export function BoardReports({
                   Download
                 </button>
                 <a
-                  className="board-sheet-open"
+                  className="board-quiet-button"
                   href={api.reportBundleUrl(r.id)}
                   data-testid={`report-bundle-${r.id}`}
                   title="The data in every format, the original pictures and their SHA-256 sums, as one zip"
@@ -181,21 +181,6 @@ export function BoardReports({
                   }
                 >
                   What changed
-                </button>
-                <button
-                  type="button"
-                  className="board-icon-button board-icon-button--danger"
-                  data-testid={`report-delete-${r.id}`}
-                  aria-label={`Remove report ${r.title}`}
-                  title="Remove report"
-                  onClick={() =>
-                    void run(async () => {
-                      await api.deleteReport(r.id);
-                      await refresh();
-                    })
-                  }
-                >
-                  <Icon name="trash" size={16} />
                 </button>
               </div>
               <div className="board-report-link">
@@ -254,6 +239,22 @@ export function BoardReports({
                     Stop the link
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  className="board-icon-button board-icon-button--danger"
+                  data-testid={`report-delete-${r.id}`}
+                  aria-label={`Remove report ${r.title}`}
+                  title="Remove report"
+                  onClick={() =>
+                    void run(async () => {
+                      await api.deleteReport(r.id);
+                      await refresh();
+                    })
+                  }
+                >
+                  <Icon name="trash" size={16} />
+                </button>
               </div>
               {changes[r.id] && (
                 <Changes changes={changes[r.id] as ReportChanges} />

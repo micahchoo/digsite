@@ -15,15 +15,60 @@
   font-size: var(--text-sm);
 }
 
-/* The board's kept reports (board/BoardReports.tsx), in the sheets list's
-   own two-column rows; the link and the changes take a whole row. */
+/* The board's kept reports (board/BoardReports.tsx), in the right column.
+   A row of its own, not the sheets list's two columns: beside four actions
+   the title had a few words' width and broke onto a line every few words.
+   The title and its facts take the whole width; the actions follow and
+   wrap. */
+.board-report-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.board-report-row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-m);
+}
+.board-report-row:hover {
+  background: var(--surface-sunken);
+}
+.board-report-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
 .board-report-title {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
+.board-report-meta {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.board-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+a.board-quiet-button {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-m);
+  font-weight: 550;
+  line-height: 1.2;
+  text-decoration: none;
+}
+/* Removal last, at the far end, apart from what the row offers. */
+.board-report-link .board-icon-button--danger {
+  margin-inline-start: auto;
+}
 .board-report-link {
   display: flex;
-  grid-column: 1 / -1;
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
@@ -35,7 +80,6 @@
   font-size: var(--text-2xs);
 }
 .board-report-changes {
-  grid-column: 1 / -1;
   margin: 0;
   color: var(--text-secondary);
   font-size: var(--text-sm);

@@ -289,6 +289,38 @@ export type UploadImageStatusesResponse = {
 
 export type GetImageResponse = BoardImage & { boardId: string };
 
+/** One kind of embedded metadata, field by field, as a person reads it. */
+export type MetadataGroup = Record<string, string | number | boolean>;
+export type MetadataGroupName =
+  | 'ifd0'
+  | 'exif'
+  | 'gps'
+  | 'iptc'
+  | 'xmp'
+  | 'jfif'
+  | 'ihdr';
+
+/** GET /images/:id/metadata (CONTEXT.md "File metadata"): the file's own
+ * facts, and everything it carries about itself, read once and kept. */
+export type ImageMetadata = {
+  file: {
+    /** What the original's bytes are: jpeg, png, webp, gif… */
+    format: string | null;
+    bytes: number | null;
+    sha256: string;
+    width: number;
+    height: number;
+    uploadedAt: string;
+    uploadedBy: string | null;
+    /** The camera file intake kept, when it did. */
+    source: { format: string; bytes: number } | null;
+    /** A region cut into a picture of its own says where from. */
+    derivedFrom: string | null;
+  };
+  /** Empty when the file carries nothing, or cannot be read. */
+  groups: Partial<Record<MetadataGroupName, MetadataGroup>>;
+};
+
 export type UpdateImagePropertiesRequest = { properties: Properties };
 export type UpdateImagePropertiesResponse = { properties: Properties };
 

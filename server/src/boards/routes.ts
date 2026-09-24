@@ -21,6 +21,7 @@ import type {
   GetBoardVocabularyResponse,
   GetImageResponse,
   GetSectionsResponse,
+  ImageMetadata,
   LabelSuggestionsResponse,
   ListBoardImagesByIdsResponse,
   ListBoardImagesResponse,
@@ -113,6 +114,7 @@ import {
 } from './folder-import.ts';
 import { type Examined, examine, storeAll } from './intake.ts';
 import { withPage } from './ladder.ts';
+import { metadataOf } from './metadata.ts';
 import { originalKey, previewKey, sourceKey } from './paths.ts';
 import { isProperties } from './properties.ts';
 import {
@@ -1026,6 +1028,22 @@ export function registerBoardRoutes(router: Router) {
       ...toBoardImage(image),
       boardId: image.board_id,
     };
+    json(ctx.res, 200, response);
+  });
+
+  // GET /images/:id/metadata (CONTEXT.md "File metadata"): the file's own
+  // facts and everything it carries, read on first ask (metadata.ts).
+  router.get('/images/:id/metadata', async (ctx) => {
+    const userId = requireAuth(ctx);
+    const image = await imageForViewing(userId, param(ctx, 'id'));
+    const { rows } = await pool.query<{ name: string | null }>(
+      'SELECT name FROM "user" WHERE id = $1',
+      [image.uploaded_by],
+    );
+    const response: ImageMetadata = await metadataOf({
+      ...image,
+      uploaded_by_name: rows[0]?.name ?? null,
+    });
     json(ctx.res, 200, response);
   });
 

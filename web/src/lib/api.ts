@@ -49,6 +49,7 @@ import type {
   GetSheetResponse,
   GetSheetRowsResponse,
   GetStatsResponse,
+  ImageMetadata,
   InviteRequest,
   InviteResponse,
   LabelSuggestionsResponse,
@@ -455,6 +456,9 @@ export const api = {
     ),
   getImage: (imageId: string) =>
     request<GetImageResponse>(`/images/${imageId}`),
+  /** CONTEXT.md "File metadata": what the file is and all it carries. */
+  imageMetadata: (imageId: string) =>
+    request<ImageMetadata>(`/images/${imageId}/metadata`),
   originalUrl: (imageId: string) =>
     `${SERVER_ORIGIN}/images/${imageId}/original`,
   /** The camera file a picture was made from (HEIC, RAW), when it kept one:

@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
 import { api } from '../lib/api.ts';
 import { bytesLabel } from '../lib/bytes.ts';
+import { FileFacts } from './FileFacts.tsx';
 import { captured, isCaptured } from './captured.ts';
 import {
   type PropertyType,
@@ -215,6 +216,8 @@ export function Detail({
           Add
         </button>
       </form>
+
+      <FileFacts imageId={image.id} />
 
       {!image.missing &&
         (confirmingDelete ? (

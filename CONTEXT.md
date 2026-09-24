@@ -216,6 +216,11 @@ sheet that made it. The board never writes a claim.
   Set by the operator (`GROUP_QUOTA_GB`, or per group by script), never
   by a route. An upload past it is refused with the numbers; a folder
   import stops and can be resumed.
+- **File metadata** — everything a picture's file carries about itself
+  (EXIF, GPS, IPTC, XMP), read from the camera file when intake kept one,
+  else the original, on first ask, and kept (`images.metadata`). Shown
+  under "The file" in the details, never edited: the file said it. The
+  captured properties are the few of it a person sorts and finds by.
 - **Folder import** — a board filled from a folder on the server's disk,
   under a root the operator allowed (`IMPORT_ROOTS`). Each file takes the
   upload path; the import keeps its file list and a cursor, so it resumes.
