@@ -24,11 +24,6 @@ import type {
 // Sheets (CONTEXT.md "Sheet", "Element", "Claim", "Foreign"). See
 // docs/design.md "Routes / Sheets".
 import {
-  SHEET_LIMIT,
-  fileId,
-  imageGroupId,
-} from '@digsite/shared/sheet/elements';
-import {
   boardForCreatingSheet,
   boardForViewing,
   sheetForDeleting,
@@ -46,6 +41,7 @@ import {
   requireAuth,
 } from '../http.ts';
 import { foreignOn, sheetsShowing } from './foreign.ts';
+import { addImages, createSheet } from './membership.ts';
 import { neighbourhoodFrom, relationWeb } from './neighbourhood.ts';
 import { participantsOf } from './participants.ts';
 import { reachOf } from './reach.ts';
@@ -57,55 +53,7 @@ import {
 } from './replies.ts';
 import { broadcastSheetScene, roomStats } from './room.ts';
 import { toEdgeRow, toRegionRow } from './rows.ts';
-import {
-  getSnapshotElements,
-  saveSnapshotAndProject,
-  saveSnapshotAndProjectInTransaction,
-} from './snapshot.ts';
-
-const CELL = 320;
-const FIT = 256;
-
-function makeImageElement(
-  imageId: string,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  seed: number,
-) {
-  return {
-    id: `el-img-${imageId}`,
-    type: 'image',
-    x,
-    y,
-    width,
-    height,
-    angle: 0,
-    strokeColor: 'transparent',
-    backgroundColor: 'transparent',
-    fillStyle: 'solid',
-    strokeWidth: 1,
-    strokeStyle: 'solid',
-    roughness: 0,
-    opacity: 100,
-    groupIds: [imageGroupId(imageId)],
-    frameId: null,
-    roundness: null,
-    seed,
-    version: 1,
-    versionNonce: seed,
-    isDeleted: false,
-    boundElements: null,
-    updated: Date.now(),
-    link: null,
-    locked: false,
-    status: 'saved',
-    fileId: fileId(imageId),
-    scale: [1, 1],
-    customData: { kind: 'image', imageId },
-  };
-}
+import { getSnapshotElements, saveSnapshotAndProject } from './snapshot.ts';
 
 export function registerSheetRoutes(router: Router) {
   router.get('/boards/:id/sheets', async (ctx) => {
@@ -204,73 +152,31 @@ export function registerSheetRoutes(router: Router) {
     const board = await boardForCreatingSheet(userId, boardId);
     const body = (await readJsonBody(ctx.req)) as CreateSheetRequest;
 
-    const imageIds = body.imageIds.slice(0, SHEET_LIMIT);
-    if (imageIds.length === 0) {
+    if (
+      !Array.isArray(body.imageIds) ||
+      !body.imageIds.every((id) => typeof id === 'string') ||
+      typeof body.name !== 'string'
+    ) {
+      return json(ctx.res, 400, {
+        error: 'a sheet takes a name and imageIds',
+      });
+    }
+    if (body.imageIds.length === 0) {
       return json(ctx.res, 400, { error: 'no images' });
     }
-
-    const { rows: imageRows } = await pool.query(
-      'SELECT id, width, height FROM images WHERE board_id = $1 AND id = ANY($2::uuid[])',
-      [boardId, imageIds],
+    // Phase 2 section 4: an explicit centre (shared/sheet/layout.ts's
+    // ringLayout, sent by the client) wins per picture (layout.ts).
+    const made = await createSheet(
+      boardId,
+      body.name,
+      body.imageIds,
+      userId,
+      body.positions,
     );
-    const byId = new Map(imageRows.map((r) => [r.id, r]));
-    const ordered = imageIds
-      .map((id) => byId.get(id))
-      .filter((r): r is NonNullable<typeof r> => !!r);
-    if (ordered.length === 0) {
+    if (!made) {
       return json(ctx.res, 400, { error: 'no images on this board' });
     }
-
-    // Phase 2 section 4: an explicit centre (e.g. shared/sheet/layout.ts's
-    // ringLayout, sent by the client) wins per-image; anything else falls
-    // back to the grid this route has always used. Only x/y come from
-    // `positions` — width/height are still the image's own, fit-scaled.
-    const cols = Math.max(1, Math.ceil(Math.sqrt(ordered.length)));
-    const elements = ordered.map((img, i) => {
-      const scale = Math.min(FIT / img.width, FIT / img.height, 1);
-      const w = img.width * scale;
-      const h = img.height * scale;
-      const centre = body.positions?.[img.id];
-      let x: number;
-      let y: number;
-      if (centre) {
-        x = centre.x - w / 2;
-        y = centre.y - h / 2;
-      } else {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        x = col * CELL + (CELL - w) / 2;
-        y = row * CELL + (CELL - h) / 2;
-      }
-      return makeImageElement(img.id, x, y, w, h, i + 1);
-    });
-
-    const client = await pool.connect();
-    let sheetId: string;
-    try {
-      await client.query('BEGIN');
-      const { rows } = await client.query(
-        'INSERT INTO sheets (board_id, name, created_by) VALUES ($1,$2,$3) RETURNING id',
-        [boardId, body.name, userId],
-      );
-      sheetId = rows[0].id;
-      for (const img of ordered) {
-        await client.query(
-          'INSERT INTO sheet_images (sheet_id, image_id) VALUES ($1,$2)',
-          [sheetId, img.id],
-        );
-      }
-      await client.query(
-        'INSERT INTO sheet_snapshots (sheet_id, elements, saved_at) VALUES ($1,$2,now())',
-        [sheetId, JSON.stringify(elements)],
-      );
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    const sheetId = made.id;
 
     // docs/phases/6-product.md "Group activity feed": "sheet started" —
     // best-effort, never fails sheet creation itself.
@@ -408,130 +314,16 @@ export function registerSheetRoutes(router: Router) {
     ) {
       return json(ctx.res, 400, { error: 'imageIds must be an array of ids' });
     }
-    const requested = body.imageIds;
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const lockedSheet = await client.query(
-        'SELECT id FROM sheets WHERE id = $1 FOR UPDATE',
-        [sheet.id],
-      );
-      if (lockedSheet.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return json(ctx.res, 404, { reason: 'sheet not found' });
-      }
-      const { rows: existingRows } = await client.query(
-        'SELECT image_id FROM sheet_images WHERE sheet_id = $1',
-        [sheet.id],
-      );
-      const already = new Set(existingRows.map((r) => r.image_id as string));
-      const existingCount = already.size;
-
-      // Dedupe the request itself, preserving first-seen order; anything
-      // already on the sheet is skipped (reported once even if repeated in
-      // the request).
-      const seen = new Set<string>();
-      const wanted: string[] = [];
-      const skipped: string[] = [];
-      for (const id of requested) {
-        if (seen.has(id)) continue;
-        seen.add(id);
-        if (already.has(id)) skipped.push(id);
-        else wanted.push(id);
-      }
-
-      let ordered: { id: string; width: number; height: number }[] = [];
-      if (wanted.length > 0) {
-        const { rows: imageRows } = await client.query(
-          'SELECT id, width, height FROM images WHERE board_id = $1 AND id = ANY($2::uuid[])',
-          [boardId, wanted],
-        );
-        const byId = new Map(imageRows.map((r) => [r.id, r]));
-        ordered = wanted
-          .map((id) => byId.get(id))
-          .filter((r): r is NonNullable<typeof r> => !!r);
-        const notOnBoard = wanted.filter((id) => !byId.has(id));
-        skipped.push(...notOnBoard);
-      }
-
-      // Cap at SHEET_LIMIT total, same cap sheet creation itself uses
-      // (shared/sheet/elements.ts) — the over-cap ones are skipped, not
-      // refused outright (docs/ux/design.md §5.1 "no action is ever refused
-      // outright").
-      const room = Math.max(0, SHEET_LIMIT - existingCount);
-      const toAdd = ordered.slice(0, room);
-      skipped.push(...ordered.slice(room).map((r) => r.id));
-
-      if (toAdd.length === 0) {
-        await client.query('COMMIT');
-        const response: AddImagesToSheetResponse = { added: [], skipped };
-        return json(ctx.res, 200, response);
-      }
-
-      // Bounding box of the existing content, from the CURRENT snapshot
-      // (foreign-never-in-scene.md's own discipline, applied here: act on
-      // polled/stored state, rebased at write time, never a stale cache) —
-      // own image elements only (customData.kind === 'image'); a sheet
-      // holding no images yet starts the grid at the origin.
-      const { rows: snapshotRows } = await client.query(
-        'SELECT elements FROM sheet_snapshots WHERE sheet_id = $1',
-        [sheet.id],
-      );
-      const stored = (snapshotRows.length ? snapshotRows[0].elements : []) as {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-        customData?: { kind?: string };
-      }[];
-      const ownImages = stored.filter((e) => e.customData?.kind === 'image');
-      const maxX = ownImages.reduce((m, e) => Math.max(m, e.x + e.width), 0);
-      const minY = ownImages.length
-        ? Math.min(...ownImages.map((e) => e.y))
-        : 0;
-      const startX = ownImages.length ? maxX + CELL : 0;
-
-      const cols = Math.max(1, Math.ceil(Math.sqrt(toAdd.length)));
-      const newElements = toAdd.map((img, i) => {
-        const scale = Math.min(FIT / img.width, FIT / img.height, 1);
-        const w = img.width * scale;
-        const h = img.height * scale;
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const x = startX + col * CELL + (CELL - w) / 2;
-        const y = minY + row * CELL + (CELL - h) / 2;
-        return makeImageElement(img.id, x, y, w, h, i + 1);
-      });
-
-      for (const img of toAdd) {
-        await client.query(
-          'INSERT INTO sheet_images (sheet_id, image_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-          [sheet.id, img.id],
-        );
-      }
-      const saved = await saveSnapshotAndProjectInTransaction(
-        client,
-        sheet.id,
-        newElements,
-      );
-      await client.query('COMMIT');
-
-      // The snapshot is committed before the room sees the same full merged
-      // scene. Clients and the later room debounce use the normal version
-      // merge path, so a stale peer scene cannot remove these additions.
-      broadcastSheetScene(sheet.id, saved.elements, userId);
-
-      const response: AddImagesToSheetResponse = {
-        added: toAdd.map((img) => img.id),
-        skipped,
-      };
-      json(ctx.res, 200, response);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    const result = await addImages(sheet.id, boardId, body.imageIds);
+    if (!result) return json(ctx.res, 404, { reason: 'sheet not found' });
+    // Committed before the room sees the whole merged scene, so a stale
+    // peer scene cannot remove the additions (the version merge).
+    if (result.scene) broadcastSheetScene(sheet.id, result.scene, userId);
+    const response: AddImagesToSheetResponse = {
+      added: result.added,
+      skipped: result.skipped,
+    };
+    json(ctx.res, 200, response);
   });
 
   // GET /sheets/:id/footprint (docs/phases/3-groups.md section 4): how many
