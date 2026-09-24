@@ -177,6 +177,29 @@ another board and download (walk claim 18), presence on the board (walk
 claim 19), region-level label suggestions, and the whole web of one
 relation. Label-suggestion tuning waits for a board with real labels.
 
+## Deployed (2026-09-23, evening)
+
+- **Repo:** https://github.com/micahchoo/digsite (public). Before the first
+  push every commit's author and committer email was rewritten to
+  `47268348+micahchoo@users.noreply.github.com` (the owner asked). **Every
+  hash changed**, so hashes quoted below and in docs/roadmap.md are the old
+  ones; find a commit by its subject. Local `main` tracks `origin/main`, and
+  this repo's `user.email` is the noreply address.
+- **Stack:** Portainer stack `digsite` on this host
+  (`deploy/portainer-stack.yml`, `deploy/portainer-deploy.sh`, notes in
+  `deploy/PORTAINER.md`). Containers `digsite-prod-db`, `digsite-server`,
+  `digsite-web` on nginx-proxy-manager's `nginx_network`; no published port.
+  Settings and secrets in `deploy/.env` (ignored by git; mode 600).
+  Web `https://dig.khattamicah.xyz`, API `https://api.dig.khattamicah.xyz`.
+  EMBEDDINGS=on (CLIP loaded in the container), SIGNUP=invite,
+  OPERATOR_EMAILS=the owner, 20 GB a group, 3 groups a person.
+- **Left to the owner:** DNS for both names, the two NPM proxy hosts
+  (PORTAINER.md §4: websockets on, `client_max_body_size 110m` on the API),
+  then the first sign-in. Backups are not scheduled yet.
+- New in the code: Settings › Accounts (operators reset a password; sessions
+  end), invite-only sign-up, a cap on groups a person creates
+  (CONTEXT.md "Operator", "Sign-up").
+
 ## Architecture passes 2 and 3 (2026-09-23, afternoon and evening; committed)
 
 The user ran /improve-codebase-architecture, asked for the fixes, a second
