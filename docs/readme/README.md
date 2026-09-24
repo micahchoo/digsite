@@ -20,6 +20,23 @@ bun docs/readme/scripts/fetch-aic.ts /tmp/aic
 cd e2e && GROUP=<group id> bun ../docs/readme/scripts/load.ts /tmp/aic
 ```
 
+## Fill it with a study
+
+`study.ts` is an example of the board in use: six sheets, each a question a
+student of the collection would ask ("Names of kings", "What \"seal\"
+means", …), with 54 regions and 29 connections, their properties,
+confidence and notes. `annotate.ts` draws it through the sheet page's own
+tools, so the claims are stamped and projected like hand-drawn ones.
+
+```
+cd e2e && BOARD=<board id> SERVER_ORIGIN=... WEB_ORIGIN=... bun ../docs/readme/scripts/annotate.ts
+```
+
+It finds each picture by the `aic` property `load.ts` sets, so it needs a
+board loaded by this `load.ts`. A search that no longer returns a picture
+the study names stops the run and names the id. Each run adds six sheets;
+`clean.ts` removes them, and it also removes the ones the recordings need.
+
 Run it with `EMBEDDINGS=on` on the server: `find` asks by meaning and
 arranges by meaning.
 

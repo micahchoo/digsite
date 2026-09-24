@@ -14,6 +14,7 @@ const drop = new Set([
 type Meta = {
   file: string;
   query: string;
+  id: number;
   title: string;
   place: string | null;
   year: number | null;
@@ -61,7 +62,12 @@ for (let i = 0; i < meta.length; i += 20) {
   for (const [j, img] of up.json.entries()) {
     const m = chunk[j];
     if (!m) continue;
-    const properties: Record<string, unknown> = { type: m.type, find: m.query };
+    // `aic` is the artwork's id at the source: study.ts names pictures by it.
+    const properties: Record<string, unknown> = {
+      type: m.type,
+      find: m.query,
+      aic: m.id,
+    };
     if (m.place) properties.place = m.place;
     if (typeof m.year === 'number') properties.year = m.year;
     if (m.medium) properties.medium = m.medium.slice(0, 80);
