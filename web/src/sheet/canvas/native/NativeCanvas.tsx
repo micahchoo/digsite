@@ -1,14 +1,14 @@
 // The native adapter's one component: a plain `<canvas>`, sized to its
 // container with devicePixelRatio, drawn every frame by `render.ts` from
-// this file's own element/viewport/selection state.
+// the sheet's scene (sheet-scene.ts) and this file's viewport.
 //
 // Its division of labour is:
 // `camera.ts` is the arithmetic, `gestures.ts` decides what a pointer press
 // means, `scene.ts` is what is on screen and what a point lands on,
-// `history.ts`/`ops.ts` are the undo stack and the patch/build logic,
+// `sheet-scene.ts` holds the elements, the selection and the undo history,
 // `images.ts` is the decoded-bitmap cache, `render.ts` draws one frame. This
 // file is the seam: DOM events in, `CanvasHandle` out, nothing else.
-import { dataOf, mergeByVersion } from '@digsite/shared';
+import { dataOf } from '@digsite/shared';
 import {
   forwardRef,
   useCallback,
@@ -44,11 +44,8 @@ import {
   selectionAfterClick,
   selectionAfterMarquee,
 } from './gestures.ts';
-import { History, applyStep } from './history.ts';
 import { ImageCache } from './images.ts';
-import { applyPatch, diffForHistory, finalizeDrag } from './ops.ts';
 import { renderFrame } from './render.ts';
-import { restoreElements } from './restore.ts';
 import {
   type HandleId,
   type Hit,
@@ -58,9 +55,9 @@ import {
   hitGrip,
   marqueeSelect,
   resizeRegion,
-  retargetEdges,
   selectedGroupMembers,
 } from './scene.ts';
+import { createSheetScene } from './sheet-scene.ts';
 import type { SpatialIndex } from './spatial.ts';
 
 const ZERO_VIEWPORT: Viewport = { scrollX: 0, scrollY: 0, zoom: 1 };
@@ -123,10 +120,14 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
     const sizeRef = useRef({ width: 0, height: 0, dpr: 1 });
 
-    const elementsRef = useRef<SceneElement[]>([]);
+    // The scene tells `sceneChanged` what to redraw and announce; the
+    // callback is filled in below, once scheduleRender and emitChange exist.
+    const sceneChanged = useRef<(what: { remote: boolean }) => void>(() => {});
+    const sceneRef = useRef<ReturnType<typeof createSheetScene> | null>(null);
+    if (!sceneRef.current)
+      sceneRef.current = createSheetScene((what) => sceneChanged.current(what));
+    const scene = sceneRef.current;
     const viewportRef = useRef<Viewport>(ZERO_VIEWPORT);
-    const selectedIdsRef = useRef<Set<string>>(new Set());
-    const historyRef = useRef(new History());
     const imagesRef = useRef(new ImageCache());
     const indexRef = useRef<{
       index: SpatialIndex;
@@ -149,9 +150,9 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
 
     const spatialIndex = useCallback((): SpatialIndex => {
       const held = indexRef.current;
-      if (held && held.elements === elementsRef.current) return held.index;
-      const index = buildIndex(elementsRef.current);
-      indexRef.current = { index, elements: elementsRef.current };
+      if (held && held.elements === scene.elements()) return held.index;
+      const index = buildIndex(scene.elements());
+      indexRef.current = { index, elements: scene.elements() };
       return index;
     }, []);
 
@@ -170,8 +171,8 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         width,
         height,
         viewport: viewportRef.current,
-        elements: elementsRef.current,
-        selectedIds: selectedIdsRef.current,
+        elements: scene.elements(),
+        selectedIds: scene.selectedSet(),
         images: imagesRef.current,
         marquee,
         dimRelations,
@@ -195,12 +196,16 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
 
     const emitChange = useCallback(() => {
       const change: SceneChange = {
-        elements: elementsRef.current,
+        elements: scene.elements(),
         viewport: viewportRef.current,
-        selectedIds: [...selectedIdsRef.current],
+        selectedIds: scene.selectedIds(),
       };
       onChangeRef.current(change);
     }, []);
+    sceneChanged.current = ({ remote }) => {
+      scheduleRender();
+      if (!remote) emitChange();
+    };
 
     // -- sizing -----------------------------------------------------------
     useEffect(() => {
@@ -251,21 +256,17 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
     );
 
     const selectedRegionRect = useCallback((): Rect | null => {
-      if (selectedIdsRef.current.size !== 1) return null;
-      const [id] = selectedIdsRef.current;
-      const el = elementsRef.current.find((e) => e.id === id);
+      if (scene.selectedSet().size !== 1) return null;
+      const [id] = scene.selectedSet();
+      const el = scene.elements().find((e) => e.id === id);
       if (!el || el.isDeleted) return null;
       if (dataOf(el)?.kind !== 'region') return null;
       return { x: el.x, y: el.y, width: el.width, height: el.height };
     }, []);
 
     const setSelection = useCallback(
-      (ids: string[]) => {
-        selectedIdsRef.current = new Set(ids);
-        scheduleRender();
-        emitChange();
-      },
-      [scheduleRender, emitChange],
+      (ids: string[]) => scene.select(ids),
+      [scene],
     );
 
     // -- pointer handling (select/pan only — DrawLayer.tsx owns region/edge) --
@@ -296,7 +297,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         });
         const hit = hitAt(
           worldPt,
-          elementsRef.current,
+          scene.elements(),
           viewportRef.current.zoom,
           spatialIndex(),
         );
@@ -322,16 +323,16 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
             startWorld: pending.worldStart,
             nowWorld: pending.worldStart,
             additive: true,
-            selectedAtStart: [...selectedIdsRef.current],
+            selectedAtStart: scene.selectedIds(),
           };
         }
-        if (pending.grip && selectedIdsRef.current.size === 1) {
-          const [regionId] = selectedIdsRef.current;
+        if (pending.grip && scene.selectedSet().size === 1) {
+          const [regionId] = scene.selectedSet();
           const rect = selectedRegionRect();
           if (regionId && rect) {
             return {
               kind: 'resize',
-              origin: elementsRef.current,
+              origin: scene.elements(),
               regionId,
               handle: pending.grip,
               originRect: rect,
@@ -347,13 +348,13 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           return { kind: 'pan', lastScreen: pending.screenStart };
         if (decided === 'move' && pending.hit) {
           const ids = selectedGroupMembers(
-            elementsRef.current,
+            scene.elements(),
             pending.hit.id,
-            [...selectedIdsRef.current],
+            scene.selectedIds(),
           );
           return {
             kind: 'move',
-            origin: elementsRef.current,
+            origin: scene.elements(),
             ids,
             startWorld: pending.worldStart,
           };
@@ -376,7 +377,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         if (!drag && mode === 'select') {
           const hit = hitAt(
             worldPt,
-            elementsRef.current,
+            scene.elements(),
             viewportRef.current.zoom,
             spatialIndex(),
           );
@@ -436,21 +437,19 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           const shifted = drag.origin.map((el) =>
             drag.ids.has(el.id) ? { ...el, x: el.x + dx, y: el.y + dy } : el,
           );
-          elementsRef.current = retargetEdges(shifted);
-          scheduleRender();
-          emitChange();
+          scene.preview(shifted);
           return;
         }
         if (drag.kind === 'resize') {
           const nextRect = resizeRegion(drag.originRect, drag.handle, worldPt);
-          const resized = elementsRef.current.map((el) =>
-            el.id === drag.regionId ? { ...el, ...nextRect } : el,
-          );
+          const resized = scene
+            .elements()
+            .map((el) =>
+              el.id === drag.regionId ? { ...el, ...nextRect } : el,
+            );
           // A region can be an edge's endpoint too — follow it the same
           // way a moved image's edges follow (retargetEdges' own contract).
-          elementsRef.current = retargetEdges(resized);
-          scheduleRender();
-          emitChange();
+          scene.preview(resized);
           return;
         }
         if (drag.kind === 'marquee') {
@@ -474,14 +473,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         }
 
         if (drag?.kind === 'move' || drag?.kind === 'resize') {
-          const { elements, entries } = finalizeDrag(
-            drag.origin,
-            elementsRef.current,
-          );
-          if (entries.length) historyRef.current.push({ entries });
-          elementsRef.current = elements;
-          scheduleRender();
-          emitChange();
+          scene.commitDrag(drag.origin);
           return;
         }
         if (drag?.kind === 'marquee') {
@@ -489,7 +481,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           setSelection(
             selectionAfterMarquee(
               drag.selectedAtStart,
-              marqueeSelect(elementsRef.current, band),
+              marqueeSelect(scene.elements(), band),
               drag.additive,
             ),
           );
@@ -501,7 +493,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         if (pending) {
           setSelection(
             selectionAfterClick(
-              [...selectedIdsRef.current],
+              scene.selectedIds(),
               pending.hit?.id ?? null,
               pending.additive,
             ),
@@ -570,10 +562,10 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           (e.key === 'Delete' || e.key === 'Backspace') &&
           toolRef.current === 'select'
         ) {
-          if (!selectedIdsRef.current.size) return;
+          if (!scene.selectedSet().size) return;
           e.preventDefault();
           handleRef.current?.apply([
-            { op: 'remove', ids: [...selectedIdsRef.current] },
+            { op: 'remove', ids: scene.selectedIds() },
           ]);
           setSelection([]);
         }
@@ -587,7 +579,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
       };
-      // `handleRef`/`toolRef`/`selectedIdsRef` are refs, read fresh every
+      // `handleRef`/`toolRef`/`sceneRef` are refs, read fresh every
       // call — this effect only ever needs to re-subscribe if `setSelection`
       // itself changed identity, and it never does (its own useCallback has
       // an empty dependency array).
@@ -596,47 +588,11 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
     // -- the imperative handle ------------------------------------------------
     useImperativeHandle(ref, (): CanvasHandle => {
       const handle: CanvasHandle = {
-        elements() {
-          return elementsRef.current;
-        },
-        apply(patch, opts) {
-          const built = retargetEdges(applyPatch(patch, elementsRef.current));
-          if (opts?.history !== false) {
-            const entries = diffForHistory(elementsRef.current, built);
-            if (entries.length) historyRef.current.push({ entries });
-          }
-          elementsRef.current = built;
-          scheduleRender();
-          emitChange();
-        },
-        applyRemote(raw) {
-          // No `onChange` here on purpose: `room.ts` calls this and then
-          // re-reads `elements()`/`viewport()` itself for its own state,
-          // Programmatic updates do not emit onChange; the owner re-reads
-          // state through this handle after applying the update.
-          elementsRef.current = mergeByVersion(
-            elementsRef.current,
-            // The wire is untyped: every element is restored to full shape
-            // here, once (restore.ts).
-            restoreElements(raw),
-          );
-          const live = new Set(
-            elementsRef.current.filter((e) => !e.isDeleted).map((e) => e.id),
-          );
-          selectedIdsRef.current = new Set(
-            [...selectedIdsRef.current].filter((id) => live.has(id)),
-          );
-          scheduleRender();
-        },
-        select(ids) {
-          const live = new Set(
-            elementsRef.current.filter((e) => !e.isDeleted).map((e) => e.id),
-          );
-          setSelection(ids.filter((id) => live.has(id)));
-        },
-        selectedIds() {
-          return [...selectedIdsRef.current];
-        },
+        elements: scene.elements,
+        apply: scene.apply,
+        applyRemote: scene.applyRemote,
+        select: scene.select,
+        selectedIds: scene.selectedIds,
         viewport() {
           return { ...viewportRef.current };
         },
@@ -656,7 +612,7 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           const screen = canvasPoint(client.x, client.y);
           const hit = hitAt(
             toWorld(viewportRef.current, screen.x, screen.y),
-            elementsRef.current,
+            scene.elements(),
             viewportRef.current.zoom,
             spatialIndex(),
           );
@@ -664,7 +620,8 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
         },
         zoomToFit(ids) {
           const wanted = ids && new Set(ids);
-          const rects = elementsRef.current
+          const rects = scene
+            .elements()
             .filter((e) => !e.isDeleted && (!wanted || wanted.has(e.id)))
             .map((e) => ({ x: e.x, y: e.y, width: e.width, height: e.height }));
           const box = boundsOf(rects);
@@ -685,20 +642,8 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           scheduleRender();
           emitChange();
         },
-        undo() {
-          const step = historyRef.current.undo();
-          if (!step) return;
-          elementsRef.current = applyStep(elementsRef.current, step, 'undo');
-          scheduleRender();
-          emitChange();
-        },
-        redo() {
-          const step = historyRef.current.redo();
-          if (!step) return;
-          elementsRef.current = applyStep(elementsRef.current, step, 'redo');
-          scheduleRender();
-          emitChange();
-        },
+        undo: scene.undo,
+        redo: scene.redo,
       };
       handleRef.current = handle;
       return handle;
