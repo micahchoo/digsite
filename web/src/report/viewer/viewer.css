@@ -51,3 +51,7 @@
   font-size: inherit;
   text-decoration: underline;
 }
+.rv-dir {
+  vertical-align: -0.15em;
+  color: var(--claim-edge);
+}

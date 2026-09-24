@@ -730,6 +730,32 @@
   color: var(--text-navigation-muted);
   font-size: var(--text-xs);
 }
+.shell-account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-m);
+  color: var(--text-navigation-muted);
+  text-decoration: none;
+}
+.shell-account:hover {
+  background: var(--surface-navigation-active);
+  color: var(--text-navigation);
+}
+.shell-account .icon {
+  flex: none;
+}
+.shell-channel-footer .shell-sign-out {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+}
 .shell-channel-footer button {
   min-height: 30px;
   padding-inline: 9px;

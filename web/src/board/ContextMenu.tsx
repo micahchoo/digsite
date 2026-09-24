@@ -10,6 +10,7 @@
 // focus lands on the first item, arrows move, Escape and Tab close and hand
 // focus back to where it was.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import './context-menu.css';
 
 export interface MenuItem {
   label: string;

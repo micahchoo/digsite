@@ -5,6 +5,7 @@
 //
 // Icons are decorative: the control that holds one names itself with
 // `aria-label` or visible text.
+import { DIRECTION_PATHS } from '@digsite/shared/icons';
 import type { SVGProps } from 'react';
 
 const PATHS = {
@@ -17,12 +18,11 @@ const PATHS = {
   menu: 'M3 5.5h14M3 10h14M3 14.5h14',
   panel:
     'M5 3.5h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Zm6.5.5v12',
-  arrowLeft: 'M15.5 10h-11m0 0L9 5.5M4.5 10 9 14.5',
-  arrowRight: 'M4.5 10h11m0 0L11 5.5m4.5 4.5L11 14.5',
+  arrowLeft: DIRECTION_PATHS.reverse,
+  arrowRight: DIRECTION_PATHS.forward,
   arrowDown: 'M10 4v12m0 0-4-4m4 4 4-4',
   arrowUp: 'M10 16V4m0 0L6 8m4-4 4 4',
-  arrowBoth:
-    'M4.5 10h11M4.5 10 8 6.5M4.5 10 8 13.5m7.5-3.5L12 6.5m3.5 3.5L12 13.5',
+  arrowBoth: DIRECTION_PATHS.both,
   // A connection's handle: drag from it to another image or region.
   connect: 'M4 10h8m0 0-3-3m3 3-3 3M15.5 10a1.5 1.5 0 1 0 0 .01',
   arrowUpRight: 'M6.5 13.5 13.5 6.5m0 0H8m5.5 0V12',
@@ -66,6 +66,12 @@ const PATHS = {
   keyboard:
     'M3.5 5.5h13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM6 8.5h.01M9 8.5h.01M12 8.5h.01M15 8.5h.01M7 11.5h6',
   report: 'M5.5 2.5h6l3.5 3.5v11.5h-9.5ZM11.5 2.5V6H15M8 10h4.5M8 13h4.5',
+  // Keep a report: a bookmark, the thing you come back to.
+  keep: 'M6 3.5h8v13l-4-3-4 3Z',
+  person:
+    'M10 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-5.5 7c.6-2.6 2.9-4.5 5.5-4.5s4.9 1.9 5.5 4.5',
+  signOut:
+    'M8.5 4H5.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M12 6.5 15.5 10 12 13.5M15.5 10H8',
 } as const;
 
 export type IconName = keyof typeof PATHS;

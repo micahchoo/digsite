@@ -30,7 +30,9 @@ async function main() {
   try {
     const page = await browser.newPage();
     await signInPage(page, 'owner@example.test', 'password1234');
-    await page.getByTestId('shell-accounts').click();
+    // Accounts is a row of Settings, for the operator only.
+    await page.getByTestId('shell-settings').click();
+    await page.getByTestId('settings-accounts').click();
     await page.waitForSelector('[data-testid="accounts-list"]');
     const listed = await page.getByTestId('accounts-list').innerText();
     assert(
@@ -60,8 +62,12 @@ async function main() {
 
     const other = await browser.newPage();
     await signInPage(other, 'member@example.test', 'password1234');
+    await other.getByTestId('shell-settings').click();
+    await other.getByTestId('settings-page').waitFor();
+    // Asked of the server; give it the moment it takes to answer no.
+    await other.waitForTimeout(1000);
     assert(
-      (await other.getByTestId('shell-accounts').count()) === 0,
+      (await other.getByTestId('settings-accounts').count()) === 0,
       'a non-operator has no Accounts link',
     );
     await other.goto(`${WEB}/settings/accounts`);

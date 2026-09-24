@@ -16,6 +16,7 @@ import {
   useImperativeHandle,
   useRef,
 } from 'react';
+import { useWheel } from '../../../lib/use-wheel.ts';
 import { usePalette } from '../../../theme/palette.ts';
 import type {
   CanvasHandle,
@@ -112,7 +113,15 @@ function typing(): boolean {
 
 export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
   function NativeCanvas(
-    { files, tool, onChange, dimRelations, captions, readOnly = false },
+    {
+      files,
+      tool,
+      onChange,
+      dimRelations,
+      captions,
+      readOnly = false,
+      wheel = 'zoom',
+    },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -138,6 +147,8 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
     toolRef.current = tool;
     const readOnlyRef = useRef(readOnly);
     readOnlyRef.current = readOnly;
+    const wheelRef = useRef(wheel);
+    wheelRef.current = wheel;
     /** What a pointer may do now: the tool, narrowed for a reader. */
     const modeNow = useCallback((): Mode => {
       if (toolRef.current === 'pan') return 'pan';
@@ -513,7 +524,11 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
 
     const applyWheel = useCallback(
       (input: WheelInput, pt: Point) => {
-        const gesture = wheelGesture(input, sizeRef.current.height);
+        const gesture = wheelGesture(
+          input,
+          sizeRef.current.height,
+          wheelRef.current,
+        );
         if (gesture.kind === 'zoom') {
           viewportRef.current = zoomAt(viewportRef.current, gesture.factor, pt);
         } else {
@@ -533,23 +548,24 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
       [scheduleRender, emitChange],
     );
 
-    const onWheel = useCallback(
-      (e: React.WheelEvent<HTMLCanvasElement>) => {
-        e.preventDefault();
-        applyWheel(
-          {
-            deltaX: e.deltaX,
-            deltaY: e.deltaY,
-            deltaMode: e.deltaMode,
-            ctrlKey: e.ctrlKey,
-            metaKey: e.metaKey,
-            shiftKey: e.shiftKey,
-          },
-          canvasPoint(e.clientX, e.clientY),
-        );
-      },
-      [applyWheel, canvasPoint],
-    );
+    useWheel(canvasRef, (e) => {
+      // A reader's canvas sits in a document: a plain wheel scrolls the
+      // document past it, and only a pinch or Ctrl+wheel zooms, as an
+      // embedded map does.
+      if (readOnlyRef.current && !e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      applyWheel(
+        {
+          deltaX: e.deltaX,
+          deltaY: e.deltaY,
+          deltaMode: e.deltaMode,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          shiftKey: e.shiftKey,
+        },
+        canvasPoint(e.clientX, e.clientY),
+      );
+    });
 
     // -- keyboard: space-pan, Delete, Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z -----------
     useEffect(() => {
@@ -675,7 +691,6 @@ export const NativeCanvas = forwardRef<CanvasHandle, CanvasProps>(
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onWheel={onWheel}
         />
       </div>
     );

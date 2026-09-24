@@ -1,11 +1,11 @@
 ---
-scope: [web/src/report/**, web/src/sheet/canvas/**, web/src/board/WebDiagram.tsx, web/src/board/web-layout.ts, web/src/components/Compare.tsx, web/src/components/compare-view.ts, web/src/components/Icon.tsx, web/src/sheet/routing.ts, web/src/sheet/labels.ts, web/src/sheet/connection-emphasis.ts, web/src/theme/palette.ts, shared/src/report/**]
+scope: [web/src/report/**, web/src/sheet/canvas/**, web/src/board/WebDiagram.tsx, web/src/board/web-layout.ts, web/src/components/Compare.tsx, web/src/components/compare-view.ts, web/src/components/Icon.tsx, web/src/sheet/routing.ts, web/src/sheet/labels.ts, web/src/sheet/connection-emphasis.ts, web/src/theme/palette.ts, web/src/lib/use-wheel.ts, shared/src/report/**]
 tags: [report, viewer, seam]
 priority: high
 source: hand-written
 checks:
   - forbid: "from '[./]*(lib/(api|auth|order-version)|sheet/(room|sync|tools))(\\.ts)?'|socket\\.io|better-auth"
-    in: [web/src/report/viewer/**, web/src/sheet/canvas/**, web/src/board/WebDiagram.tsx, web/src/board/web-layout.ts, web/src/components/Compare.tsx, web/src/components/compare-view.ts, web/src/components/Icon.tsx, web/src/sheet/routing.ts, web/src/sheet/labels.ts, web/src/sheet/connection-emphasis.ts, web/src/theme/palette.ts]
+    in: [web/src/report/viewer/**, web/src/sheet/canvas/**, web/src/board/WebDiagram.tsx, web/src/board/web-layout.ts, web/src/components/Compare.tsx, web/src/components/compare-view.ts, web/src/components/Icon.tsx, web/src/sheet/routing.ts, web/src/sheet/labels.ts, web/src/sheet/connection-emphasis.ts, web/src/theme/palette.ts, web/src/lib/use-wheel.ts]
     message: the report viewer's import tree reached a server client; a report file must run with no server
 ---
 

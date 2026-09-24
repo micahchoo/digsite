@@ -74,6 +74,7 @@ export function WebFigure({ data, pictures, selected, onSelect }: Props) {
           emphasis={null}
           label="The web of this report's connections"
           testId="report-web"
+          inPage
         />
       </div>
       <div className="rv-tools" role="toolbar" aria-label="The web">

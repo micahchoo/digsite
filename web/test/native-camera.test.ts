@@ -121,7 +121,11 @@ describe('zoomBy', () => {
 });
 
 describe('wheelGesture', () => {
-  test('scrolls plainly and zooms under ctrl or the command key', () => {
+  test('a mouse wheel zooms, as on the board; a trackpad slide pans', () => {
+    expect(wheelGesture({ deltaX: 0, deltaY: -100 }, 600)).toMatchObject({
+      kind: 'zoom',
+      into: true,
+    });
     expect(wheelGesture({ deltaX: 3, deltaY: 9 }, 600)).toEqual({
       kind: 'scroll',
       dx: 3,
@@ -147,16 +151,13 @@ describe('wheelGesture', () => {
   });
 
   test('normalises lines and pages, because Firefox does not report pixels', () => {
-    expect(wheelGesture({ deltaX: 0, deltaY: 3, deltaMode: 1 }, 600)).toEqual({
-      kind: 'scroll',
-      dx: 0,
-      dy: 48,
-    });
-    expect(wheelGesture({ deltaX: 0, deltaY: 1, deltaMode: 2 }, 600)).toEqual({
-      kind: 'scroll',
-      dx: 0,
-      dy: 600,
-    });
+    const lines = wheelGesture(
+      { deltaX: 0, deltaY: 3, deltaMode: 1, shiftKey: true },
+      600,
+    );
+    expect(lines).toEqual({ kind: 'scroll', dx: 48, dy: 0 });
+    const pages = wheelGesture({ deltaX: 0, deltaY: 1, deltaMode: 2 }, 600);
+    expect(pages).toMatchObject({ kind: 'zoom', factor: Math.exp(-0.9) });
   });
 
   test('pans a one-axis wheel sideways under shift, and leaves a trackpad alone', () => {

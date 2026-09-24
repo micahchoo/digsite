@@ -375,10 +375,13 @@ async function main() {
   );
   assert(beforeWheelPan, 'viewport was unavailable before wheel pan');
   await page.mouse.move(regionWheelBox.x + 32, regionWheelBox.y + 32);
+  // A plain wheel zooms (camera.ts#wheelGesture); Shift makes it pan.
+  await page.keyboard.down('Shift');
   await page.mouse.wheel(0, 80);
+  await page.keyboard.up('Shift');
   await page.waitForFunction(
-    (scrollY) => window.__digsiteSheetDebug?.getAppState()?.scrollY !== scrollY,
-    beforeWheelPan.scrollY,
+    (scrollX) => window.__digsiteSheetDebug?.getAppState()?.scrollX !== scrollX,
+    beforeWheelPan.scrollX,
   );
   await assertPointerAnchoredWheelZoom('tool-edge');
 

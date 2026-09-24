@@ -6,7 +6,7 @@
 // never unmounted by navigating between groups/boards/sheets.
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { Link, Outlet } from 'react-router';
-import { stopAllUploadQueues } from '../board/upload.ts';
+import { Icon } from '../components/Icon.tsx';
 import { api } from '../lib/api.ts';
 import { authClient, useSession } from '../lib/auth.ts';
 import { modalOpen } from '../lib/modal.ts';
@@ -15,8 +15,8 @@ import { GroupRail } from './GroupRail.tsx';
 import { QuickSwitcher } from './QuickSwitcher.tsx';
 import { RightColumnSetter } from './RightColumn.tsx';
 import './shell.css';
-import { Icon } from '../components/Icon.tsx';
 import { TopBar } from './TopBar.tsx';
+import { signOut } from './sign-out.ts';
 import { useShellData } from './useShellData.ts';
 
 // A debug hook, same convention as window.__digsiteBoard/window.__digsite
@@ -28,21 +28,6 @@ declare global {
   interface Window {
     __digsiteShell?: { mounts: number };
   }
-}
-
-// Slice 2 follow-up (c): after "sign out", a reload must show the sign-in
-// page every time. `authClient.signOut()` alone raced — the session
-// nanostore could still read "signed in" for a tick after the cookie
-// cleared (smoke-groups.ts's own header comment on the flake it worked
-// around by clearing the cookie directly instead of using this button).
-// Awaiting the request, THEN hard-navigating with `window.location.href`
-// (never `navigate()`) throws away every in-memory store — better-auth's
-// session cache included — so there is nothing stale left to race a
-// reload against.
-async function signOut() {
-  stopAllUploadQueues();
-  await authClient.signOut();
-  window.location.href = '/';
 }
 
 export function Shell() {
@@ -101,21 +86,6 @@ export function Shell() {
   // Sheet.tsx still carries its own inline panel (the Inspector) — moving
   // that in is slice 3's job, tracked there, not here.
   const [rightContent, setRightContent] = useState<ReactNode>(null);
-  // The Accounts link shows only for the site's operator; the server
-  // decides who that is (GET /operator).
-  const [operator, setOperator] = useState(false);
-  const signedInAs = session?.user.id;
-  useEffect(() => {
-    if (!signedInAs) return;
-    let live = true;
-    api
-      .isOperator()
-      .then((yes) => live && setOperator(yes))
-      .catch(() => live && setOperator(false));
-    return () => {
-      live = false;
-    };
-  }, [signedInAs]);
   const hasRightColumn = route.kind === 'board';
 
   return (
@@ -142,20 +112,28 @@ export function Shell() {
           activeSheetId={route.sheetId}
         />
         <div className="shell-channel-footer" data-testid="shell-user-footer">
-          <span className="muted shell-user-email">
-            {session?.user.email ?? ''}
-          </span>
-          {operator && (
-            <Link to="/settings/accounts" data-testid="shell-accounts">
-              Accounts
-            </Link>
-          )}
+          {/* The account, and where its settings live (pages/Settings.tsx). */}
+          <Link
+            to="/settings"
+            className="shell-account"
+            title="Settings"
+            aria-label={`Settings, signed in as ${session?.user.email ?? ''}`}
+            data-testid="shell-settings"
+          >
+            <Icon name="person" size={16} />
+            <span className="shell-user-email">
+              {session?.user.email ?? ''}
+            </span>
+          </Link>
           <button
             type="button"
+            className="shell-sign-out"
+            aria-label="Sign out"
+            title="Sign out"
             onClick={() => void signOut()}
             data-testid="shell-sign-out"
           >
-            Sign out
+            <Icon name="signOut" size={16} />
           </button>
         </div>
       </div>

@@ -122,10 +122,14 @@ export function zoomBy(
   return zoomAt(current, factor, { x: anchorX, y: anchorY });
 }
 
-/** What a wheel gesture asks for — ported verbatim from image-graph's
- * `wheelGesture`: the wheel scrolls, ctrl or the command key zooms;
- * `deltaMode` is normalised because Firefox reports lines and a page-mode
- * wheel reports screens; a one-axis wheel pans sideways under shift. */
+/** What a wheel gesture asks for. A mouse wheel zooms about the pointer,
+ * as the board map does (deck.gl's own wheel), so the two surfaces answer
+ * one hand the same way; before 2026-09-24 it scrolled, image-graph's rule,
+ * and a mouse could not zoom a sheet at all. A pinch (ctrl or the command
+ * key, which browsers set on a trackpad pinch) zooms too. A trackpad's
+ * two-finger slide pans: it is the one wheel that carries a sideways delta.
+ * Shift makes any wheel pan, a one-axis wheel sideways. `deltaMode` is
+ * normalised because Firefox reports lines and a page-mode wheel screens. */
 export type WheelGesture =
   | { kind: 'zoom'; factor: number; into: boolean }
   | { kind: 'scroll'; dx: number; dy: number };
@@ -133,17 +137,27 @@ export type WheelGesture =
 export function wheelGesture(
   event: WheelInput,
   viewportHeight: number,
+  /** What a plain wheel does (Settings › The wheel on a sheet). `scroll`
+   * is image-graph's rule: the wheel scrolls, Ctrl+wheel zooms. */
+  plain: 'zoom' | 'scroll' = 'zoom',
 ): WheelGesture {
   const unit =
     event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewportHeight : 1;
   let dx = event.deltaX * unit;
   let dy = event.deltaY * unit;
-  if (event.ctrlKey || event.metaKey) {
-    return { kind: 'zoom', factor: Math.exp(-dy * 0.0015), into: dy < 0 };
+  const zoom = (): WheelGesture => ({
+    kind: 'zoom',
+    factor: Math.exp(-dy * 0.0015),
+    into: dy < 0,
+  });
+  if (event.ctrlKey || event.metaKey) return zoom();
+  if (event.shiftKey) {
+    if (!dx) {
+      dx = dy;
+      dy = 0;
+    }
+    return { kind: 'scroll', dx, dy };
   }
-  if (event.shiftKey && !dx) {
-    dx = dy;
-    dy = 0;
-  }
-  return { kind: 'scroll', dx, dy };
+  if (dx || plain === 'scroll') return { kind: 'scroll', dx, dy };
+  return zoom();
 }

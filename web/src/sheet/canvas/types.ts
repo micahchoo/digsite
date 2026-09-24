@@ -187,7 +187,11 @@ export interface CanvasProps {
    * Display only, like `dimRelations`. */
   captions?: ReadonlyMap<string, string>;
   /** Look, select and pan; never move, resize, delete, undo or redo
-   * (`gestures.ts` mode `read`). A report's reader. */
+   * (`gestures.ts` mode `read`). A report's reader. A plain wheel is left
+   * to the page; Ctrl+wheel or a pinch zooms. */
   readOnly?: boolean;
+  /** What a plain mouse wheel does: zoom (the default, as on the board) or
+   * scroll, with Ctrl+wheel to zoom (lib/preferences.ts). */
+  wheel?: 'zoom' | 'scroll';
   onChange(scene: SceneChange): void;
 }

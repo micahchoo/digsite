@@ -7,6 +7,7 @@ import { Group } from './pages/Group.tsx';
 import { Groups } from './pages/Groups.tsx';
 import { Join } from './pages/Join.tsx';
 import { PublishedReport } from './pages/PublishedReport.tsx';
+import { Settings } from './pages/Settings.tsx';
 import { SignIn } from './pages/SignIn.tsx';
 import { Sheet } from './sheet/Sheet.tsx';
 import { Shell } from './shell/Shell.tsx';
@@ -45,6 +46,7 @@ export function App() {
           <Route path="/g/:id" element={<Group />} />
           <Route path="/b/:id" element={<Board />} />
           <Route path="/s/:id" element={<Sheet />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="/settings/accounts" element={<Accounts />} />
         </Route>
       </Routes>

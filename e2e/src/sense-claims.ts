@@ -754,6 +754,57 @@ async function main(): Promise<void> {
       '6c. right-click a picture or a connection: its own items first, removal last; how sure is set from the menu',
     );
 
+    // -- 6c2. A mouse wheel zooms the sheet about the pointer, and only it ----
+    {
+      const box = await m.locator('.digsite-canvas canvas').boundingBox();
+      assert(box, 'no sheet canvas');
+      const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      const view = () =>
+        m.evaluate((p) => {
+          const s = (
+            window as unknown as {
+              __digsiteSheetDebug?: {
+                getAppState: () => {
+                  scrollX: number;
+                  scrollY: number;
+                  zoom: { value: number };
+                } | null;
+              };
+            }
+          ).__digsiteSheetDebug?.getAppState();
+          const r = document
+            .querySelector('.digsite-canvas canvas')
+            ?.getBoundingClientRect();
+          if (!s || !r) return null;
+          const z = s.zoom.value;
+          return {
+            zoom: z,
+            worldX: (p.x - r.left) / z - s.scrollX,
+            worldY: (p.y - r.top) / z - s.scrollY,
+            page: window.visualViewport?.scale ?? 1,
+          };
+        }, at);
+      await m.mouse.move(at.x, at.y);
+      const before = await view();
+      await m.mouse.wheel(0, -300);
+      await m.waitForTimeout(200);
+      const after = await view();
+      assert(
+        before &&
+          after &&
+          after.zoom > before.zoom * 1.2 &&
+          Math.abs(after.worldX - before.worldX) < 0.5 &&
+          Math.abs(after.worldY - before.worldY) < 0.5 &&
+          after.page === 1,
+        `a wheel over the sheet should zoom it about the pointer: ${JSON.stringify({ before, after })}`,
+      );
+      await m.mouse.wheel(0, 300);
+      await m.waitForTimeout(200);
+      pass(
+        '6c2. a mouse wheel zooms the sheet about the pointer, and not the page',
+      );
+    }
+
     // -- 6d. Names under pictures; a group reads as one; the cursor warns ------
     await m.keyboard.press('Escape');
     await m.evaluate(() =>

@@ -8,6 +8,7 @@
 // portals into the document's own claim cards, so they sit where the
 // reader is reading and take the document's styles.
 import {
+  DIRECTION_WORDS,
   type ReportClaim,
   type ReportData,
   claimGroups,
@@ -17,6 +18,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Compare, type CompareEnd } from '../../components/Compare.tsx';
+import { Icon } from '../../components/Icon.tsx';
 import { WHOLE } from '../../components/compare-view.ts';
 import { SheetFigure, type SheetFigureHandle } from './SheetFigure.tsx';
 import { WebFigure } from './WebFigure.tsx';
@@ -33,12 +35,12 @@ interface Props {
   files: HTMLElement | null;
 }
 
-const ARROW: Record<string, string> = {
-  forward: '→',
-  reverse: '←',
-  both: '↔',
-  none: '—',
-};
+const DIRECTION_ICON = {
+  forward: 'arrowRight',
+  reverse: 'arrowLeft',
+  both: 'arrowBoth',
+  none: 'minus',
+} as const;
 
 /** The Data section's files (shared/report/formats.ts), by name. */
 const DATA_FILES: Record<string, string> = {
@@ -55,6 +57,39 @@ function save(name: string, body: string) {
   a.download = name;
   a.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** A claim's two ends with its direction drawn between them. */
+function ClaimTitle({
+  claim,
+  names,
+}: {
+  claim: ReportClaim;
+  names: ReadonlyMap<string, string>;
+}) {
+  const [a, b] = claim.ends;
+  const name = (id?: string) => names.get(id ?? '') ?? 'picture';
+  if (claim.kind !== 'connection')
+    return (
+      <>
+        {claim.term || 'Unlabelled region'} on {name(a?.imageId)}
+      </>
+    );
+  const d = claim.direction ?? 'none';
+  return (
+    <>
+      {name(a?.imageId)}{' '}
+      <Icon
+        name={DIRECTION_ICON[d]}
+        size={14}
+        className="rv-dir"
+        role="img"
+        aria-hidden={false}
+        aria-label={DIRECTION_WORDS[d]}
+      />{' '}
+      {name(b?.imageId)}
+    </>
+  );
 }
 
 export function Reader({ data, pictures, cards, figure, files }: Props) {
@@ -86,7 +121,7 @@ export function Reader({ data, pictures, cards, figure, files }: Props) {
       const [a, b] = c.ends;
       const name = (id?: string) => names.get(id ?? '') ?? 'picture';
       return c.kind === 'connection'
-        ? `${name(a?.imageId)} ${ARROW[c.direction ?? 'none']} ${name(b?.imageId)}`
+        ? `${name(a?.imageId)} ${DIRECTION_WORDS[c.direction ?? 'none']} ${name(b?.imageId)}`
         : `${c.term || 'Unlabelled region'} on ${name(a?.imageId)}`;
     },
     [names],
@@ -171,16 +206,16 @@ export function Reader({ data, pictures, cards, figure, files }: Props) {
                   className="rv-link"
                   onClick={() => read(c)}
                 >
-                  {n.get(c.key)}. {titleOf(c)}
+                  {n.get(c.key)}. <ClaimTitle claim={c} names={names} />
                 </button>
               </span>
             ))}
             {focused.length > 6 && ` and ${focused.length - 6} more`}
           </>
         ) : data.scene ? (
-          'Click a claim to find it below. Drag to move around; the wheel zooms.'
+          'Click a claim to find it below. Drag to move around; pinch or Ctrl+wheel to zoom.'
         ) : (
-          'Click a picture to light its claims. Drag to move around; the wheel zooms.'
+          'Click a picture to light its claims. Drag to move around; pinch or Ctrl+wheel to zoom.'
         )}
       </p>
       {cards.map((card) => {

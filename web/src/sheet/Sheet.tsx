@@ -22,6 +22,7 @@ import { WHOLE } from '../components/compare-view.ts';
 import { api } from '../lib/api.ts';
 import { useSession } from '../lib/auth.ts';
 import { modalOpen } from '../lib/modal.ts';
+import { usePreferences } from '../lib/preferences.ts';
 import { useVocabulary, withLocalTerms } from '../lib/vocabulary.ts';
 import { ConnectLayer } from './ConnectLayer.tsx';
 import { DrawLayer } from './DrawLayer.tsx';
@@ -81,6 +82,7 @@ export function Sheet() {
     : null;
 
   const canvasRef = useRef<CanvasHandle | null>(null);
+  const { wheel: wheelPreference } = usePreferences();
   const inspectorToggleRef = useRef<HTMLButtonElement | null>(null);
   const inspectorCloseRef = useRef<HTMLButtonElement | null>(null);
   const imageMetaRef = useRef(new Map<string, ImageMeta>());
@@ -713,6 +715,7 @@ export function Sheet() {
           tool={tool}
           dimRelations={connectionRelation}
           captions={captions}
+          wheel={wheelPreference}
           onChange={onCanvasChange}
         />
         <DrawLayer

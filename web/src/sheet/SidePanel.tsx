@@ -134,26 +134,33 @@ function Header({
       >
         Show on board
       </Link>
-      {onExportReport && (
-        <button
-          type="button"
-          className="sheet-header-action"
-          data-testid="export-report"
-          onClick={onExportReport}
-        >
-          Export a report
-        </button>
-      )}
-      {onKeepReport && (
-        <button
-          type="button"
-          className="sheet-header-action"
-          data-testid="keep-report"
-          title="Keep it on digsite with an id, to cite it and see what changes"
-          onClick={onKeepReport}
-        >
-          Keep a report
-        </button>
+      {(onExportReport || onKeepReport) && (
+        <div className="sheet-header-actions">
+          {onExportReport && (
+            <button
+              type="button"
+              className="sheet-header-action"
+              data-testid="export-report"
+              title="Download this sheet's claims as one file, with its pictures"
+              onClick={onExportReport}
+            >
+              <Icon name="report" size={15} />
+              Export report
+            </button>
+          )}
+          {onKeepReport && (
+            <button
+              type="button"
+              className="sheet-header-action"
+              data-testid="keep-report"
+              title="Keep it on digsite with an id, to cite it and see what changes"
+              onClick={onKeepReport}
+            >
+              <Icon name="keep" size={15} />
+              Keep report
+            </button>
+          )}
+        </div>
       )}
       {peers.length > 0 && (
         <div className="sheet-presence" data-testid="presence-strip">

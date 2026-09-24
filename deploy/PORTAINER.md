@@ -69,8 +69,9 @@ duplicate"). On the first deploy host that file already set `5G`.
 
 Open `https://DOMAIN`. With `SIGNUP=invite`, the first account made and
 any address in `OPERATOR_EMAILS` may sign up; everyone else needs a group
-invitation. Settings › Accounts (the link under your email, operators
-only) gives a person who lost their password a new one.
+invitation. Settings › Accounts (your email at the foot of the side
+column, or the top bar's menu › All settings; operators only) gives a
+person who lost their password a new one.
 
 ## 6. Check
 

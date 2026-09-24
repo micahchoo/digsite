@@ -139,6 +139,15 @@ textarea:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+/* Settings › Motion › Reduce (lib/preferences.ts), whatever the system says. */
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
 
 .nav {
   display: flex;

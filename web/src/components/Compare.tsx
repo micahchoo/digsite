@@ -6,6 +6,7 @@
 // One zoom and one pan drive both sides (compare-view.ts). A region end is
 // framed on its region, so two regions line up corner to corner.
 import { useEffect, useRef, useState } from 'react';
+import { useWheel } from '../lib/use-wheel.ts';
 import { Icon } from './Icon.tsx';
 import {
   type Focus,
@@ -45,7 +46,11 @@ interface Props {
 
 /** The pane's size, kept current. A callback ref, because a pane unmounts
  * and remounts as the mode changes and the observer must follow it. */
-function usePaneSize(): [(el: HTMLDivElement | null) => void, Pane] {
+function usePaneSize(): [
+  (el: HTMLDivElement | null) => void,
+  Pane,
+  HTMLDivElement | null,
+] {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [size, setSize] = useState<Pane>({ width: 1, height: 1 });
   useEffect(() => {
@@ -57,7 +62,7 @@ function usePaneSize(): [(el: HTMLDivElement | null) => void, Pane] {
     observer.observe(el);
     return () => observer.disconnect();
   }, [el]);
-  return [setEl, size];
+  return [setEl, size, el];
 }
 
 export function Compare({ a, b, title, onClose }: Props) {
@@ -71,8 +76,8 @@ export function Compare({ a, b, title, onClose }: Props) {
     a: [number, number] | null;
     b: [number, number] | null;
   }>({ a: null, b: null });
-  const [paneA, sizeA] = usePaneSize();
-  const [paneB, sizeB] = usePaneSize();
+  const [paneA, sizeA, elA] = usePaneSize();
+  const [paneB, sizeB, elB] = usePaneSize();
   const drag = useRef<{ x: number; y: number; side: Side; pane: Pane } | null>(
     null,
   );
@@ -102,9 +107,15 @@ export function Compare({ a, b, title, onClose }: Props) {
   // Stacked modes draw both in pane A's frame.
   const stacked = mode !== 'side';
 
-  function onWheel(e: React.WheelEvent, side: Side | null, pane: Pane) {
+  function onWheel(
+    e: WheelEvent,
+    paneEl: Element,
+    side: Side | null,
+    pane: Pane,
+  ) {
     if (!side) return;
-    const box = e.currentTarget.getBoundingClientRect();
+    e.preventDefault();
+    const box = paneEl.getBoundingClientRect();
     const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015));
     setView((v) =>
       zoomAt(
@@ -116,6 +127,8 @@ export function Compare({ a, b, title, onClose }: Props) {
       ),
     );
   }
+  useWheel(elA, (e, el) => onWheel(e, el, sideA, sizeA));
+  useWheel(elB, (e, el) => onWheel(e, el, sideB, sizeB));
   function onPointerDown(e: React.PointerEvent, side: Side | null, pane: Pane) {
     if (!side || e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -287,7 +300,6 @@ export function Compare({ a, b, title, onClose }: Props) {
             ref={paneA}
             className="compare-pane"
             data-testid="compare-pane-a"
-            onWheel={(e) => onWheel(e, sideA, sizeA)}
             onPointerDown={(e) => onPointerDown(e, sideA, sizeA)}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
@@ -370,7 +382,6 @@ export function Compare({ a, b, title, onClose }: Props) {
               ref={paneB}
               className="compare-pane"
               data-testid="compare-pane-b"
-              onWheel={(e) => onWheel(e, sideB, sizeB)}
               onPointerDown={(e) => onPointerDown(e, sideB, sizeB)}
               onPointerMove={onPointerMove}
               onPointerUp={endDrag}

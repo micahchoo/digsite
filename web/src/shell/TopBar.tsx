@@ -4,9 +4,14 @@
 // column toggle (768–1279px) live here too (§3.2, §3.3) — both are plain
 // CSS-hidden outside their breakpoint, not conditionally rendered, so
 // there's nothing for a resize to remount.
-import { Link } from 'react-router';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router';
+import { ContextMenu } from '../board/ContextMenu.tsx';
 import { Icon } from '../components/Icon.tsx';
+import { setPreferences, usePreferences } from '../lib/preferences.ts';
 import { UploadIndicator } from './UploadIndicator.tsx';
+import { settingsMenu } from './settings-menu.ts';
+import { signOut } from './sign-out.ts';
 import type { ShellRoute } from './useShellData.ts';
 
 interface Props {
@@ -104,6 +109,9 @@ export function TopBar({
   onToggleRight,
   hasRightColumn,
 }: Props) {
+  const navigate = useNavigate();
+  const prefs = usePreferences();
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   return (
     <div className="shell-topbar" data-testid="shell-topbar">
       <button
@@ -148,11 +156,33 @@ export function TopBar({
       <button
         type="button"
         className="shell-overflow"
-        aria-label="Page actions"
+        aria-label="Settings"
+        aria-haspopup="menu"
+        aria-expanded={menuAt !== null}
+        title="Settings"
         data-testid="shell-overflow"
+        onClick={(e) => {
+          if (menuAt) return setMenuAt(null);
+          const box = e.currentTarget.getBoundingClientRect();
+          setMenuAt({ x: box.right - 240, y: box.bottom + 4 });
+        }}
       >
         <Icon name="more" />
       </button>
+      {menuAt && (
+        <ContextMenu
+          x={menuAt.x}
+          y={menuAt.y}
+          label="Settings"
+          testId="shell-settings-menu"
+          sections={settingsMenu(prefs, {
+            set: setPreferences,
+            openSettings: () => navigate('/settings'),
+            signOut: () => void signOut(),
+          })}
+          onClose={() => setMenuAt(null)}
+        />
+      )}
     </div>
   );
 }

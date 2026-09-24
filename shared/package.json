@@ -21,7 +21,8 @@
     "./report/order": "./src/report/order.ts",
     "./report/document": "./src/report/document.ts",
     "./report/changes": "./src/report/changes.ts",
-    "./report/formats": "./src/report/formats.ts"
+    "./report/formats": "./src/report/formats.ts",
+    "./icons": "./src/icons.ts"
   },
   "scripts": {
     "test": "bun test",

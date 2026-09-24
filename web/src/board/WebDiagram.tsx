@@ -12,6 +12,7 @@ import {
   useState,
 } from 'react';
 import { useEffect } from 'react';
+import { useWheel } from '../lib/use-wheel.ts';
 import { type LayoutEdge, NODE, type Placed } from './web-layout.ts';
 
 export type WebEdge = LayoutEdge & {
@@ -42,6 +43,9 @@ interface Props {
   /** Names the drawing for a screen reader when no dialog does. */
   label?: string;
   testId?: string;
+  /** In a document: a plain wheel scrolls the page, a pinch or Ctrl+wheel
+   * zooms (the report's web figure). Otherwise every wheel zooms. */
+  inPage?: boolean;
 }
 
 const THUMB = 72;
@@ -88,6 +92,7 @@ export const WebDiagram = forwardRef<WebDiagramHandle, Props>(
       emphasis,
       label,
       testId = 'web-view-canvas',
+      inPage = false,
     },
     ref,
   ) {
@@ -131,6 +136,20 @@ export const WebDiagram = forwardRef<WebDiagramHandle, Props>(
       return out;
     }, [edges]);
 
+    useWheel(svgRef, (e, svg) => {
+      if (inPage && !e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const box = svg.getBoundingClientRect();
+      const px = e.clientX - box.left;
+      const py = e.clientY - box.top;
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      setView((v) => {
+        const scale = Math.min(4, Math.max(0.1, v.scale * factor));
+        const k = scale / v.scale;
+        return { scale, x: px - (px - v.x) * k, y: py - (py - v.y) * k };
+      });
+    });
+
     const touching = (e: WebEdge, id: string | null) =>
       id !== null && (e.source.imageId === id || e.target.imageId === id);
     const showLabels = edges.length <= 40;
@@ -142,17 +161,6 @@ export const WebDiagram = forwardRef<WebDiagramHandle, Props>(
         data-testid={testId}
         role={label ? 'img' : undefined}
         aria-label={label}
-        onWheel={(e) => {
-          const box = e.currentTarget.getBoundingClientRect();
-          const px = e.clientX - box.left;
-          const py = e.clientY - box.top;
-          const factor = Math.exp(-e.deltaY * 0.0015);
-          setView((v) => {
-            const scale = Math.min(4, Math.max(0.1, v.scale * factor));
-            const k = scale / v.scale;
-            return { scale, x: px - (px - v.x) * k, y: py - (py - v.y) * k };
-          });
-        }}
         onPointerDown={(e) => {
           if (e.button !== 0 || e.target !== e.currentTarget) return;
           e.currentTarget.setPointerCapture(e.pointerId);

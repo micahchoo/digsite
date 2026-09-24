@@ -33,6 +33,7 @@ import {
 } from '@digsite/shared';
 import { useEffect, useRef, useState } from 'react';
 import { TermInput } from '../components/TermInput.tsx';
+import { useWheel } from '../lib/use-wheel.ts';
 import type { Tool, WheelInput } from './canvas/types.ts';
 import {
   type Point,
@@ -130,6 +131,27 @@ export function DrawLayer({
   // The keyboard loop: the image the last region went on, and what Tab
   // needs to read at the moment it is pressed.
   const currentImageRef = useRef<string | null>(null);
+  // The layer is there only while Region or Edge is on, so the wheel
+  // follows the element, not a ref read once.
+  const [layerEl, setLayerEl] = useState<HTMLDivElement | null>(null);
+  useWheel(layerEl, (e, layer) => {
+    e.preventDefault();
+    onWheel(
+      {
+        deltaX: e.deltaX,
+        deltaY: e.deltaY,
+        deltaMode: e.deltaMode,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        shiftKey: e.shiftKey,
+      },
+      clientPoint({
+        currentTarget: layer,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      }),
+    );
+  });
   const loopRef = useRef({ tool, elements, tools, labelOpen: false });
   loopRef.current = { tool, elements, tools, labelOpen: labelFor !== null };
 
@@ -322,21 +344,6 @@ export function DrawLayer({
     });
   }
 
-  function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
-    e.preventDefault();
-    onWheel(
-      {
-        deltaX: e.deltaX,
-        deltaY: e.deltaY,
-        deltaMode: e.deltaMode,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-        shiftKey: e.shiftKey,
-      },
-      clientPoint(e),
-    );
-  }
-
   function commitLabel(value = labelValue) {
     if (labelFor) tools.setProperty(labelFor.id, 'label', value.trim());
     setLabelFor(null);
@@ -368,12 +375,12 @@ export function DrawLayer({
     // Same layer as the foreign overlay (sheet.css's z-index) — both sit
     // above the canvas, below product controls.
     <div
+      ref={setLayerEl}
       data-testid="draw-layer"
       className="sheet-draw-layer"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onWheel={handleWheel}
     >
       <svg aria-hidden="true" className="sheet-draw-svg">
         {previewScreen && (

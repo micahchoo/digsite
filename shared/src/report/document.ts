@@ -14,6 +14,7 @@
 // no second copy of any pixel, and it prints.
 //
 // Pure. Every text is escaped; nothing typed on a sheet is markup.
+import { DIRECTION_PATHS, DIRECTION_WORDS } from '../icons.ts';
 import type { Properties } from '../sheet/elements.ts';
 import {
   type ReportClaim,
@@ -96,12 +97,13 @@ export function scopeSentence(data: ReportData): string {
   }
 }
 
-const ARROW: Record<string, string> = {
-  forward: '→',
-  reverse: '←',
-  both: '↔',
-  none: '—',
-};
+type Dir = keyof typeof DIRECTION_PATHS;
+
+/** A connection's direction, drawn (icons.ts), never a typed arrow. */
+function arrow(direction: Dir | null, className: string): string {
+  const d = direction ?? 'none';
+  return `<svg class="${className}" viewBox="0 0 20 20" role="img" aria-label="${DIRECTION_WORDS[d]}"><path d="${DIRECTION_PATHS[d]}"/></svg>`;
+}
 
 /** The document's own id for a picture's <image>: by position, short. */
 type Pictures = Map<string, { image: ReportImage; ref: string | null }>;
@@ -249,11 +251,11 @@ function claimSection(
   const [a, b] = claim.ends;
   const title =
     claim.kind === 'connection'
-      ? `${e(name(a))} ${ARROW[claim.direction ?? 'none']} ${e(name(b))}`
+      ? `${e(name(a))} ${arrow(claim.direction, 'dir')} ${e(name(b))}`
       : `${e(claim.term || 'Unlabelled region')} <span class="on">on ${e(name(a))}</span>`;
   const ends =
     claim.kind === 'connection' && a && b
-      ? `${endFigure(pics, a)}<div class="arrow" aria-label="${e(claim.direction ?? 'none')}">${ARROW[claim.direction ?? 'none']}</div>${endFigure(pics, b)}`
+      ? `${endFigure(pics, a)}<div class="arrow">${arrow(claim.direction, 'dir-large')}</div>${endFigure(pics, b)}`
       : claim.ends.map((end) => endFigure(pics, end)).join('');
   const replies = claim.replies.length
     ? `<h4>Discussion</h4><ol class="replies">${claim.replies
@@ -383,7 +385,10 @@ h3 .on{color:var(--text-secondary);font-weight:400}
 .mark-disagree{border:1px solid var(--danger);color:var(--danger)}
 h4{margin:var(--space-4) 0 var(--space-1);font-size:var(--text-sm);color:var(--text-secondary)}
 .ends{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap}
-.arrow{font-size:var(--text-2xl);color:var(--claim-edge)}
+.arrow{display:grid;place-items:center;color:var(--claim-edge)}
+.dir,.dir-large{fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+.dir{width:1em;height:1em;vertical-align:-.15em;color:var(--claim-edge)}
+.dir-large{width:32px;height:32px}
 figure.end{margin:0;max-width:100%;display:grid;grid-template-columns:auto auto;justify-content:start;gap:var(--space-2);align-items:end}
 figure.end figcaption{grid-column:1/-1}
 .crop{display:block;max-width:100%;height:auto;border-radius:var(--radius-m);border:1px solid var(--line);background:var(--placeholder)}

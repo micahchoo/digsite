@@ -4,6 +4,23 @@ Updated 2026-09-22 after the upload-throughput and interface Luna pass.
 The product repository is `app/`; roadmap: `docs/roadmap.md`.
 Nothing was deployed. The isolated functional preview uses ports 5292/8892.
 
+## Wheel, Settings, drawn icons (2026-09-24, the same third session)
+
+- A mouse wheel zooms a sheet about the pointer, as the board does
+  (`camera.ts#wheelGesture`); a trackpad's sideways slide and Shift+wheel
+  pan. Every wheel listener is native and not passive (`lib/use-wheel.ts`):
+  React's `onWheel` is passive, so Ctrl+wheel zoomed the whole page too. A
+  report's figures leave a plain wheel to the page (Ctrl+wheel zooms).
+- Settings (`pages/Settings.tsx`, `/settings`): theme, motion, the wheel,
+  account, and Accounts for the operator. Per device (`lib/preferences.ts`),
+  applied before first paint. The top bar's `⋯`, which did nothing, is the
+  settings menu (`shell/settings-menu.ts`). The footer's email is the link.
+- Icons: `.claude/rules/icons-are-drawn.md` forbids typed glyph icons; the
+  report's direction arrows are drawn from `shared/src/icons.ts`. The
+  context menu has its own stylesheet (it had none off the board page).
+- All seven e2e suites pass; sense-claims 2b timed out once in the full
+  run and passed on rerun alone.
+
 ## Report export (2026-09-23, a third session)
 
 Seven horizons, all committed on main (`aeee3c9`..`059acc6`), the table in
