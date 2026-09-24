@@ -91,12 +91,20 @@ export function registerGroupRoutes(router: Router) {
   router.post('/groups', async (ctx) => {
     const userId = requireAuth(ctx);
     const body = (await readJsonBody(ctx.req)) as CreateGroupRequest;
-    const org = await auth.api.createOrganization({
-      body: { name: body.name, slug: slugify(body.name) },
-      headers: fromNodeHeaders(ctx.req.headers),
-    });
-    const response: CreateGroupResponse = { id: org?.id };
-    json(ctx.res, 200, response);
+    try {
+      const org = await auth.api.createOrganization({
+        body: { name: body.name, slug: slugify(body.name) },
+        headers: fromNodeHeaders(ctx.req.headers),
+      });
+      const response: CreateGroupResponse = { id: org?.id };
+      json(ctx.res, 200, response);
+    } catch (err) {
+      // The plugin's own refusals (the groups-per-person limit, a name
+      // already taken) are the asker's: 4xx with its reason.
+      const refused = authApiErrorResponse(err);
+      if (!refused) throw err;
+      json(ctx.res, refused.status, { reason: refused.reason });
+    }
   });
 
   router.get('/groups', async (ctx) => {

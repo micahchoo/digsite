@@ -567,6 +567,22 @@ const EXPECTATIONS: Record<string, Expectation> = {
     path: (fx) => `/sheets/${fx.sheetId}/rows`,
     outsider: 403,
   },
+  // The site's operator (site/routes.ts): an outsider is not one.
+  'GET /operator': {
+    method: 'GET',
+    path: () => '/operator',
+    outsider: 403,
+  },
+  'GET /operator/accounts': {
+    method: 'GET',
+    path: () => '/operator/accounts',
+    outsider: 403,
+  },
+  'POST /operator/accounts/:id/password': {
+    method: 'POST',
+    path: (fx) => `/operator/accounts/${fx.memberUserId}/password`,
+    outsider: 403,
+  },
   'GET /stats': {
     // Global, non-object counters (room.ts's roomStats) — requireAuth
     // only, by design; nothing here is per-group or per-board.

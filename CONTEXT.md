@@ -9,6 +9,12 @@ line here before it gets a file.
 - **Group** — the unit of membership. A Better Auth *organization*. Joining
   is by invitation; an invitation is single-use and expires. Discord's
   "server".
+- **Operator** — whoever runs the site, named by email in the server's
+  `OPERATOR_EMAILS`. Not a group role. May always make an account, sees
+  every account (Settings › Accounts), and gives a person a new password
+  when they have lost theirs; their sessions end. Nothing is emailed.
+- **Sign-up** — making an account. `open`, or `invite`: only the first
+  account, an operator, or an email with a pending group invitation.
 - **Member** — a user in a group, with a role `owner`, `admin` or `member`.
   Roles are the plugin's. Any member may create a board.
 - **Board** — belongs to one group; holds its own **images**. Either

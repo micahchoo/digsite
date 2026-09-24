@@ -538,3 +538,21 @@ export type ListJobsResponse = JobSummary[];
 /** POST /jobs/:id/retry, same intent — resets a failed job to pending,
  * attempts 0, due now. */
 export type RetryJobResponse = { ok: true };
+
+// -- The site's operator (Settings › Accounts) ------------------------------
+
+// GET /operator: 200 for an operator (env.OPERATOR_EMAILS), else 403.
+export type OperatorResponse = { operator: true };
+export type Account = {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+  /** How many groups the account is in. */
+  groups: number;
+};
+// GET /operator/accounts
+export type ListAccountsResponse = Account[];
+// POST /operator/accounts/:id/password: the account's sessions end.
+export type SetAccountPasswordRequest = { password: string };
+export type SetAccountPasswordResponse = { signedOut: true };

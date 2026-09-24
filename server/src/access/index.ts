@@ -6,6 +6,7 @@
 // written here and nowhere else.
 import type { Pool } from 'pg';
 import { pool } from '../db/pool.ts';
+import { env } from '../env.ts';
 
 // Phase 6 (docs/ux/audit.md #7, docs/ux/design.md's error copy): a board
 // denial names whom to ask ONLY when the viewer is a member of the board's
@@ -478,4 +479,60 @@ export async function statsForGroupListing(
     images: Number(rows[0]?.images ?? 0),
     sheets: Number(rows[0]?.sheets ?? 0),
   };
+}
+
+// -- the site, not a group -------------------------------------------------
+
+/** Whether `email` may make an account (env.SIGNUP). Under `invite`: the
+ * very first account, an operator, or an email with a pending, unexpired
+ * group invitation. The invitation is accepted after sign-up, as before. */
+export async function signUpAllowed(
+  email: string,
+  db: Pool = pool,
+): Promise<boolean> {
+  if (env.SIGNUP === 'open') return true;
+  const address = email.trim().toLowerCase();
+  if (env.OPERATOR_EMAILS.includes(address)) return true;
+  const { rows } = await db.query(
+    `SELECT
+       NOT EXISTS (SELECT 1 FROM "user") AS first,
+       EXISTS (SELECT 1 FROM "invitation"
+               WHERE lower(email) = $1 AND status = 'pending'
+                 AND "expiresAt" > now()) AS invited`,
+    [address],
+  );
+  return rows[0]?.first === true || rows[0]?.invited === true;
+}
+
+export type OperatorRow = { id: string; email: string };
+
+/** The site's operator (env.OPERATOR_EMAILS): may see every account and
+ * set another person's password. */
+export async function userForOperating(
+  userId: string,
+  db: Pool = pool,
+): Promise<OperatorRow> {
+  const { rows } = await db.query(
+    'SELECT id, email FROM "user" WHERE id = $1',
+    [userId],
+  );
+  const user = rows[0] as OperatorRow | undefined;
+  if (!user || !env.OPERATOR_EMAILS.includes(user.email.toLowerCase()))
+    deny('only the site operator may do this');
+  return user;
+}
+
+/** Whether the user has made as many groups as env.MAX_GROUPS_PER_USER
+ * allows. Groups they were invited to do not count. */
+export async function groupLimitReached(
+  userId: string,
+  db: Pool = pool,
+): Promise<boolean> {
+  if (env.MAX_GROUPS_PER_USER <= 0) return false;
+  const { rows } = await db.query(
+    `SELECT count(*)::int AS n FROM "member"
+     WHERE "userId" = $1 AND role LIKE '%owner%'`,
+    [userId],
+  );
+  return (rows[0]?.n ?? 0) >= env.MAX_GROUPS_PER_USER;
 }

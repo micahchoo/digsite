@@ -179,6 +179,20 @@ export const env = {
   // storage/quota.ts: the storage quota of a group that has none of its
   // own, in GB. 0 (the default) is no quota; usage is still counted.
   GROUP_QUOTA_GB: Number(process.env.GROUP_QUOTA_GB ?? 0),
+  // access/signup.ts: who may make an account. `invite` (the production
+  // compose's default): the first account, an operator, or an email with a
+  // pending group invitation. `open` (the default here, for dev and tests):
+  // anyone who reaches the site.
+  SIGNUP: process.env.SIGNUP === 'invite' ? 'invite' : 'open',
+  // The site's operators, comma separated, compared lowercased. They may
+  // sign up whatever SIGNUP says, and see Settings › Accounts, where they
+  // set another person's password (access/operators.ts).
+  OPERATOR_EMAILS: (process.env.OPERATOR_EMAILS ?? '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+  // How many groups one person may create. 0 (the default) is no limit.
+  MAX_GROUPS_PER_USER: Number(process.env.MAX_GROUPS_PER_USER ?? 0),
   ARRANGE_BUDGET_MB: Number(process.env.ARRANGE_BUDGET_MB ?? 1536),
   MODELS_DIR: resolve(
     REPO_ROOT,

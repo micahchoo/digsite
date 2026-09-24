@@ -46,6 +46,7 @@ import type {
   InviteRequest,
   InviteResponse,
   LabelSuggestionsResponse,
+  ListAccountsResponse,
   ListBoardImagesByIdsResponse,
   ListBoardImagesResponse,
   ListBoardsResponse,
@@ -59,6 +60,7 @@ import type {
   MarkSheetSeenResponse,
   MeaningResponse,
   Member,
+  OperatorResponse,
   PutAliasRequest,
   PutBoardSelectionRequest,
   PutBoardSelectionResponse,
@@ -67,6 +69,8 @@ import type {
   Role,
   SelectionRangeRequest,
   SelectionRangeResponse,
+  SetAccountPasswordRequest,
+  SetAccountPasswordResponse,
   SheetFootprint,
   SheetSummary,
   UpdateBoardRequest,
@@ -526,4 +530,22 @@ export const api = {
   getSheetRows: (sheetId: string) =>
     request<GetSheetRowsResponse>(`/sheets/${sheetId}/rows`),
   getStats: () => request<GetStatsResponse>('/stats'),
+
+  // -- the site's operator (Settings › Accounts) -------------------------
+  /** True for an operator; the server answers 403 for anyone else. */
+  isOperator: async (): Promise<boolean> => {
+    try {
+      await request<OperatorResponse>('/operator');
+      return true;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) return false;
+      throw err;
+    }
+  },
+  listAccounts: () => request<ListAccountsResponse>('/operator/accounts'),
+  setAccountPassword: (accountId: string, body: SetAccountPasswordRequest) =>
+    request<SetAccountPasswordResponse>(
+      `/operator/accounts/${accountId}/password`,
+      post(body),
+    ),
 };

@@ -43,6 +43,8 @@ const SUITE_PATHS = [
   'src/sheet-hour.ts',
   // CONTEXT.md "Making sense", walked through the real app as people would.
   'src/sense-claims.ts',
+  // Last: it gives outsider@example.test a new password.
+  'src/operator-accounts.ts',
 ];
 const requested = process.argv.slice(2);
 if (requested.some((path) => !SUITE_PATHS.includes(path))) {
@@ -183,6 +185,8 @@ async function main() {
         // weights (~150 MB) again whenever EMBEDDINGS=on.
         MODELS_DIR: process.env.MODELS_DIR ?? join(REPO_ROOT, '.cache/models'),
         STORAGE: 'fs',
+        // The seeded owner is the site's operator (operator-accounts.ts).
+        OPERATOR_EMAILS: process.env.OPERATOR_EMAILS ?? 'owner@example.test',
       } as Record<string, string>,
       stdout: 'inherit',
       stderr: 'inherit',

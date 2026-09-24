@@ -28,6 +28,7 @@ import { logError, logRequest, requestIdFor } from './logging.ts';
 import { registerMetricsRoutes } from './metrics.ts';
 import { mountSheetRoom } from './sheets/room.ts';
 import { registerSheetRoutes } from './sheets/routes.ts';
+import { registerSiteRoutes } from './site/routes.ts';
 
 // GET /_access/:intent/:objectId — runs one access function for the
 // signed-in user, returns {allowed, reason?, ms}. Test/measurement only,
@@ -73,6 +74,7 @@ export function buildRouter(opts: HttpServerOptions = {}): Router {
   registerGroupRoutes(router);
   registerBoardRoutes(router);
   registerSheetRoutes(router);
+  registerSiteRoutes(router);
   registerMetricsRoutes(router, opts.metricsToken ?? env.METRICS_TOKEN);
 
   router.get('/_access/:intent/:objectId', async (ctx) => {

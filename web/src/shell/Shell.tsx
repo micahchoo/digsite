@@ -5,8 +5,9 @@
 // swaps only the <Outlet/> content, so the rail and channel column are
 // never unmounted by navigating between groups/boards/sheets.
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
-import { Outlet } from 'react-router';
+import { Link, Outlet } from 'react-router';
 import { stopAllUploadQueues } from '../board/upload.ts';
+import { api } from '../lib/api.ts';
 import { authClient, useSession } from '../lib/auth.ts';
 import { modalOpen } from '../lib/modal.ts';
 import { ChannelColumn } from './ChannelColumn.tsx';
@@ -100,6 +101,21 @@ export function Shell() {
   // Sheet.tsx still carries its own inline panel (the Inspector) — moving
   // that in is slice 3's job, tracked there, not here.
   const [rightContent, setRightContent] = useState<ReactNode>(null);
+  // The Accounts link shows only for the site's operator; the server
+  // decides who that is (GET /operator).
+  const [operator, setOperator] = useState(false);
+  const signedInAs = session?.user.id;
+  useEffect(() => {
+    if (!signedInAs) return;
+    let live = true;
+    api
+      .isOperator()
+      .then((yes) => live && setOperator(yes))
+      .catch(() => live && setOperator(false));
+    return () => {
+      live = false;
+    };
+  }, [signedInAs]);
   const hasRightColumn = route.kind === 'board';
 
   return (
@@ -129,6 +145,11 @@ export function Shell() {
           <span className="muted shell-user-email">
             {session?.user.email ?? ''}
           </span>
+          {operator && (
+            <Link to="/settings/accounts" data-testid="shell-accounts">
+              Accounts
+            </Link>
+          )}
           <button
             type="button"
             onClick={() => void signOut()}

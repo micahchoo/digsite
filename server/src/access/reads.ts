@@ -84,3 +84,31 @@ export async function allowlistMembersOf(
   );
   return rows;
 }
+
+export type AccountListed = {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+  groups: number;
+};
+
+/** Every account on the site, newest first, with how many groups each is
+ * in. Read only after access/index.ts#userForOperating has passed. */
+export async function accountsForOperating(
+  db: Pool = pool,
+): Promise<AccountListed[]> {
+  const { rows } = await db.query(
+    `SELECT u.id, u.name, u.email, u."createdAt" AS created_at,
+            (SELECT count(*)::int FROM "member" m WHERE m."userId" = u.id)
+              AS groups
+     FROM "user" u ORDER BY u."createdAt" DESC`,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    createdAt: new Date(r.created_at).toISOString(),
+    groups: r.groups,
+  }));
+}

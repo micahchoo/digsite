@@ -18,8 +18,10 @@
 // and it is the only caller of the team-member routes — see
 // .claude/rules/access-one-function-per-intent.md.
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import { createAccessControl, organization } from 'better-auth/plugins';
 import { defaultStatements } from 'better-auth/plugins/organization/access';
+import { groupLimitReached, signUpAllowed } from './access/index.ts';
 import { pool } from './db/pool.ts';
 import { env } from './env.ts';
 
@@ -100,8 +102,25 @@ export const auth = betterAuth({
     window: env.AUTH_RATE_LIMIT_WINDOW,
     max: env.AUTH_RATE_LIMIT_MAX,
   },
+  // Who may make an account and how many groups they may make are access
+  // decisions (access/index.ts#signUpAllowed, #groupLimitReached); these
+  // two hooks only ask them.
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          if (!(await signUpAllowed(user.email)))
+            throw new APIError('FORBIDDEN', {
+              message:
+                'This site is by invitation. Ask someone in a group to invite you.',
+            });
+        },
+      },
+    },
+  },
   plugins: [
     organization({
+      organizationLimit: (user) => groupLimitReached(user.id),
       teams: { enabled: true, defaultTeam: { enabled: false } },
       invitationExpiresIn: env.INVITATION_EXPIRES_IN,
       ac,

@@ -30,7 +30,15 @@ export function Groups() {
   async function createGroup(e: React.FormEvent) {
     e.preventDefault();
     if (!newName.trim()) return;
-    await api.createGroup({ name: newName.trim() });
+    try {
+      await api.createGroup({ name: newName.trim() });
+    } catch (err) {
+      // The server's refusal says why: a name taken, or the most groups
+      // one person may make on this site.
+      setError(err instanceof ApiError ? err.reason : String(err));
+      return;
+    }
+    setError(null);
     setNewName('');
     await refresh();
   }

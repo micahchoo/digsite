@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { useSession } from './lib/auth.ts';
+import { Accounts } from './pages/Accounts.tsx';
 import { Board } from './pages/Board.tsx';
 import { Group } from './pages/Group.tsx';
 import { Groups } from './pages/Groups.tsx';
@@ -40,6 +41,7 @@ export function App() {
           <Route path="/g/:id" element={<Group />} />
           <Route path="/b/:id" element={<Board />} />
           <Route path="/s/:id" element={<Sheet />} />
+          <Route path="/settings/accounts" element={<Accounts />} />
         </Route>
       </Routes>
     </BrowserRouter>
