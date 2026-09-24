@@ -42,7 +42,7 @@ import { cropToDataUrl } from './crop.ts';
 import { type ImageMeta, loadImageFiles } from './images.ts';
 import { Overlay } from './overlay/Overlay.tsx';
 import { Reach } from './overlay/Reach.tsx';
-import { screenToScene } from './overlay/screen.ts';
+import { revealRect, sceneToScreen, screenToScene } from './overlay/screen.ts';
 import { usePolled } from './overlay/usePolled.ts';
 import { peerCursors } from './presence.ts';
 import { nextImage } from './reading-order.ts';
@@ -320,7 +320,7 @@ export function Sheet() {
       if (!handle) return;
       const box = e.currentTarget.getBoundingClientRect();
       const client = { x: e.clientX - box.left, y: e.clientY - box.top };
-      const p = screenToScene(client, viewport, { left: 0, top: 0 });
+      const p = screenToScene(client, viewport);
       room.sendPointer(p.x, p.y, handle.selectedIds());
     },
     [viewport, room.sendPointer],
@@ -572,18 +572,8 @@ export function Sheet() {
       ?.getBoundingClientRect();
     if (el && area) {
       const vp = canvas.viewport();
-      const left = (el.x + vp.scrollX) * vp.zoom;
-      const top = (el.y + vp.scrollY) * vp.zoom;
-      const off =
-        left < 0 ||
-        top < 0 ||
-        left + el.width * vp.zoom > area.width ||
-        top + el.height * vp.zoom > area.height;
-      if (off)
-        canvas.setViewport({
-          scrollX: area.width / 2 / vp.zoom - (el.x + el.width / 2),
-          scrollY: area.height / 2 / vp.zoom - (el.y + el.height / 2),
-        });
+      const next = revealRect(el, vp, area);
+      if (next !== vp) canvas.setViewport(next);
     }
     rerender();
   }
@@ -639,12 +629,14 @@ export function Sheet() {
         );
         return;
       }
-      const vp = canvas.viewport();
-      openMenuRef.current(
-        area.left + (el.x + el.width / 2 + vp.scrollX) * vp.zoom,
-        area.top + (el.y + el.height / 2 + vp.scrollY) * vp.zoom,
-        { id: el.id, kind: data.kind },
+      const centre = sceneToScreen(
+        { x: el.x + el.width / 2, y: el.y + el.height / 2 },
+        canvas.viewport(),
       );
+      openMenuRef.current(area.left + centre.x, area.top + centre.y, {
+        id: el.id,
+        kind: data.kind,
+      });
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -701,7 +693,6 @@ export function Sheet() {
           tools={tools}
           elements={sceneElements}
           viewport={viewport}
-          offset={{ left: 0, top: 0 }}
           onPendingEdgeChange={setPendingEdge}
           onDrawn={rerender}
           onEdgeDrawn={(edgeId, at) => setNaming({ edgeId, at })}
@@ -719,7 +710,6 @@ export function Sheet() {
           source={connectSource}
           elements={sceneElements}
           viewport={viewport}
-          offset={{ left: 0, top: 0 }}
           connect={(from, to) => tools.connect(from, to)}
           onConnected={(edgeId, at) => {
             rerender();
@@ -749,7 +739,6 @@ export function Sheet() {
           rows={foreign.rows}
           elements={sceneElements}
           viewport={viewport}
-          offset={{ left: 0, top: 0 }}
           selectedId={selectedForeignId}
           selectedOwnIds={selectedOwnIds}
           connectionRelation={connectionRelation}
@@ -761,7 +750,6 @@ export function Sheet() {
           rows={reach.value}
           elements={sceneElements}
           viewport={viewport}
-          offset={{ left: 0, top: 0 }}
           onBring={async (imageId) => {
             await api.addSheetImages(sheetInfo.boardId, sheetId, {
               imageIds: [imageId],

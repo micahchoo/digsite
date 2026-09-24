@@ -16,18 +16,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon.tsx';
 import { api } from '../../lib/api.ts';
 import { plural } from '../../lib/plural.ts';
-import {
-  type ContainerOffset,
-  type ElementLike,
-  type Viewport,
-  rectToScreen,
-} from './screen.ts';
+import { type ElementLike, type Viewport, rectToScreen } from './screen.ts';
 
 interface Props {
   rows: ReachRows;
   elements: readonly ElementLike[];
   viewport: Viewport;
-  offset: ContainerOffset;
   /** Adds the far image to this sheet; resolves when the server accepted it. */
   onBring: (imageId: string) => Promise<void>;
 }
@@ -98,7 +92,7 @@ export function leadsByImage(rows: ReachRows): Map<string, Lead[]> {
   return new Map([...out].map(([k, v]) => [k, [...v.values()]]));
 }
 
-export function Reach({ rows, elements, viewport, offset, onBring }: Props) {
+export function Reach({ rows, elements, viewport, onBring }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   const [bringing, setBringing] = useState<string | null>(null);
   const layerRef = useRef<HTMLDivElement | null>(null);
@@ -126,7 +120,7 @@ export function Reach({ rows, elements, viewport, offset, onBring }: Props) {
         const data = dataOf(el);
         if (data?.kind !== 'image') return null;
         const imageLeads = leads.get(data.imageId) ?? [];
-        const box = rectToScreen(el, viewport, offset);
+        const box = rectToScreen(el, viewport);
         const isOpen = open === data.imageId;
         const shown = imageLeads.slice(0, FAN_LIMIT);
         const fanHeight = shown.length * (CARD_H + CARD_GAP) - CARD_GAP;

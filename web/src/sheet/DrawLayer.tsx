@@ -43,11 +43,7 @@ import {
   rectFromDrag,
 } from './gestures.ts';
 import { hitAt } from './hit.ts';
-import type {
-  ContainerOffset,
-  ElementLike,
-  Viewport,
-} from './overlay/screen.ts';
+import type { ElementLike, Viewport } from './overlay/screen.ts';
 import {
   rectToScreen,
   sceneToScreen,
@@ -61,7 +57,6 @@ interface Props {
   tools: Tools;
   elements: readonly ElementLike[];
   viewport: Viewport;
-  offset: ContainerOffset;
   onPendingEdgeChange: (pending: boolean) => void;
   onDrawn: () => void;
   /** A connection made with the Edge tool, and where to name it. */
@@ -110,7 +105,6 @@ export function DrawLayer({
   tools,
   elements,
   viewport,
-  offset,
   onPendingEdgeChange,
   onDrawn,
   onEdgeDrawn,
@@ -205,7 +199,7 @@ export function DrawLayer({
   if (tool !== 'region' && tool !== 'edge') return null;
 
   function toScene(e: React.PointerEvent): Point {
-    return screenToScene(clientPoint(e), viewport, offset);
+    return screenToScene(clientPoint(e), viewport);
   }
 
   function handlePointerDown(e: React.PointerEvent) {
@@ -259,7 +253,7 @@ export function DrawLayer({
     if (!hit || !edgePending) return;
     if (hit.id === edgePending.elId) return; // same element: not a self-edge
     const newId = tools.connect(edgePending.elId, hit.id);
-    const from = sceneToScreen(edgePending.anchor, viewport, offset);
+    const from = sceneToScreen(edgePending.anchor, viewport);
     setEdgePending(null);
     if (!newId) return;
     onDrawn();
@@ -310,7 +304,6 @@ export function DrawLayer({
         height: created.height,
       },
       viewport,
-      offset,
     );
     setLabelValue('');
     setLabelFor({ id, screenRect });
@@ -361,15 +354,14 @@ export function DrawLayer({
           height: previewRect.height,
         },
         viewport,
-        offset,
       )
     : null;
 
   const edgeLine =
     edgePending && pointerNow
       ? {
-          a: sceneToScreen(edgePending.anchor, viewport, offset),
-          b: sceneToScreen(pointerNow, viewport, offset),
+          a: sceneToScreen(edgePending.anchor, viewport),
+          b: sceneToScreen(pointerNow, viewport),
         }
       : null;
 

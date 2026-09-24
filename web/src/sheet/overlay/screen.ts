@@ -1,14 +1,10 @@
 // Pure geometry helpers. Two jobs (docs/design.md "web/" §
 // "The sheet page"):
 //
-// 1. scene -> screen, verified against
-//      screenX = (sceneX + scrollX) * zoom + offsetLeft
-//      screenY = (sceneY + scrollY) * zoom.value + offsetTop
-//    `offset` is the overlay <svg>'s own box relative to the canvas container.
-//    Sheet.tsx renders the svg as a full-bleed sibling over the canvas, so
-//    at the call site `offset` is always {left: 0, top: 0} — both boxes
-//    share one origin, and offsetLeft/offsetTop cancel. The parameter stays
-//    explicit so this stays testable without a DOM.
+// 1. scene -> screen: screenX = (sceneX + scrollX) * zoom, the same for y.
+//    Every layer over the canvas (the overlay <svg>, the draw and connect
+//    layers) is a full-bleed sibling of it, so they share its origin. An
+//    `offset` parameter carried {0, 0} through every call until 2026-09-23.
 //
 // 2. foreignShapes(rows, elements): today's foreign claims, in scene space,
 //    from the CURRENT image (and region) element rects — never a cached
@@ -40,11 +36,6 @@ export interface Viewport {
   scrollX: number;
   scrollY: number;
   zoom: number;
-}
-
-export interface ContainerOffset {
-  left: number;
-  top: number;
 }
 
 export interface ConnectionLabelJob {
@@ -232,14 +223,10 @@ export function placeRegionLabels(
   return placed;
 }
 
-export function sceneToScreen(
-  p: Point,
-  vp: Viewport,
-  offset: ContainerOffset,
-): Point {
+export function sceneToScreen(p: Point, vp: Viewport): Point {
   return {
-    x: (p.x + vp.scrollX) * vp.zoom + offset.left,
-    y: (p.y + vp.scrollY) * vp.zoom + offset.top,
+    x: (p.x + vp.scrollX) * vp.zoom,
+    y: (p.y + vp.scrollY) * vp.zoom,
   };
 }
 
@@ -247,28 +234,41 @@ export function sceneToScreen(
  * pointer event's client position into before calling
  * `tools.ts#pointerDraw`/`pointerConnect`, both of which take scene
  * coordinates only. */
-export function screenToScene(
-  p: Point,
-  vp: Viewport,
-  offset: ContainerOffset,
-): Point {
+export function screenToScene(p: Point, vp: Viewport): Point {
   return {
-    x: (p.x - offset.left) / vp.zoom - vp.scrollX,
-    y: (p.y - offset.top) / vp.zoom - vp.scrollY,
+    x: p.x / vp.zoom - vp.scrollX,
+    y: p.y / vp.zoom - vp.scrollY,
   };
 }
 
-export function rectToScreen(
-  r: Rect,
-  vp: Viewport,
-  offset: ContainerOffset,
-): Rect {
-  const topLeft = sceneToScreen({ x: r.x, y: r.y }, vp, offset);
+export function rectToScreen(r: Rect, vp: Viewport): Rect {
+  const topLeft = sceneToScreen({ x: r.x, y: r.y }, vp);
   return {
     x: topLeft.x,
     y: topLeft.y,
     width: r.width * vp.zoom,
     height: r.height * vp.zoom,
+  };
+}
+
+/** A viewport that shows `r` whole in a `width` x `height` area: the same
+ * one when it already does, else one centred on it at the same zoom. */
+export function revealRect(
+  r: Rect,
+  vp: Viewport,
+  area: { width: number; height: number },
+): Viewport {
+  const box = rectToScreen(r, vp);
+  const shown =
+    box.x >= 0 &&
+    box.y >= 0 &&
+    box.x + box.width <= area.width &&
+    box.y + box.height <= area.height;
+  if (shown) return vp;
+  return {
+    ...vp,
+    scrollX: area.width / 2 / vp.zoom - (r.x + r.width / 2),
+    scrollY: area.height / 2 / vp.zoom - (r.y + r.height / 2),
   };
 }
 

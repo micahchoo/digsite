@@ -10,7 +10,6 @@ import { useRef, useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
 import { hitAt } from './hit.ts';
 import {
-  type ContainerOffset,
   type ElementLike,
   type Point,
   type Viewport,
@@ -24,7 +23,6 @@ interface Props {
   source: ElementLike | null;
   elements: readonly ElementLike[];
   viewport: Viewport;
-  offset: ContainerOffset;
   /** Makes the edge; returns its id, or null when it could not be made. */
   connect: (fromId: string, toId: string) => string | null;
   /** The new edge and the screen point to name it at. */
@@ -85,7 +83,6 @@ export function ConnectLayer({
   source,
   elements,
   viewport,
-  offset,
   connect,
   onConnected,
 }: Props) {
@@ -97,11 +94,11 @@ export function ConnectLayer({
     return <div ref={layerRef} className="sheet-connect-layer" />;
   }
 
-  const box = rectToScreen(source, viewport, offset);
+  const box = rectToScreen(source, viewport);
   const handle = handleSpot(box, layerRef.current);
 
   function targetAt(p: Point): string | null {
-    const hit = hitAt(screenToScene(p, viewport, offset), elements);
+    const hit = hitAt(screenToScene(p, viewport), elements);
     if (!hit || !source || hit.id === source.id) return null;
     return hit.id;
   }
@@ -109,7 +106,7 @@ export function ConnectLayer({
   const target = drag?.targetId
     ? elements.find((e) => e.id === drag.targetId)
     : null;
-  const targetBox = target ? rectToScreen(target, viewport, offset) : null;
+  const targetBox = target ? rectToScreen(target, viewport) : null;
 
   return (
     <div
@@ -175,13 +172,11 @@ export function ConnectLayer({
           const a = sceneToScreen(
             { x: source.x + source.width / 2, y: source.y + source.height / 2 },
             viewport,
-            offset,
           );
           const b = end
             ? sceneToScreen(
                 { x: end.x + end.width / 2, y: end.y + end.height / 2 },
                 viewport,
-                offset,
               )
             : drag.now;
           onConnected(edgeId, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });

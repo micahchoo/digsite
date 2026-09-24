@@ -14,6 +14,7 @@ import {
   placeConnectionLabels,
   placeRegionLabels,
   rectToScreen,
+  revealRect,
   sceneToScreen,
   screenToScene,
 } from '../src/sheet/overlay/screen.ts';
@@ -21,19 +22,10 @@ import {
 import { foreignPaths } from '../src/sheet/routing.ts';
 
 describe('sceneToScreen', () => {
-  test('matches the sheet scene-to-viewport coordinate formula', () => {
-    // screenX = (sceneX + scrollX) * zoom.value + offsetLeft — verified
+  test('screen = (scene + scroll) * zoom', () => {
     const vp = { scrollX: 50, scrollY: -20, zoom: 2 };
-    const offset = { left: 10, top: 5 };
-    const p = sceneToScreen({ x: 100, y: 200 }, vp, offset);
-    expect(p.x).toBe((100 + 50) * 2 + 10);
-    expect(p.y).toBe((200 + -20) * 2 + 5);
-  });
-
-  test('offset {0,0} is the common case: screen = (scene + scroll) * zoom', () => {
-    const vp = { scrollX: 0, scrollY: 0, zoom: 1.5 };
-    const p = sceneToScreen({ x: 40, y: 40 }, vp, { left: 0, top: 0 });
-    expect(p).toEqual({ x: 60, y: 60 });
+    const p = sceneToScreen({ x: 100, y: 200 }, vp);
+    expect(p).toEqual({ x: (100 + 50) * 2, y: (200 + -20) * 2 });
   });
 });
 
@@ -97,20 +89,41 @@ describe('focus emphasis', () => {
 describe('screenToScene', () => {
   test('is the exact inverse of sceneToScreen — DrawLayer.tsx round-trips a pointer through both', () => {
     const vp = { scrollX: 50, scrollY: -20, zoom: 2 };
-    const offset = { left: 10, top: 5 };
     const scene = { x: 100, y: 200 };
-    const screen = sceneToScreen(scene, vp, offset);
-    expect(screenToScene(screen, vp, offset)).toEqual(scene);
+    expect(screenToScene(sceneToScreen(scene, vp), vp)).toEqual(scene);
+  });
+});
+
+describe('revealRect', () => {
+  const area = { width: 400, height: 300 };
+  test('a picture already on screen keeps the same viewport', () => {
+    const vp = { scrollX: 0, scrollY: 0, zoom: 1 };
+    expect(revealRect({ x: 10, y: 10, width: 50, height: 50 }, vp, area)).toBe(
+      vp,
+    );
+  });
+
+  test('a picture off screen is centred at the same zoom', () => {
+    const vp = { scrollX: 0, scrollY: 0, zoom: 2 };
+    const r = { x: 500, y: 500, width: 40, height: 20 };
+    const next = revealRect(r, vp, area);
+    expect(next.zoom).toBe(2);
+    const box = rectToScreen(r, next);
+    expect(box.x + box.width / 2).toBeCloseTo(200);
+    expect(box.y + box.height / 2).toBeCloseTo(150);
+  });
+
+  test('a picture cut by the edge counts as off screen', () => {
+    const vp = { scrollX: 0, scrollY: 0, zoom: 1 };
+    const r = { x: 380, y: 10, width: 40, height: 40 };
+    expect(revealRect(r, vp, area)).not.toBe(vp);
   });
 });
 
 describe('rectToScreen', () => {
-  test('scales width/height by zoom and offsets the top-left', () => {
+  test('scales the top-left and the size by zoom', () => {
     const vp = { scrollX: 0, scrollY: 0, zoom: 2 };
-    const r = rectToScreen({ x: 10, y: 10, width: 30, height: 40 }, vp, {
-      left: 0,
-      top: 0,
-    });
+    const r = rectToScreen({ x: 10, y: 10, width: 30, height: 40 }, vp);
     expect(r).toEqual({ x: 20, y: 20, width: 60, height: 80 });
   });
 });

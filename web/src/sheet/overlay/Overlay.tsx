@@ -17,7 +17,6 @@ import type { PeerCursor } from '../presence.ts';
 import { edgePaths, foreignPaths, midSegment } from '../routing.ts';
 import {
   type ConnectionLabelJob,
-  type ContainerOffset,
   type LabelObstacle,
   type PlacedConnectionLabel,
   type PlacedRegionLabel,
@@ -35,7 +34,6 @@ interface Props {
   rows: Foreign;
   elements: readonly SceneElement[];
   viewport: Viewport;
-  offset: ContainerOffset;
   selectedId: string | null;
   /** Every selected own element: what the connections are dimmed around. */
   selectedOwnIds: readonly string[];
@@ -64,7 +62,6 @@ export function Overlay({
   rows,
   elements,
   viewport,
-  offset,
   selectedId,
   selectedOwnIds,
   connectionRelation,
@@ -151,10 +148,7 @@ export function Overlay({
       jobs.push({
         id: `own-${element.id}`,
         label: relation,
-        line: [
-          sceneToScreen(from, viewport, offset),
-          sceneToScreen(to, viewport, offset),
-        ],
+        line: [sceneToScreen(from, viewport), sceneToScreen(to, viewport)],
         relation,
         foreign: false,
         ignoreObstacleIds: [
@@ -176,10 +170,7 @@ export function Overlay({
       jobs.push({
         id: shape.id,
         label: shape.label,
-        line: [
-          sceneToScreen(from, viewport, offset),
-          sceneToScreen(to, viewport, offset),
-        ],
+        line: [sceneToScreen(from, viewport), sceneToScreen(to, viewport)],
         relation: shape.row.relation,
         foreign: true,
         ignoreObstacleIds: [shape.row.source.imageId, shape.row.target.imageId],
@@ -203,7 +194,6 @@ export function Overlay({
               height: element.height,
             },
             viewport,
-            offset,
           ),
           id: data.imageId,
         },
@@ -229,7 +219,6 @@ export function Overlay({
     elements,
     focus,
     measureLabel,
-    offset,
     selectedId,
     shapes,
     size,
@@ -243,7 +232,7 @@ export function Overlay({
         {
           id: shape.id,
           label: shape.label,
-          rect: rectToScreen(shape.rect, viewport, offset),
+          rect: rectToScreen(shape.rect, viewport),
           priority: shape.id === selectedId ? 100 : 0,
         },
       ];
@@ -264,7 +253,6 @@ export function Overlay({
           height: element.height,
         },
         viewport,
-        offset,
       );
       return [regionChip(rect, measureLabel(truncateLabel(label)))];
     });
@@ -294,16 +282,7 @@ export function Overlay({
         ? [{ ...label, shapeId: shape.id, selected: shape.id === selectedId }]
         : [];
     });
-  }, [
-    elements,
-    labels,
-    measureLabel,
-    offset,
-    selectedId,
-    shapes,
-    size,
-    viewport,
-  ]);
+  }, [elements, labels, measureLabel, selectedId, shapes, size, viewport]);
 
   return (
     <svg
@@ -325,7 +304,7 @@ export function Overlay({
         };
 
         if (shape.kind === 'region') {
-          const r = rectToScreen(shape.rect, viewport, offset);
+          const r = rectToScreen(shape.rect, viewport);
           return (
             <g key={shape.id}>
               <rect
@@ -349,7 +328,7 @@ export function Overlay({
         }
 
         const path = (drawn.get(shape.id) ?? []).map((p) =>
-          sceneToScreen(p, viewport, offset),
+          sceneToScreen(p, viewport),
         );
         const a = path[0];
         const b = path[path.length - 1];
@@ -523,7 +502,7 @@ export function Overlay({
         </g>
       ))}
       {peers.map((p) => {
-        const pt = sceneToScreen({ x: p.x, y: p.y }, viewport, offset);
+        const pt = sceneToScreen({ x: p.x, y: p.y }, viewport);
         return (
           <g
             key={p.user}
@@ -533,7 +512,7 @@ export function Overlay({
             className="sheet-overlay-static"
           >
             {p.rects.map((r) => {
-              const rr = rectToScreen(r, viewport, offset);
+              const rr = rectToScreen(r, viewport);
               return (
                 <rect
                   key={`${r.x},${r.y},${r.width},${r.height}`}
