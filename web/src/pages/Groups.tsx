@@ -12,7 +12,10 @@ export function Groups() {
   const [newName, setNewName] = useState('');
   const [inviteFor, setInviteFor] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [lastInvitationId, setLastInvitationId] = useState<string | null>(null);
+  // The join link for the invitation just made: the app sends no email,
+  // so the inviter sends this link themselves.
+  const [lastInviteUrl, setLastInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [acceptId, setAcceptId] = useState('');
 
   const refresh = useCallback(async () => {
@@ -45,10 +48,11 @@ export function Groups() {
 
   async function sendInvite(groupId: string) {
     if (!inviteEmail.trim()) return;
-    const { invitationId } = await api.invite(groupId, {
+    const { url } = await api.invite(groupId, {
       email: inviteEmail.trim(),
     });
-    setLastInvitationId(invitationId);
+    setLastInviteUrl(url);
+    setCopied(false);
     setInviteEmail('');
   }
 
@@ -137,9 +141,21 @@ export function Groups() {
                         onChange={(e) => setInviteEmail(e.target.value)}
                       />
                       <button type="submit">Send invitation</button>
-                      {lastInvitationId && (
-                        <span className="muted" data-testid="invitation-id">
-                          Invitation created: {lastInvitationId}
+                      {lastInviteUrl && (
+                        <span className="muted" data-testid="invitation-link">
+                          Send them this link. They sign up with the email
+                          above: <a href={lastInviteUrl}>{lastInviteUrl}</a>{' '}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void navigator.clipboard
+                                .writeText(lastInviteUrl)
+                                .then(() => setCopied(true))
+                                .catch(() => {});
+                            }}
+                          >
+                            {copied ? 'Copied' : 'Copy link'}
+                          </button>
                         </span>
                       )}
                     </form>
