@@ -23,7 +23,7 @@ export interface SwitcherEntry {
 const GLYPH: Record<SwitcherEntry['kind'], IconName> = {
   group: 'group',
   board: 'hash',
-  sheet: 'thread',
+  sheet: 'sheet',
 };
 const GROUP_LABEL: Record<SwitcherEntry['kind'], string> = {
   group: 'Groups',

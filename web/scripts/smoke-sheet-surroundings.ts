@@ -383,6 +383,18 @@ async function main() {
     (scrollX) => window.__digsiteSheetDebug?.getAppState()?.scrollX !== scrollX,
     beforeWheelPan.scrollX,
   );
+  // And back: a sideways pan leaves the first picture off the left edge,
+  // where the Space-drag below would press on the channel column instead.
+  await page.keyboard.down('Shift');
+  await page.mouse.wheel(0, -80);
+  await page.keyboard.up('Shift');
+  await page.waitForFunction(
+    (scrollX) =>
+      Math.abs(
+        (window.__digsiteSheetDebug?.getAppState()?.scrollX ?? 0) - scrollX,
+      ) < 0.5,
+    beforeWheelPan.scrollX,
+  );
   await assertPointerAnchoredWheelZoom('tool-edge');
 
   const imageAfterEmptyPan = await page.evaluate((id) => {

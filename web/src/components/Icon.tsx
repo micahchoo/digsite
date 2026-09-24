@@ -35,7 +35,6 @@ const PATHS = {
     'M4.5 5.5h11M8 5.5V4h4v1.5m2.5 0-.7 10.2a1.5 1.5 0 0 1-1.5 1.3H7.7a1.5 1.5 0 0 1-1.5-1.3L5.5 5.5m3 3v5m3-5v5',
   hash: 'M8 3.5 6.5 16.5m7-13L12 16.5M4 7.5h12.5M3.5 12.5H16',
   // A sheet hangs off its board: the thread hook.
-  thread: 'M6 4v5.5A2.5 2.5 0 0 0 8.5 12H15m0 0-3-3m3 3-3 3',
   group: 'M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0Z',
   pencil: 'M12.5 4.5l3 3L8 15H5v-3l7.5-7.5Z',
   // Two lines joining into one: two terms that mean the same.
@@ -57,7 +56,9 @@ const PATHS = {
   // Where a person starts: the workspaces, before any group.
   home: 'm2.5 9.2 7.5-5.8 7.5 5.8M4.6 7.9v8.3h10.8V7.9M7.9 16.2v-5h4.2v5',
   // A sheet: a page with its corner folded.
-  sheet: 'M5 3.5h7l3 3v10H5zM12 3.5v3h3M7.5 10h5M7.5 13h5',
+  // A sheet: a canvas holding pictures. Not a page of lines, which is a
+  // report; not a hooked arrow, which read as a new-line mark.
+  sheet: 'M3.5 4.5h13v11h-13ZM6 7h4v3.5H6ZM11.5 9h2.5v4h-2.5Z',
   // A board open to the whole group; `lock` is a private one.
   open: 'M16.56 10a6.56 6.56 0 1 1-13.12 0 6.56 6.56 0 0 1 13.12 0ZM7.12 10h5.76',
   // Groups, and one more: the rail's way back to every workspace.

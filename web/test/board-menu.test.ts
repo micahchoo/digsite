@@ -117,3 +117,14 @@ describe('the map', () => {
     expect(calls).toEqual(['report']);
   });
 });
+
+describe('find', () => {
+  test('its matches open as a web', () => {
+    const { calls, act } = recorder();
+    item(
+      boardMenu(null, state({ find: { count: 3, shown: 3 } }), act),
+      'Open the matches as a web',
+    ).onSelect();
+    expect(calls).toEqual(['openMatchesWeb']);
+  });
+});

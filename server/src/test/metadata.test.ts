@@ -16,7 +16,9 @@ describe('readable', () => {
     expect(readable(new Uint8Array([1, 2]))).toBeUndefined();
     // Local fields in, local fields out: the camera's wall time, whatever
     // zone the server runs in.
-    expect(readable(new Date(2024, 5, 1, 18, 4, 59))).toBe('2024-06-01 18:04:59');
+    expect(readable(new Date(2024, 5, 1, 18, 4, 59))).toBe(
+      '2024-06-01 18:04:59',
+    );
     expect(readable(new Date(2024, 5, 1))).toBe('2024-06-01');
     expect(readable([1, 2, 3])).toBe('1, 2, 3');
     expect(readable('\u0001\u0002binary')).toBeUndefined();
@@ -103,7 +105,8 @@ describe('GET /images/:id/metadata', () => {
       headers: { Origin: base, cookie },
       body: form,
     });
-    const [{ id }] = (await up.json()) as { id: string }[];
+    const [first] = (await up.json()) as { id: string }[];
+    const id = first?.id as string;
     await drain();
 
     const meta = (await (

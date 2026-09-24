@@ -10,7 +10,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { ContextMenu, type MenuSection } from '../board/ContextMenu.tsx';
-import { WebView } from '../board/WebView.tsx';
+import { webQuestion, webSearch } from '../board/web-question.ts';
 import { Compare, type CompareEnd } from '../components/Compare.tsx';
 import {
   ErrorState,
@@ -123,8 +123,6 @@ export function Sheet() {
     sections: MenuSection[];
   } | null>(null);
   const [help, setHelp] = useState(false);
-  /** The web view's starting pictures, while it is open. */
-  const [webRoots, setWebRoots] = useState<string[] | null>(null);
   /** A long action in progress, said where the person is looking. */
   const [working, setWorking] = useState<string | null>(null);
   const [comparing, setComparing] = useState<{
@@ -473,6 +471,13 @@ export function Sheet() {
     }
   }
 
+  /** The board's web around these pictures (board/WebView.tsx): the web
+   * is a view of the board, so the sheet goes there with the question. */
+  function openWeb(imageIds: string[]) {
+    if (!sheetInfo) return;
+    navigate(`/b/${sheetInfo.boardId}${webSearch(webQuestion(imageIds))}`);
+  }
+
   /**
    * A report of this sheet's claims (CONTEXT.md "Report"; web/src/report/):
    * the server gathers it from the saved sheet, once the save holds what
@@ -565,6 +570,13 @@ export function Sheet() {
       help: () => setHelp(true),
       report: (ids) => void exportReport(ids),
       keepReport: () => void exportReport(undefined, true),
+      openWeb: () =>
+        openWeb(
+          canvas.elements().flatMap((el) => {
+            const d = el.isDeleted ? null : dataOf(el);
+            return d?.kind === 'image' ? [d.imageId] : [];
+          }),
+        ),
     });
     rerender();
     setMenu({ x: clientX, y: clientY, sections });
@@ -798,17 +810,6 @@ export function Sheet() {
           <Icon name="settings" size={18} />
           <span>Details</span>
         </button>
-        {webRoots && sheetInfo && (
-          <WebView
-            boardId={sheetInfo.boardId}
-            sort={sortId(DEFAULT_SORT)}
-            roots={webRoots}
-            onShowOnBoard={(imageId) =>
-              navigate(`/b/${sheetInfo.boardId}?image=${imageId}`)
-            }
-            onClose={() => setWebRoots(null)}
-          />
-        )}
         {/* What a screen reader hears when the selection changes. A live
             region speaks only when its words change, so this is said once
             per selection, never mid-gesture (announce.ts). */}
@@ -914,7 +915,7 @@ export function Sheet() {
           sheetId,
           userId: session?.user.id ?? null,
           onExtract: (id) => void extractToPicture(id),
-          onOpenWeb: setWebRoots,
+          onOpenWeb: openWeb,
           looksLike: sheetInfo
             ? {
                 boardId: sheetInfo.boardId,

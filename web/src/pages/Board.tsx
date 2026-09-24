@@ -116,6 +116,13 @@ import { noteOrderVersion, waitForOrderVersion } from '../lib/order-version.ts';
 import '../board/board.css';
 import type { GetBoardResponse } from '@digsite/shared/api';
 import { BoardReports } from '../board/BoardReports.tsx';
+import type { Placed } from '../board/web-layout.ts';
+import {
+  type WebQuestion,
+  readWebQuestion,
+  webQuestion,
+  webSearch,
+} from '../board/web-question.ts';
 import { Confirm } from '../components/Confirm.tsx';
 import {
   ErrorState,
@@ -129,6 +136,7 @@ import { plural } from '../lib/plural.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
 import { useVocabulary } from '../lib/vocabulary.ts';
 import { ReportWorking, useReport } from '../report/use-report.tsx';
+import { DRAG_THRESHOLD } from '../sheet/canvas/native/gestures.ts';
 import { useRightColumn } from '../shell/RightColumn.tsx';
 import { rgba, usePalette } from '../theme/palette.ts';
 
@@ -219,12 +227,26 @@ function isTextInput(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
+/** A web's rings are 190 apart and its pictures 72 wide; a sheet's
+ * pictures are about 2.4 times as big, so its places spread as much. */
+const WEB_TO_SHEET = 2.4;
+
+/** The longest press that is still a click; under the touch long-press. */
+const CLICK_HOLD_MS = 500;
+
 export function Board() {
   const palette = usePalette();
   const { id } = useParams<{ id: string }>();
   const boardId = id ?? '';
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  // The web (board/WebView.tsx) is a view of the board whose question lives
+  // in the URL (board/web-question.ts): linkable, and Back returns to the
+  // map. Every way in asks one question through `openWeb`.
+  const webQ = readWebQuestion(searchParams);
+  const openWeb = (q: WebQuestion) =>
+    setSearchParams(new URLSearchParams(webSearch(q).slice(1)));
+  const closeWeb = () => setSearchParams(new URLSearchParams());
   const selection = useSelection(boardId);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -274,8 +296,6 @@ export function Board() {
   const [pathImages, setPathImages] = useState<BoardImageWithRank[]>([]);
   /** The web view's starting pictures, while it is open, and the relation
    * it shows when it is the web of one relation. */
-  const [webRoots, setWebRoots] = useState<string[] | null>(null);
-  const [webRelation, setWebRelation] = useState<string | undefined>();
   const [fileDragActive, setFileDragActive] = useState(false);
   const [, forceRender] = useState(0);
 
@@ -614,7 +634,23 @@ export function Board() {
       initialViewState: viewStateRef.current,
       controller: true,
       layers: [],
-      onViewStateChange: ({ viewState }) => noteView(viewState as BoardCamera),
+      // A click is a click until it moves DRAG_THRESHOLD px, as on a sheet.
+      // deck.gl's own pan starts at 1 px and cancels the tap, and its tap
+      // expires at 250 ms, so a hand that wobbled a pixel or pressed a
+      // little slowly selected nothing: clicks "worked sometimes"
+      // (measured 2026-09-24: any drift, or a hold of 300 ms, missed every
+      // time). The hold stops short of the touch long-press (550 ms below),
+      // which opens the menu instead.
+      eventRecognizerOptions: {
+        pan: { threshold: DRAG_THRESHOLD },
+        click: { threshold: DRAG_THRESHOLD, time: CLICK_HOLD_MS },
+      },
+      // Through setView, which hands deck the camera back: once any move
+      // (a fly-to, the zoom buttons, Fit) has given deck a `viewState`, the
+      // map is controlled, and a drag that was only noted kept the old
+      // camera. The map froze after its first programmatic move (found
+      // 2026-09-24; it predates this session's click fix).
+      onViewStateChange: ({ viewState }) => setView(viewState as BoardCamera),
       onClick: (info, event) => handleClick(info, event),
       onHover: (info) => handleHover(info),
       onDragStart: (info, event) => {
@@ -1442,6 +1478,34 @@ export function Board() {
 
   /** Centres the map on a picture and opens its details, leaving the
    * selection alone: looking is not choosing. */
+  /** A new sheet of the web's pictures, placed as the web has them: the
+   * nearest first when there are more than a sheet holds. The claims come
+   * with them as other sheets' (CONTEXT.md "Foreign"): the web never
+   * writes one. */
+  async function sheetFromWeb(placed: readonly Placed[], title: string) {
+    const kept = [...placed]
+      .sort((a, b) => a.hops - b.hops)
+      .slice(0, SHEET_LIMIT);
+    try {
+      const { id } = await api.createSheet(boardId, {
+        name: title.slice(0, 120),
+        imageIds: kept.map((p) => p.id),
+        positions: Object.fromEntries(
+          kept.map((p) => [
+            p.id,
+            { x: p.x * WEB_TO_SHEET, y: p.y * WEB_TO_SHEET },
+          ]),
+        ),
+      });
+      notifySheetsChanged();
+      navigate(`/s/${id}`);
+    } catch (err) {
+      setSelectionNote(
+        `Could not make the sheet: ${err instanceof Error ? err.message : 'unknown error'}`,
+      );
+    }
+  }
+
   function showOnMap(imageId: string, rank: number) {
     if (rank < 0) return;
     moveView((cam) => centreOn(cam, rank));
@@ -1516,6 +1580,8 @@ export function Board() {
         properties: (imageId) => selection.replace([imageId]),
         copyTo: (ids) => setCopying([...ids]),
         download,
+        openMatchesWeb: () =>
+          findResult && openWeb(webQuestion(findResult.imageIds)),
         report: () => void report.make(() => api.getBoardReport(boardId)),
         importReport: () => reportInputRef.current?.click(),
       },
@@ -1675,7 +1741,9 @@ export function Board() {
             b={pathEnds[1]}
             onPath={setPathImages}
             onShowImage={showOnMap}
-            onOpenWeb={() => setWebRoots([pathEnds[0].id, pathEnds[1].id])}
+            onOpenWeb={() =>
+              openWeb(webQuestion([pathEnds[0].id, pathEnds[1].id]))
+            }
             onReport={() =>
               void report.make(() =>
                 api.getBoardReport(boardId, {
@@ -1733,7 +1801,7 @@ export function Board() {
           <Explore
             boardId={boardId}
             imageId={detailImage.id}
-            onOpenWeb={() => setWebRoots([detailImage.id])}
+            onOpenWeb={() => openWeb(webQuestion([detailImage.id]))}
             currentSelectionCount={selectedImages.length}
             onSelectImages={(ids, mode) => {
               if (mode === 'add') selection.add(ids);
@@ -1757,8 +1825,7 @@ export function Board() {
           onOpenWeb={(relation) => {
             // The whole web of the relation, across every sheet (WebView
             // asks relation-web when it has no starting picture).
-            setWebRelation(relation);
-            setWebRoots([]);
+            openWeb(webQuestion([], { relation }));
           }}
         />
 
@@ -1767,6 +1834,14 @@ export function Board() {
           groupId={board.groupId}
           sheets={sheets}
           onSelect={(sheetId) => void selectSheetImages(sheetId)}
+          onOpenWeb={(sheetId) =>
+            void api
+              .getSheet(sheetId)
+              .then((sheet) =>
+                openWeb(webQuestion(sheet.images.map((img) => img.id))),
+              )
+              .catch(() => {})
+          }
         />
         <BoardReports boardId={boardId} make={report.make} />
         <BoardAdministration board={board} />
@@ -1871,6 +1946,32 @@ export function Board() {
             <span className="board-count-badge">
               {plural(board.imageCount, 'image')}
             </span>
+            <div
+              className="segmented board-view-switch"
+              role="radiogroup"
+              aria-label="View the board as"
+            >
+              <label>
+                <input
+                  type="radio"
+                  name="board-view"
+                  checked={!webQ}
+                  data-testid="board-view-map"
+                  onChange={closeWeb}
+                />
+                Map
+              </label>
+              <label title="The board by its claims: every sheet's connections">
+                <input
+                  type="radio"
+                  name="board-view"
+                  checked={!!webQ}
+                  data-testid="board-view-web"
+                  onChange={() => openWeb(webQuestion([]))}
+                />
+                Web
+              </label>
+            </div>
             {othersHere.length > 0 && (
               <span
                 className="board-presence"
@@ -2081,6 +2182,9 @@ export function Board() {
         onInvert={() => void invertSelection()}
         onStartSheet={startSheetFromTray}
         onAddToSheet={addSelectionToSheet}
+        onOpenWeb={() =>
+          openWeb(webQuestion(selectedImages.map((img) => img.id)))
+        }
         onFindPath={() => {
           const [first, second] = selectedImages;
           if (first && second)
@@ -2106,16 +2210,24 @@ export function Board() {
       />
 
       {selectionNote && <output className="board-note">{selectionNote}</output>}
-      {webRoots && (
+      {webQ && (
         <WebView
           boardId={boardId}
           sort={currentSortId}
-          roots={webRoots}
-          relation={webRelation}
-          onShowOnBoard={showOnMap}
-          onClose={() => {
-            setWebRoots(null);
-            setWebRelation(undefined);
+          question={webQ}
+          onAsk={openWeb}
+          onClose={closeWeb}
+          onMakeSheet={(placed, title) => void sheetFromWeb(placed, title)}
+          onReport={() =>
+            void report.make(() => api.getBoardReport(boardId, { web: webQ }))
+          }
+          onSelectOnMap={(ids) => {
+            selection.replace(ids);
+            closeWeb();
+          }}
+          onShowOnBoard={(imageId, rank) => {
+            closeWeb();
+            showOnMap(imageId, rank);
           }}
         />
       )}

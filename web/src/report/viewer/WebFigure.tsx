@@ -43,7 +43,16 @@ export function WebFigure({ data, pictures, selected, onSelect }: Props) {
       }),
     [data],
   );
-  const roots = useMemo(() => (data.path?.[0] ? [data.path[0]] : []), [data]);
+  // A web report centres where its web did; a path, on its first picture.
+  const roots = useMemo(
+    () =>
+      data.scope.kind === 'web'
+        ? data.scope.roots
+        : data.path?.[0]
+          ? [data.path[0]]
+          : [],
+    [data],
+  );
   const placed = useMemo(
     () =>
       ringLayout(

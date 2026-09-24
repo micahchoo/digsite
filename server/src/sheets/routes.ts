@@ -42,7 +42,7 @@ import {
 } from '../http.ts';
 import { foreignOn, sheetsShowing } from './foreign.ts';
 import { addImages, createSheet } from './membership.ts';
-import { neighbourhoodFrom, relationWeb } from './neighbourhood.ts';
+import { boardWeb, neighbourhoodFrom } from './neighbourhood.ts';
 import { participantsOf } from './participants.ts';
 import { reachOf } from './reach.ts';
 import {
@@ -96,20 +96,21 @@ export function registerSheetRoutes(router: Router) {
   // stronger intent than looking at the board.
   // GET /boards/:id/relation-web?relation= (roadmap horizon 3): every
   // connection meaning that relation across the board's sheets, and the
-  // pictures it joins; the neighbourhood's shape, every hop 0.
+  // pictures it joins; the neighbourhood's shape, every hop 0. With no
+  // relation, every connection: the board's whole web.
   router.get('/boards/:id/relation-web', async (ctx) => {
     const userId = requireAuth(ctx);
     const boardId = param(ctx, 'id');
     await boardForViewing(userId, boardId);
     const relation = (ctx.url.searchParams.get('relation') ?? '').trim();
-    if (!relation || relation.length > 200) {
+    if (relation.length > 200) {
       return json(ctx.res, 400, {
-        error: 'relation must be 1 to 200 characters',
+        error: 'relation is at most 200 characters',
       });
     }
-    const response: GetNeighbourhoodResponse = await relationWeb(
+    const response: GetNeighbourhoodResponse = await boardWeb(
       boardId,
-      relation,
+      relation || null,
     );
     json(ctx.res, 200, response);
   });

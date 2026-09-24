@@ -156,6 +156,13 @@ sheet that made it. The board never writes a claim.
 
 ## Showing the work
 
+- **Web** — the board seen by its claims instead of by a sort: pictures on
+  hop rings, joined by every sheet's connections. It answers one question
+  (start pictures, steps out, one relation or all), kept in the board's URL
+  (`?view=web&…`); with no start pictures it is the board's whole web. Any
+  set of pictures opens one, and every web can be taken out as a sheet,
+  a report or a selection on the map. It never writes a claim.
+
 - **Report** — the claims a **report scope** names, with what each rests
   on: its ends as pictures, canonical term and the term as typed, how
   sure, why, who and when, the discussion, and what other sheets say about

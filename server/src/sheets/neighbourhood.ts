@@ -84,24 +84,27 @@ export async function neighbourhoodFrom(
 }
 
 /**
- * The web of one relation (roadmap horizon 3): every connection on the
- * board that means `relation` (its aliases included), across all sheets,
- * and the pictures at their ends. There is no anchor, so every hop count
- * is 0. Cut at `limit` pictures, the most connected kept first, so the
- * web's hubs survive and the loose ends go (`truncated: true`).
+ * The web of one relation (roadmap horizon 3), or with none the board's
+ * whole web, the union of every sheet's connections: every connection on
+ * the board that means `relation` (its aliases included), across all
+ * sheets, and the pictures at their ends. There is no anchor, so every hop
+ * count is 0. Cut at `limit` pictures, the most connected kept first, so
+ * the web's hubs survive and the loose ends go (`truncated: true`).
  */
-export async function relationWeb(
+export async function boardWeb(
   boardId: string,
-  relation: string,
+  relation: string | null,
   limit: number = SHEET_LIMIT,
 ): Promise<Neighbourhood> {
-  const relations = termsMeaning(relation, (await aliasesOf(boardId)).relation);
+  const relations = relation
+    ? termsMeaning(relation, (await aliasesOf(boardId)).relation)
+    : null;
   const { rows } = await pool.query(
     `WITH web AS (
        SELECT e.src_image_id, e.dst_image_id FROM edges e
        JOIN images si ON si.id = e.src_image_id AND si.board_id = $1
        JOIN images di ON di.id = e.dst_image_id AND di.board_id = $1
-       WHERE e.relation = ANY($2::text[])
+       WHERE ($2::text[] IS NULL OR e.relation = ANY($2::text[]))
      ), ends AS (
        SELECT src_image_id AS image_id FROM web
        UNION ALL SELECT dst_image_id FROM web
@@ -119,7 +122,7 @@ export async function relationWeb(
     const { rows: edgeRows } = await pool.query(
       `SELECT * FROM edges
        WHERE src_image_id = ANY($1::uuid[]) AND dst_image_id = ANY($1::uuid[])
-         AND relation = ANY($2::text[])`,
+         AND ($2::text[] IS NULL OR relation = ANY($2::text[]))`,
       [images.map((i) => i.id), relations],
     );
     edges = (edgeRows as EdgeDbRow[]).map(toEdgeRow);

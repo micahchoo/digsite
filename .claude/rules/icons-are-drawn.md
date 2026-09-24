@@ -4,7 +4,7 @@ tags: [ui, icons]
 priority: medium
 source: hand-written
 checks:
-  - forbid: '^(?!\s*(//|\*|/\*|\{/\*)).*[→←↔⇄⇆✕✖✓✔⋯▸▾▶◀▲▼•●○◆★☆↗↘]'
+  - forbid: '^(?!\s*(//|\*|/\*|\{/\*)).*[→←↔⇄⇆↳↪↵⏎✕✖✓✔⋯▸▾▶◀▲▼•●○◆★☆↗↘]'
     in: [web/src/**, shared/src/report/**]
     message: a typed glyph used as an icon; draw it with components/Icon.tsx (or shared/icons.ts in a report)
 ---

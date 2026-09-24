@@ -30,6 +30,7 @@ import {
 import type { EdgeRow, RegionRow } from '@digsite/shared/sheet/claims';
 import { aliasesOf } from '../boards/vocabulary.ts';
 import { pool } from '../db/pool.ts';
+import { boardWeb, neighbourhoodFrom } from '../sheets/neighbourhood.ts';
 import { repliesOn } from '../sheets/replies.ts';
 import {
   type EdgeDbRow,
@@ -142,8 +143,16 @@ function chosen(
   rows: { regions: RegionRow[]; edges: EdgeRow[] },
   sheets: SheetRead[],
   aliases: Aliases,
+  /** A web scope's connections, as the web view found them. */
+  webEdges: ReadonlySet<string>,
 ): { regions: RegionRow[]; edges: EdgeRow[]; path: string[] | null } {
   switch (scope.kind) {
+    case 'web':
+      return {
+        regions: [],
+        edges: rows.edges.filter((e) => webEdges.has(e.id)),
+        path: null,
+      };
     case 'sheet':
     case 'board':
       return { ...rows, path: null };
@@ -195,6 +204,26 @@ function chosen(
   }
 }
 
+/** The connections a web shows, found the way the web view finds them
+ * (sheets/neighbourhood.ts), so the report and the view agree. */
+async function webEdgesOf(
+  scope: Extract<ReportScope, { kind: 'web' }>,
+): Promise<Set<string>> {
+  const parts = scope.roots.length
+    ? await Promise.all(
+        scope.roots.map((root) =>
+          neighbourhoodFrom(
+            scope.boardId,
+            root,
+            scope.hops,
+            scope.relation ?? undefined,
+          ),
+        ),
+      )
+    : [await boardWeb(scope.boardId, scope.relation)];
+  return new Set(parts.flatMap((p) => p.edges.map((e) => e.id)));
+}
+
 function titleOf(input: GatherInput, sheets: SheetRead[]): string {
   if (input.title?.trim()) return input.title.trim().slice(0, 200);
   const scope = input.scope;
@@ -209,6 +238,12 @@ function titleOf(input: GatherInput, sheets: SheetRead[]): string {
       return `“${scope.relation}” on ${input.boardName}`;
     case 'path':
       return `A path on ${input.boardName}`;
+    case 'web':
+      return scope.roots.length
+        ? `A web on ${input.boardName}`
+        : scope.relation
+          ? `The web of “${scope.relation}” on ${input.boardName}`
+          : `The web of ${input.boardName}`;
   }
 }
 
@@ -220,7 +255,13 @@ export async function gatherReport(input: GatherInput): Promise<ReportData> {
   ]);
   const sheetIds = sheets.map((s) => s.id);
   const rows = await rowsOf(sheetIds);
-  const picked = chosen(scope, rows, sheets, aliases);
+  const picked = chosen(
+    scope,
+    rows,
+    sheets,
+    aliases,
+    scope.kind === 'web' ? await webEdgesOf(scope) : new Set(),
+  );
 
   // Every region row by its claim key, for the ends of edges that rest on
   // one; drawn from ALL rows, since an edge may end on a region the scope
@@ -238,6 +279,7 @@ export async function gatherReport(input: GatherInput): Promise<ReportData> {
     imageIds.add(e.target.imageId);
   }
   for (const id of picked.path ?? []) imageIds.add(id);
+  if (scope.kind === 'web') for (const id of scope.roots) imageIds.add(id);
   // A sheet's report shows every picture on the sheet, claimed or not.
   const sheetScene =
     scope.kind === 'sheet' || scope.kind === 'selection' ? sheets[0] : null;

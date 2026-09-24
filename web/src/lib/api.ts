@@ -547,9 +547,22 @@ export const api = {
     ),
   getBoardReport: (
     boardId: string,
-    opts: { relation?: string; from?: string; to?: string } = {},
+    opts: {
+      relation?: string;
+      from?: string;
+      to?: string;
+      /** What a web shows (board/web-question.ts). */
+      web?: { roots: string[]; hops: number; relation: string | null };
+    } = {},
   ) => {
     const q = new URLSearchParams();
+    if (opts.web) {
+      q.set('view', 'web');
+      if (opts.web.roots.length) q.set('roots', opts.web.roots.join(','));
+      q.set('hops', String(opts.web.hops));
+      if (opts.web.relation) q.set('relation', opts.web.relation);
+      return request<ReportData>(`/boards/${boardId}/report?${q}`);
+    }
     if (opts.relation) q.set('relation', opts.relation);
     if (opts.from && opts.to) {
       q.set('from', opts.from);

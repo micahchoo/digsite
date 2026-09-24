@@ -39,6 +39,8 @@ export interface SheetMenuActions {
   report: (ids?: string[]) => void;
   /** Keeps the sheet's report on digsite with an id, and downloads it. */
   keepReport: () => void;
+  /** The board's web around this sheet's pictures. */
+  openWeb: () => void;
 }
 
 const HOW_SURE: [Confidence | null, string][] = [
@@ -138,6 +140,11 @@ export function sheetMenu(
       keys: '?',
       testId: 'sheet-menu-help',
       onSelect: act.help,
+    },
+    {
+      label: 'Open this sheet as a web',
+      testId: 'sheet-menu-web',
+      onSelect: act.openWeb,
     },
     {
       label: 'Export a report',

@@ -34,6 +34,8 @@ interface Props {
   onCompare?: () => void;
   /** Two selected: find the chain of claims between them. */
   onFindPath?: () => void;
+  /** The selection's web: these pictures and what connects them. */
+  onOpenWeb?: () => void;
   startRequested?: boolean;
   onStartRequested?: () => void;
   addRequested?: boolean;
@@ -54,6 +56,7 @@ export function Tray({
   onAddToSheet,
   onCompare,
   onFindPath,
+  onOpenWeb,
   startRequested = false,
   onStartRequested,
   addRequested = false,
@@ -293,6 +296,16 @@ export function Tray({
                 onClick={onFindPath}
               >
                 How are they connected?
+              </button>
+            )}
+            {onOpenWeb && (
+              <button
+                type="button"
+                data-testid="board-tray-web"
+                title="These pictures and what connects them, across every sheet"
+                onClick={onOpenWeb}
+              >
+                Open as a web
               </button>
             )}
             <div className="board-tray-add-wrap">

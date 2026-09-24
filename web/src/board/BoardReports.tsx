@@ -23,6 +23,7 @@ const SCOPE: Record<ReportData['scope']['kind'], string> = {
   board: 'the board',
   relation: 'a relation',
   path: 'a path',
+  web: 'a web',
 };
 
 const FIELD: Record<string, string> = {

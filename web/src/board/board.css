@@ -1841,24 +1841,44 @@
 
 /* -- the web of claims (board/WebView.tsx) -------------------------------- */
 
+/* The board's web (WebView.tsx): the other view of the board, over the
+   map below the toolbar, so the toolbar's Map | Web switch stays in reach
+   and the map keeps its place underneath. Above every floating panel. */
 .web-view {
-  width: calc(100vw - 32px);
-  max-width: none;
-  height: calc(100vh - 32px);
-  max-height: none;
-  padding: 0;
+  position: absolute;
+  z-index: 10;
+  inset: var(--board-chrome-top) var(--board-edge) var(--board-edge);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-l);
   background: var(--surface-canvas);
+  box-shadow: var(--shadow-m);
   color: var(--text-primary);
 }
-.web-view[open] {
-  display: flex;
-  flex-direction: column;
+.web-view-head button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
-.web-view::backdrop {
-  background: color-mix(in srgb, var(--surface-app) 60%, transparent);
+.web-view-outs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+.web-view-outs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Map | Web, beside the board's name: what you are looking at. */
+.board-view-switch {
+  flex: none;
+  margin-inline-start: var(--space-2);
 }
 .web-view-head {
   display: flex;
@@ -1878,7 +1898,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.web-view-close {
+.web-view-head .web-view-close {
   display: inline-grid;
   place-items: center;
   width: 32px;

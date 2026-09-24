@@ -27,7 +27,17 @@ export type ReportScope =
   /** Every connection whose canonical relation is `relation`. */
   | { kind: 'relation'; boardId: string; relation: string }
   /** The shortest chain of connections between two pictures. */
-  | { kind: 'path'; boardId: string; from: string; to: string };
+  | { kind: 'path'; boardId: string; from: string; to: string }
+  /** What a web shows (web/src/board/web-question.ts): around its start
+   * pictures, `hops` steps out; with none, the board's whole web. Either
+   * of one relation, or of every one. */
+  | {
+      kind: 'web';
+      boardId: string;
+      roots: string[];
+      hops: 1 | 2 | 3;
+      relation: string | null;
+    };
 
 export type ReportPerson = { name: string; at: string };
 

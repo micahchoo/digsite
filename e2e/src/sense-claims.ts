@@ -1017,6 +1017,9 @@ async function main(): Promise<void> {
       e45w.id,
     );
     await m.getByTestId('inspector-open-web').click();
+    // The web is the board's (CONTEXT.md "Web"): the sheet sends the
+    // question there, in the URL.
+    await m.waitForURL(/\/b\/.*view=web.*roots=/, { timeout: 10_000 });
     const sheetWeb = m.getByTestId('web-view');
     await sheetWeb.waitFor({ timeout: 5000 });
     const node5 = m.locator(
@@ -1024,18 +1027,18 @@ async function main(): Promise<void> {
     );
     await node5.waitFor({ timeout: 15_000 });
     await node5.click();
-    await m.getByRole('button', { name: 'Show on board' }).click();
-    await m.waitForURL(/\/b\//, { timeout: 10_000 });
+    await m.getByRole('button', { name: 'Show on the map' }).click();
+    await m.getByTestId('web-view').waitFor({ state: 'detached' });
     const detailName = m.locator(
       '[data-testid="detail-panel"] .board-image-name',
     );
     await detailName.waitFor({ timeout: 15_000 });
     assert(
       (await detailName.innerText()) === 'image-5.png',
-      `"Show on board" should open image 5 there, not "${await detailName.innerText()}"`,
+      `"Show on the map" should open image 5 there, not "${await detailName.innerText()}"`,
     );
     pass(
-      '12. a connection on a sheet opens the web around both ends; "Show on board" opens that picture on the board',
+      '12. a connection on a sheet opens the board\'s web around both ends; "Show on the map" opens that picture there',
     );
     await M.open(firstPass.id);
 
@@ -1468,6 +1471,95 @@ async function main(): Promise<void> {
       '5. Terms counts and lights up "find"; merge widens it without touching Faces; separate restores; corner marks; Explore answers on focus and draws lines',
     );
 
+    // -- 8b. A click on the map selects even when the hand is not still ------
+    // deck.gl's pan began at 1 px and its tap expired at 250 ms, so a click
+    // that wobbled or was slow selected nothing: "works sometimes".
+    {
+      type BoardProbe = {
+        __digsiteBoard: {
+          clear: () => void;
+          getSelection: () => number[];
+          getCamera: () => { target: number[]; zoom: number } | null;
+          setZoom: (z: number) => void;
+          goToRank: (r: number) => void;
+        };
+      };
+      await m.evaluate(() => {
+        (window as unknown as BoardProbe).__digsiteBoard.clear();
+        (window as unknown as BoardProbe).__digsiteBoard.goToRank(0);
+      });
+      await m.waitForTimeout(600);
+      const cellAt = (rank: number) =>
+        m.evaluate((rank) => {
+          const b = (window as unknown as BoardProbe).__digsiteBoard;
+          const cam = b.getCamera();
+          const box = document
+            .querySelector('[data-testid="board-canvas"], canvas')
+            ?.getBoundingClientRect();
+          if (!cam || !box) return null;
+          const s = 2 ** cam.zoom;
+          const [tx = 0, ty = 0] = cam.target;
+          return {
+            x: box.left + box.width / 2 + ((rank % 16) * 128 + 64 - tx) * s,
+            y:
+              box.top +
+              box.height / 2 +
+              (Math.floor(rank / 16) * 128 + 64 - ty) * s,
+          };
+        }, rank);
+      for (const [rank, hold, drift] of [
+        [0, 400, 3],
+        [1, 60, 4],
+        [2, 450, 0],
+      ] as const) {
+        const at = await cellAt(rank);
+        assert(at, 'no board camera');
+        await m.mouse.move(at.x, at.y);
+        await m.mouse.down();
+        await m.mouse.move(at.x + drift, at.y - drift, { steps: 2 });
+        await m.waitForTimeout(hold);
+        await m.mouse.up();
+        await m.waitForFunction(
+          (rank) =>
+            JSON.stringify(
+              (window as unknown as BoardProbe).__digsiteBoard.getSelection(),
+            ) === JSON.stringify([rank]),
+          rank,
+          { timeout: 5000 },
+        );
+      }
+      // A real drag still pans, and selects nothing new.
+      const before = await m.evaluate(
+        () =>
+          (window as unknown as BoardProbe).__digsiteBoard.getCamera()?.target,
+      );
+      // From a cell, so the press lands on the map and not a panel over it,
+      // and up and left: the camera is at the map's top-left corner and
+      // stops at the edge.
+      const from = await cellAt(17);
+      assert(from, 'no board camera');
+      await m.mouse.move(from.x, from.y);
+      await m.mouse.down();
+      await m.mouse.move(from.x - 60, from.y - 30, { steps: 8 });
+      await m.mouse.up();
+      await m.waitForTimeout(400);
+      const after = await m.evaluate(
+        () =>
+          (window as unknown as BoardProbe).__digsiteBoard.getCamera()?.target,
+      );
+      const kept = await m.evaluate(() =>
+        (window as unknown as BoardProbe).__digsiteBoard.getSelection(),
+      );
+      assert(
+        JSON.stringify(before) !== JSON.stringify(after) &&
+          JSON.stringify(kept) === '[2]',
+        `a drag should pan and keep the selection: ${JSON.stringify({ before, after, kept })}`,
+      );
+      pass(
+        '8b. a map click selects with a few pixels of wobble or a slow press; after the map was moved by code, a drag still pans',
+      );
+    }
+
     // -- 9. How are two pictures connected, across sheets ----------------------
     // 8 -> 10 resembles (First pass), 10 -> 11 same place (First pass),
     // 11 -> 14 derived from (Faces): three steps, over both sheets.
@@ -1675,6 +1767,80 @@ async function main(): Promise<void> {
     pass(
       "9d. a relation, the path and the whole board each download as a report; the board's says where sheets disagree, and its web is live in the file",
     );
+
+    // -- 9e. The web is a view of the board, and every web can be taken ------
+    {
+      const nodeCount = () => m.getByTestId('web-view-node').count();
+      await m.getByTestId('board-view-web').click({ force: true });
+      await m.waitForURL(/view=web/);
+      await m.getByTestId('web-view-node').first().waitFor({ timeout: 20_000 });
+      const title = await m.getByTestId('web-view-title').innerText();
+      const whole = await nodeCount();
+      assert(
+        title === 'The whole web of this board' && whole >= 6,
+        `the board's whole web reads "${title}" with ${whole} pictures`,
+      );
+      await m.screenshot({ path: `${SHOTS}9e-whole-web.png` });
+      // Report on this: the claims the web shows, as a web-scoped report.
+      const [webReport] = await Promise.all([
+        m.waitForEvent('download'),
+        m.getByTestId('web-report').click(),
+      ]);
+      const webHtml = await Bun.file((await webReport.path()) ?? '').text();
+      const webData = JSON.parse(
+        webHtml.match(
+          /<script type="application\/json" id="digsite-report">(.*?)<\/script>/s,
+        )?.[1] ?? 'null',
+      ) as { scope: { kind: string }; claims: unknown[] };
+      assert(
+        webData.scope.kind === 'web' && webData.claims.length >= 4,
+        `the web's report is ${webData.scope.kind} with ${webData.claims.length} claims`,
+      );
+      // Select on map: the web's pictures, on the map.
+      await m.getByTestId('web-select-on-map').click();
+      await m.getByTestId('web-view').waitFor({ state: 'detached' });
+      await m.waitForFunction(
+        (n) =>
+          document.querySelectorAll('[data-testid="selection-item"]').length ===
+          n,
+        whole,
+        { timeout: 10_000 },
+      );
+      // And back in, from the tray: the selection's web, one step out.
+      await m.getByTestId('board-tray-web').click();
+      await m.waitForURL(/view=web.*roots=.*hops=1/);
+      await m.getByTestId('web-view-node').first().waitFor({ timeout: 20_000 });
+      // Make a sheet: the web's pictures, where the web has them.
+      await m.getByTestId('web-make-sheet').click();
+      await m.waitForURL(/\/s\//, { timeout: 15_000 });
+      await m.waitForFunction(
+        (n) =>
+          (
+            (
+              window as unknown as {
+                __digsite?: {
+                  getElements: () => {
+                    isDeleted?: boolean;
+                    customData?: { kind?: string };
+                  }[];
+                };
+              }
+            ).__digsite?.getElements() ?? []
+          ).filter((e) => !e.isDeleted && e.customData?.kind === 'image')
+            .length === n,
+        whole,
+        { timeout: 20_000 },
+      );
+      await m.screenshot({ path: `${SHOTS}9e-sheet-from-web.png` });
+      pass(
+        "9e. Web beside Map shows the board's whole web; it reports, selects on the map, opens again from the tray, and makes a sheet of what it shows",
+      );
+      await m.goto(`${WEB}/b/${field.id}`);
+      await m.waitForFunction(
+        () =>
+          (window as unknown as { __digsiteBoard?: unknown }).__digsiteBoard,
+      );
+    }
 
     // -- 7. Zoom in on the board far enough to study a picture ------------------
     await m.evaluate(() =>

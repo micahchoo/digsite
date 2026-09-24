@@ -88,6 +88,20 @@ export function scopeSentence(data: ReportData): string {
       return `Every claim on ${board}, from ${plural(data.sheets.length, 'sheet')}.`;
     case 'relation':
       return `Every “${scope.relation}” connection on ${board}.`;
+    case 'web': {
+      const of = scope.relation
+        ? `“${scope.relation}” connections`
+        : 'connections';
+      if (!scope.roots.length)
+        return `Every picture on ${board} that ${of} join.`;
+      const start = scope.roots
+        .slice(0, 3)
+        .map((id) => names.get(id) ?? 'a picture')
+        .join(', ');
+      const more =
+        scope.roots.length > 3 ? ` and ${scope.roots.length - 3} more` : '';
+      return `The ${of} around ${start}${more} on ${board}, ${plural(scope.hops, 'step')} out.`;
+    }
     case 'path': {
       const steps = Math.max(0, (data.path?.length ?? 1) - 1);
       return steps

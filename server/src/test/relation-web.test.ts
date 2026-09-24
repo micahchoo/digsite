@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-// sheets/neighbourhood.ts#relationWeb: every connection meaning one
+// sheets/neighbourhood.ts#boardWeb: every connection meaning one
 // relation (aliases included), across the board's sheets; its pictures,
 // the most connected kept when it must be cut.
 import { putAlias } from '../boards/vocabulary.ts';
 import { pool } from '../db/pool.ts';
-import { relationWeb } from '../sheets/neighbourhood.ts';
+import { boardWeb } from '../sheets/neighbourhood.ts';
 
 async function board(): Promise<{
   boardId: string;
@@ -63,16 +63,19 @@ describe('the web of one relation', () => {
     await edge(sheetId, i4, i5, 'resembles');
     await putAlias(boardId, 'relation', 'duplicate of', 'copy of', 'tester');
 
-    const web = await relationWeb(boardId, 'copy of');
+    const web = await boardWeb(boardId, 'copy of');
     expect(web.images[0]).toEqual({ id: i0, hops: 0 });
     expect(web.images.map((i) => i.id).sort()).toEqual([i0, i1, i2, i3].sort());
     expect(web.edges).toHaveLength(3);
     expect(web.truncated).toBe(false);
 
-    const cut = await relationWeb(boardId, 'copy of', 2);
+    const cut = await boardWeb(boardId, 'copy of', 2);
     expect(cut.truncated).toBe(true);
     expect(cut.images[0]?.id).toBe(i0);
-    expect(await relationWeb(boardId, 'nothing')).toEqual({
+    // No relation: every connection, the board's whole web.
+    const whole = await boardWeb(boardId, null);
+    expect(whole.edges.length).toBeGreaterThanOrEqual(web.edges.length);
+    expect(await boardWeb(boardId, 'nothing')).toEqual({
       images: [],
       edges: [],
       truncated: false,

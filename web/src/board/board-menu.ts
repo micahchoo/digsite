@@ -44,6 +44,8 @@ export interface BoardMenuActions {
   download: (ids: readonly string[]) => void;
   /** Every claim on the board, from every sheet, as one report file. */
   report: () => void;
+  /** Find's matches, and what connects them, as the board's web. */
+  openMatchesWeb: () => void;
   /** A report file's claims, as a new sheet here. */
   importReport: () => void;
 }
@@ -79,6 +81,12 @@ function mapMenu(state: BoardMenuState, act: BoardMenuActions): MenuSection[] {
       disabled: find !== null && find.shown === 0,
     },
   ];
+  if (find && find.shown > 0)
+    matches.push({
+      label: 'Open the matches as a web',
+      testId: 'board-menu-matches-web',
+      onSelect: act.openMatchesWeb,
+    });
   if (selected) {
     matches.push({ label: 'Clear selection', onSelect: act.clearSelection });
     matches.push(...copyItems(state.selectedIds, act));

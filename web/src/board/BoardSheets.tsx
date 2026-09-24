@@ -44,12 +44,15 @@ export function BoardSheets({
   groupId,
   sheets,
   onSelect,
+  onOpenWeb,
 }: {
   boardId: string;
   groupId: string;
   sheets: BoardSheet[];
   /** Select a sheet's images on the map. */
   onSelect: (sheetId: string) => void;
+  /** The board's web around a sheet's pictures. */
+  onOpenWeb: (sheetId: string) => void;
 }) {
   // A delete shows its footprint first (docs/phases/3-groups.md section 4:
   // "how many other sheets' foreign views it affects").
@@ -132,6 +135,15 @@ export function BoardSheets({
                   onClick={() => onSelect(sheet.id)}
                 >
                   Select
+                </button>
+                <button
+                  type="button"
+                  className="board-quiet-button"
+                  data-testid={`sheet-web-${sheet.id}`}
+                  title="This sheet's pictures, and what connects them across every sheet"
+                  onClick={() => onOpenWeb(sheet.id)}
+                >
+                  Web
                 </button>
                 <Link className="board-sheet-open" to={`/s/${sheet.id}`}>
                   Open

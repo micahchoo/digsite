@@ -4,6 +4,22 @@ Updated 2026-09-22 after the upload-throughput and interface Luna pass.
 The product repository is `app/`; roadmap: `docs/roadmap.md`.
 Nothing was deployed. The isolated functional preview uses ports 5292/8892.
 
+## The web as a view; board clicks (2026-09-24, the same third session)
+
+- The web is the board's other view (`board/WebView.tsx`, Map | Web beside
+  the board's name). Its question lives in the URL (`board/web-question.ts`);
+  every way in calls `openWeb`: the tray, Find's matches (board menu), each
+  sheet in the list, a relation in Terms, Explore, the path panel, a
+  connection or the menu on a sheet. Ways out: Make a sheet (web positions
+  x2.4), Report on this (report scope `web`), Select on map.
+  `GET /boards/:id/relation-web` with no relation is the whole web
+  (`boardWeb`, cut to the 150 most connected).
+- Board clicks: deck's pan began at 1 px and its tap ended at 250 ms, so a
+  wobble or a slow press selected nothing; and after any programmatic move
+  the map would not pan. Both fixed; `.claude/rules/board-camera-and-clicks.md`.
+- The sheet icon is a canvas with two pictures; the hooked arrow read as a
+  new-line mark and is gone.
+
 ## Wheel, Settings, drawn icons (2026-09-24, the same third session)
 
 - A mouse wheel zooms a sheet about the pointer, as the board does

@@ -4,7 +4,8 @@
 // people outside the group (kept.ts).
 //
 //   GET    /sheets/:id/report            the sheet now     (?ids= a selection)
-//   GET    /boards/:id/report            the board union   (?relation=, ?from=&to=)
+//   GET    /boards/:id/report            the board union   (?relation=, ?from=&to=,
+//                                        ?view=web&roots=&hops=&relation=)
 //   POST   /boards/:id/reports           keep one          {scope?, title?}
 //   GET    /boards/:id/reports           the board's kept reports
 //   GET    /reports/:id                  a kept report, as kept
@@ -96,6 +97,25 @@ function boardScope(
   return { scope: { kind: 'board', boardId } };
 }
 
+/** A web's question (web/src/board/web-question.ts): start pictures,
+ * steps out, a relation. The same words in a query string and a body. */
+function webScope(
+  boardId: string,
+  f: { roots?: unknown; hops?: unknown; relation?: unknown },
+): Parsed {
+  const roots = idsOf(f.roots ?? []) ?? [];
+  if (roots.length > 40 || !roots.every((r) => UUID.test(r)))
+    return { error: 'roots are at most 40 picture ids' };
+  const hops = Number(f.hops ?? 2);
+  if (hops !== 1 && hops !== 2 && hops !== 3)
+    return { error: 'hops is 1, 2 or 3' };
+  const relation =
+    typeof f.relation === 'string' && f.relation.trim()
+      ? f.relation.trim().slice(0, 200)
+      : null;
+  return { scope: { kind: 'web', boardId, roots, hops, relation } };
+}
+
 function idsOf(v: unknown): string[] | null {
   const ids = Array.isArray(v)
     ? v
@@ -131,6 +151,12 @@ async function keptScope(
     return { scope: { kind: 'selection', sheetId: sheet.id, ids } };
   }
   if (s.kind === 'path') return boardScope(boardId, { from: s.from, to: s.to });
+  if (s.kind === 'web')
+    return webScope(boardId, {
+      roots: s.roots,
+      hops: s.hops,
+      relation: s.relation,
+    });
   if (s.kind === 'relation')
     return boardScope(boardId, { relation: s.relation });
   return { scope: { kind: 'board', boardId } };
@@ -170,11 +196,18 @@ export function registerReportRoutes(router: Router) {
     const userId = requireAuth(ctx);
     const board = await boardForViewing(userId, param(ctx, 'id'));
     const q = query(ctx);
-    const parsed = boardScope(board.id, {
-      relation: q.get('relation') ?? undefined,
-      from: q.get('from') ?? undefined,
-      to: q.get('to') ?? undefined,
-    });
+    const parsed =
+      q.get('view') === 'web'
+        ? webScope(board.id, {
+            roots: q.get('roots') ?? '',
+            hops: q.get('hops') ?? undefined,
+            relation: q.get('relation') ?? undefined,
+          })
+        : boardScope(board.id, {
+            relation: q.get('relation') ?? undefined,
+            from: q.get('from') ?? undefined,
+            to: q.get('to') ?? undefined,
+          });
     if ('error' in parsed) return json(ctx.res, 400, parsed);
     json(
       ctx.res,

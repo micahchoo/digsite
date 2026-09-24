@@ -106,7 +106,7 @@ function BoardRow({
                 data-testid="shell-sheet-link"
                 data-unread={Boolean(s.unread && s.id !== activeSheetId)}
               >
-                <Icon name="thread" size={14} className="shell-thread-glyph" />
+                <Icon name="sheet" size={14} className="shell-thread-glyph" />
                 {s.name}
                 {s.unread && s.id !== activeSheetId && (
                   <span
