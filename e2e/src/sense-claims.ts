@@ -1525,9 +1525,11 @@ async function main(): Promise<void> {
           };
         }, rank);
       for (const [rank, hold, drift] of [
-        [0, 400, 3],
+        // Past deck's old 250 ms tap and inside the 500 ms one, with room for
+        // a slow runner: the hold is measured from the press, moves included.
+        [0, 300, 3],
         [1, 60, 4],
-        [2, 450, 0],
+        [2, 320, 0],
       ] as const) {
         const at = await cellAt(rank);
         assert(at, 'no board camera');
@@ -1537,10 +1539,12 @@ async function main(): Promise<void> {
           `cell ${rank} is under a ${under}, not the map`,
         );
         await m.mouse.move(at.x, at.y);
+        const pressed = Date.now();
         await m.mouse.down();
         await m.mouse.move(at.x + drift, at.y - drift, { steps: 2 });
         await m.waitForTimeout(hold);
         await m.mouse.up();
+        const held = Date.now() - pressed;
         // A pick asks the server which picture the cell holds.
         const picked = await m
           .waitForFunction(
@@ -1555,7 +1559,7 @@ async function main(): Promise<void> {
           .catch(() => false);
         assert(
           picked,
-          `a click on cell ${rank} (held ${hold} ms, ${drift} px of wobble) selected ${JSON.stringify(await m.evaluate(() => (window as unknown as BoardProbe).__digsiteBoard.getSelection()))}`,
+          `a click on cell ${rank} (held ${held} ms, ${drift} px of wobble) selected ${JSON.stringify(await m.evaluate(() => (window as unknown as BoardProbe).__digsiteBoard.getSelection()))}`,
         );
       }
       // A real drag still pans, and selects nothing new.
