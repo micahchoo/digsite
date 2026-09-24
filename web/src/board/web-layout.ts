@@ -55,14 +55,20 @@ export function hopsFrom(
 }
 
 /** Positions for the whole web. The part that holds the starting
- * pictures sits at (0, 0); every part not joined to it sits to its right,
+ * pictures sits where its rings put it, the first root at (0, 0); every
+ * part not joined to it follows to its right,
  * each laid out around its own busiest picture, so no line crosses from
  * one unconnected part to another (the web of one relation joins several
- * separate pairs; on one set of rings, their lines crossed the middle). */
+ * separate pairs; on one set of rings, their lines crossed the middle).
+ *
+ * With `aspect` (the frame's width over its height), the parts wrap into
+ * rows so the whole web is about that shape: a board of many small parts
+ * then fills its frame instead of shrinking to a strip. */
 export function ringLayout(
   roots: readonly string[],
   ids: readonly string[],
   edges: readonly LayoutEdge[],
+  aspect = Number.POSITIVE_INFINITY,
 ): Placed[] {
   const parts = components(ids, edges);
   const rooted = new Set(roots);
@@ -74,9 +80,7 @@ export function ringLayout(
       b.length - a.length ||
       (a[0] ?? '').localeCompare(b[0] ?? ''),
   );
-  const out: Placed[] = [];
-  let right = Number.NEGATIVE_INFINITY;
-  for (const part of parts) {
+  const laid = parts.map((part) => {
     const inPart = new Set(part);
     const partEdges = edges.filter(
       (e) => inPart.has(e.source.imageId) && inPart.has(e.target.imageId),
@@ -87,11 +91,45 @@ export function ringLayout(
       part,
       partEdges,
     );
-    const minX = Math.min(...placed.map((p) => p.x));
-    const maxX = Math.max(...placed.map((p) => p.x));
-    const shift = Number.isFinite(right) ? right + NODE * 2 - minX : 0;
-    for (const p of placed) out.push({ ...p, x: p.x + shift });
-    right = maxX + shift;
+    const xs = placed.map((p) => p.x);
+    const ys = placed.map((p) => p.y);
+    const box = {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+    };
+    return { placed, box };
+  });
+  // Shelves: a part goes right of the one before, or starts a new row
+  // when it would pass the width that gives the whole web its aspect.
+  const gap = NODE * 2;
+  const area = laid.reduce(
+    (sum, { box }) => sum + (box.width + gap) * (box.height + gap),
+    0,
+  );
+  const widest = Math.max(0, ...laid.map(({ box }) => box.width));
+  const rowWidth = Math.max(widest, Math.sqrt(area * aspect));
+  // Rows run from the first part's corner, so it does not move.
+  const origin = laid[0]?.box ?? { x: 0, y: 0 };
+  const out: Placed[] = [];
+  let x = 0;
+  let y = 0;
+  let rowHeight = 0;
+  for (const { placed, box } of laid) {
+    if (x > 0 && x + box.width > rowWidth) {
+      x = 0;
+      y += rowHeight + gap;
+      rowHeight = 0;
+    }
+    for (const p of placed)
+      out.push({
+        ...p,
+        x: p.x - box.x + x + origin.x,
+        y: p.y - box.y + y + origin.y,
+      });
+    x += box.width + gap;
+    rowHeight = Math.max(rowHeight, box.height);
   }
   return out;
 }

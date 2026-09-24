@@ -98,3 +98,25 @@ describe('parts no edge joins', () => {
     expect(len('C', 'D')).toBeCloseTo(len('A', 'B'), 0);
   });
 });
+
+describe('many parts in a frame', () => {
+  // A board report's web: many small parts. In one row they shrank to a
+  // strip across a wide frame (2026-09-23, walk claim 9d).
+  test("wrap into rows about the frame's shape, none on another", () => {
+    const ids = Array.from({ length: 16 }, (_, i) => `p${i}`);
+    const pairs = Array.from({ length: 8 }, (_, i) =>
+      e(`p${2 * i}`, `p${2 * i + 1}`),
+    );
+    const placed = ringLayout([], ids, pairs, 4 / 3);
+    const xs = placed.map((p) => p.x);
+    const ys = placed.map((p) => p.y);
+    const width = Math.max(...xs) - Math.min(...xs) + NODE;
+    const height = Math.max(...ys) - Math.min(...ys) + NODE;
+    expect(width / height).toBeLessThan(3);
+    expect(width / height).toBeGreaterThan(0.5);
+    for (const a of placed)
+      for (const b of placed)
+        if (a.id !== b.id)
+          expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(NODE / 2);
+  });
+});

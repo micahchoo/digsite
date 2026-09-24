@@ -18,6 +18,8 @@ interface Props {
   onShowImage: (imageId: string, rank: number) => void;
   /** Opens the web around both pictures. */
   onOpenWeb?: () => void;
+  /** The chain, every claim on each step, as one report file. */
+  onReport?: () => void;
   onClose: () => void;
 }
 
@@ -41,6 +43,7 @@ export function PathPanel({
   onPath,
   onShowImage,
   onOpenWeb,
+  onReport,
   onClose,
 }: Props) {
   const [state, setState] = useState<State>({ kind: 'searching' });
@@ -185,6 +188,16 @@ export function PathPanel({
           onClick={onOpenWeb}
         >
           See the web around both
+        </button>
+      )}
+      {onReport && state.kind === 'found' && (
+        <button
+          type="button"
+          className="board-path-web"
+          data-testid="board-path-report"
+          onClick={onReport}
+        >
+          Report on this path
         </button>
       )}
     </section>

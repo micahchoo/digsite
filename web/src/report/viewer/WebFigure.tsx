@@ -12,6 +12,10 @@ import {
 import { ringLayout } from '../../board/web-layout.ts';
 import { Icon } from '../../components/Icon.tsx';
 
+/** About the shape of the figure (viewer.css `.rv-sheet`), so a web of
+ * many small parts fills it. */
+const FRAME_ASPECT = 4 / 3;
+
 interface Props {
   data: ReportData;
   pictures: Readonly<Record<string, string>>;
@@ -46,6 +50,7 @@ export function WebFigure({ data, pictures, selected, onSelect }: Props) {
         roots,
         data.images.map((img) => img.id),
         edges,
+        FRAME_ASPECT,
       ),
     [roots, data, edges],
   );

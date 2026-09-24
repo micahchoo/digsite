@@ -127,6 +127,7 @@ import { ApiError, api } from '../lib/api.ts';
 import { plural } from '../lib/plural.ts';
 import { notifySheetsChanged } from '../lib/sheetEvents.ts';
 import { useVocabulary } from '../lib/vocabulary.ts';
+import { ReportWorking, useReport } from '../report/use-report.tsx';
 import { useRightColumn } from '../shell/RightColumn.tsx';
 import { rgba, usePalette } from '../theme/palette.ts';
 
@@ -247,6 +248,8 @@ export function Board() {
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [tileVersion, setTileVersion] = useState(0);
   const [folderImport, setFolderImport] = useState(false);
+  /** A board, relation or path report being made (report/use-report). */
+  const report = useReport();
   /** The pictures being copied to another board, while its dialog is open. */
   const [copying, setCopying] = useState<string[] | null>(null);
   const currentSortId = sort ? sortId(sort) : DEFAULT_SORT.key.toString();
@@ -1511,6 +1514,7 @@ export function Board() {
         properties: (imageId) => selection.replace([imageId]),
         copyTo: (ids) => setCopying([...ids]),
         download,
+        report: () => void report.make(() => api.getBoardReport(boardId)),
       },
     );
   }
@@ -1669,6 +1673,14 @@ export function Board() {
             onPath={setPathImages}
             onShowImage={showOnMap}
             onOpenWeb={() => setWebRoots([pathEnds[0].id, pathEnds[1].id])}
+            onReport={() =>
+              void report.make(() =>
+                api.getBoardReport(boardId, {
+                  from: pathEnds[0].id,
+                  to: pathEnds[1].id,
+                }),
+              )
+            }
             onClose={() => setPathEnds(null)}
           />
         )}
@@ -1736,6 +1748,9 @@ export function Board() {
             finder.dispatch({ type: 'claim', claim });
             if (claim) setFindOpen(true);
           }}
+          onReport={(relation) =>
+            void report.make(() => api.getBoardReport(boardId, { relation }))
+          }
           onOpenWeb={(relation) => {
             // The whole web of the relation, across every sheet (WebView
             // asks relation-web when it has no starting picture).
@@ -2003,6 +2018,7 @@ export function Board() {
         </div>
       )}
       <UploadActivity boardId={boardId} snapshot={uploadSnapshot} />
+      <ReportWorking message={report.working} />
       {copying && (
         <CopyToBoard
           boardId={boardId}

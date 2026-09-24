@@ -42,6 +42,8 @@ export interface BoardMenuActions {
   properties: (imageId: string) => void;
   copyTo: (ids: readonly string[]) => void;
   download: (ids: readonly string[]) => void;
+  /** Every claim on the board, from every sheet, as one report file. */
+  report: () => void;
 }
 
 /**
@@ -87,11 +89,18 @@ function mapMenu(state: BoardMenuState, act: BoardMenuActions): MenuSection[] {
       onSelect: act.importFolder,
     },
   ];
+  const report: MenuItem[] = [
+    {
+      label: 'Report on this board',
+      testId: 'board-menu-report',
+      onSelect: act.report,
+    },
+  ];
   const history: MenuItem[] = [
     { label: 'Undo selection', onSelect: act.undo, disabled: !state.canUndo },
     { label: 'Redo selection', onSelect: act.redo, disabled: !state.canRedo },
   ];
-  return [view, matches, add, history];
+  return [view, matches, add, report, history];
 }
 
 function pictureMenu(

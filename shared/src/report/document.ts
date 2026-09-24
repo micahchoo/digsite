@@ -390,7 +390,7 @@ figure.end figcaption{grid-column:1/-1}
 .context{display:block;width:64px;border-radius:var(--radius-s);border:1px solid var(--line)}
 .context .dim{fill:rgba(0,0,0,.45)}
 .context rect{fill:none;stroke:var(--claim-own);stroke-width:2}
-.missing{display:grid;place-items:center;width:100%;aspect-ratio:4/3;border-radius:var(--radius-m);background:var(--placeholder);color:var(--text-secondary);font-size:var(--text-xs)}
+.missing{display:grid;place-items:center;width:260px;max-width:100%;aspect-ratio:4/3;border-radius:var(--radius-m);background:var(--placeholder);color:var(--text-secondary);font-size:var(--text-xs)}
 dl{display:grid;grid-template-columns:minmax(7em,auto) 1fr;gap:var(--space-1) var(--space-3);margin:var(--space-4) 0 0;font-size:var(--text-base)}
 dt{color:var(--text-secondary)}dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .dangling,.disagree{color:var(--danger)}

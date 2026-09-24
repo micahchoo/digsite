@@ -16,11 +16,13 @@ interface Props {
   onPick: (claim: { kind: TermKind; term: string } | null) => void;
   /** Opens the web of every picture a relation joins. */
   onOpenWeb?: (relation: string) => void;
+  /** Every connection of a relation, as one report file. */
+  onReport?: (relation: string) => void;
 }
 
 const SHOWN = 10;
 
-export function Terms({ vocab, active, onPick, onOpenWeb }: Props) {
+export function Terms({ vocab, active, onPick, onOpenWeb, onReport }: Props) {
   const [kind, setKind] = useState<TermKind>('label');
   const [all, setAll] = useState(false);
   const [merging, setMerging] = useState<string | null>(null);
@@ -85,6 +87,11 @@ export function Terms({ vocab, active, onPick, onOpenWeb }: Props) {
                   ? () => onOpenWeb(t.term)
                   : undefined
               }
+              onReport={
+                kind === 'relation' && onReport
+                  ? () => onReport(t.term)
+                  : undefined
+              }
               active={active?.kind === kind && active.term === t.term}
               merging={merging === t.term}
               into={into}
@@ -135,6 +142,7 @@ function TermRow({
   onMerge,
   onSeparate,
   onOpenWeb,
+  onReport,
 }: {
   term: VocabularyTerm;
   kind: TermKind;
@@ -148,6 +156,7 @@ function TermRow({
   onMerge: (canonical: string) => void;
   onSeparate: (alias: string) => void;
   onOpenWeb?: () => void;
+  onReport?: () => void;
 }) {
   return (
     <li className="board-term" data-active={active}>
@@ -173,6 +182,18 @@ function TermRow({
             onClick={onOpenWeb}
           >
             <Icon name="connect" size={14} />
+          </button>
+        )}
+        {onReport && (
+          <button
+            type="button"
+            className="board-icon-button board-icon-button--small"
+            data-testid={`board-term-report-${term.term}`}
+            aria-label={`Report on every "${term.term}" connection`}
+            title="Report on it"
+            onClick={onReport}
+          >
+            <Icon name="report" size={14} />
           </button>
         )}
         <button

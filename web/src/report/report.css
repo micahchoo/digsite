@@ -1,0 +1,16 @@
+/* A report being made, said over the page (use-report.tsx). */
+.report-working {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-6);
+  z-index: 40;
+  max-width: min(32rem, calc(100vw - 32px));
+  padding: var(--space-2) var(--space-4);
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-m);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}

@@ -109,3 +109,11 @@ describe('the map', () => {
     );
   });
 });
+
+describe('the map', () => {
+  test('offers a report on the whole board', () => {
+    const { calls, act } = recorder();
+    item(boardMenu(null, state(), act), 'Report on this board').onSelect();
+    expect(calls).toEqual(['report']);
+  });
+});

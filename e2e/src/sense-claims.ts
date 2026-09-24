@@ -1416,6 +1416,88 @@ async function main(): Promise<void> {
       '9c. a relation in Terms opens the web of every picture it joins, and only that relation',
     );
 
+    // -- 9d. Reports beyond one sheet: a relation, the path, the board ------
+    type Gathered = {
+      scope: { kind: string };
+      sheets: { name: string }[];
+      claims: { term: string; sheetId: string }[];
+      path: string[] | null;
+    };
+    const downloaded = async (click: () => Promise<void>, name: string) => {
+      const [file] = await Promise.all([m.waitForEvent('download'), click()]);
+      const path = `${SHOTS}${name}.html`;
+      await file.saveAs(path);
+      const html = await Bun.file(path).text();
+      const data = JSON.parse(
+        html.match(
+          /<script type="application\/json" id="digsite-report">(.*?)<\/script>/s,
+        )?.[1] ?? 'null',
+      ) as Gathered;
+      return { path, html, data };
+    };
+    const byRelation = await downloaded(
+      () => m.getByTestId('board-term-report-same place').click(),
+      '9d-relation-report',
+    );
+    assert(
+      byRelation.data.scope.kind === 'relation' &&
+        byRelation.data.claims.length >= 2 &&
+        byRelation.data.claims.every((c) => c.term === 'same place'),
+      `the "same place" report holds ${JSON.stringify(byRelation.data.claims.map((c) => c.term))}`,
+    );
+    const byPath = await downloaded(
+      () => m.getByTestId('board-path-report').click(),
+      '9d-path-report',
+    );
+    assert(
+      byPath.data.scope.kind === 'path' &&
+        byPath.data.path?.length === expected.length + 1 &&
+        byPath.html.includes(`in ${expected.length} step`),
+      `the path report reads ${JSON.stringify(byPath.data.path)} for ${expected.length} steps`,
+    );
+    await m.getByTestId('board-actions-button').click();
+    const byBoard = await downloaded(
+      () => m.getByTestId('board-menu-report').click(),
+      '9d-board-report',
+    );
+    const speaking = new Set(byBoard.data.claims.map((c) => c.sheetId));
+    assert(
+      byBoard.data.scope.kind === 'board' &&
+        speaking.size >= 2 &&
+        byBoard.data.sheets.some((s) => s.name === 'Faces') &&
+        byBoard.html.includes('sheets disagree about'),
+      `the board report speaks for ${speaking.size} sheets and marks no disagreement`,
+    );
+    // Its figure is the web, live, with no server behind it.
+    const boardPage = await m.context().newPage();
+    const boardErrors: string[] = [];
+    boardPage.on('pageerror', (err) => boardErrors.push(err.message));
+    await boardPage.goto(`file://${byBoard.path}`);
+    await boardPage.waitForSelector('html[data-viewer="on"]', {
+      timeout: 10_000,
+    });
+    await boardPage
+      .locator('.rv-host [data-testid="web-view-node"]')
+      .first()
+      .waitFor();
+    await boardPage
+      .locator('article.claim')
+      .first()
+      .getByTestId('report-show')
+      .click();
+    const boardStatus = await boardPage
+      .getByTestId('report-status')
+      .innerText();
+    await boardPage.screenshot({ path: `${SHOTS}9d-board-report.png` });
+    await boardPage.close();
+    assert(
+      /chosen/i.test(boardStatus) && boardErrors.length === 0,
+      `the board report's web did not light a claim (${boardStatus}; ${boardErrors.join('; ')})`,
+    );
+    pass(
+      "9d. a relation, the path and the whole board each download as a report; the board's says where sheets disagree, and its web is live in the file",
+    );
+
     // -- 7. Zoom in on the board far enough to study a picture ------------------
     await m.evaluate(() =>
       (
